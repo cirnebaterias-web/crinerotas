@@ -1,0 +1,31 @@
+# Only application/build inputs enter the context. Existing local files stay out.
+**
+!package.json
+!package-lock.json
+!tsconfig*.json
+!eslint.config.*
+!vitest.config.*
+!apps/
+!apps/**
+!packages/
+!packages/**
+!scripts/
+!scripts/**
+!infrastructure/
+!infrastructure/docker/
+!infrastructure/docker/Dockerfile
+
+# These exclusions apply after the allowlist, at every directory depth.
+**/.env
+**/.env.*
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+**/*.pem
+**/*.key
+**/.npmrc
+**/.git
+**/.DS_Store

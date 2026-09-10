@@ -1,0 +1,34 @@
+name: cirne-rotas-local
+
+services:
+  web:
+    image: cirne-rotas-web:local
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
+      target: runtime
+    init: true
+    ports:
+      - "127.0.0.1:${CIRNE_WEB_PORT:-3000}:3000"
+    environment:
+      APP_BASE_URL: "http://127.0.0.1:${CIRNE_WEB_PORT:-3000}"
+      LOG_LEVEL: "${CIRNE_LOG_LEVEL:-info}"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+      - /app/apps/web/.next/cache:uid=1000,gid=1000,mode=0750,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Supabase is managed separately by its CLI, with its own project/network/data.
+# This service has no Docker socket, external network or business-data volume.

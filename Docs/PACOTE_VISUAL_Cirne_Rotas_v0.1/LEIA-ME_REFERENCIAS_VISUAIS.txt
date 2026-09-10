@@ -1,0 +1,20 @@
+PACOTE VISUAL — CIRNE ROTAS v0.1
+
+Uso: referência conceitual para elaboração do PRD.
+
+Diretrizes:
+- Preservar o fluxo simples e o design system Cirne.
+- Menu do vendedor centrado em “Ver rota”.
+- Uma visita reúne Estoque, Concorrência, Sucata e Resultado.
+- Quilos coletados e quilos agendados são fatos diferentes.
+- Exibir claramente estados offline e de sincronização.
+- Nomes, preços, quantidades, datas e indicadores dos mockups são ilustrativos.
+- Os mockups não substituem requisitos, validações ou critérios de aceite do PRD.
+
+Paleta:
+- Verde Cirne: #00A651
+- Verde escuro: #06331F
+- Laranja: #FF7900
+- Preto: #121512
+- Superfície: #F3F6F4
+- Branco: #FFFFFF

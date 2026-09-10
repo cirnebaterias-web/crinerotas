@@ -1,0 +1,48 @@
+
+
+# Environment & Secrets (AIOX)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Dependencies (AIOX)
+node_modules/
+node_modules
+
+# Build & Logs (AIOX)
+dist/
+build/
+*.log
+logs/
+
+# IDE & OS (AIOX)
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# AIOX Local (AIOX)
+.aiox-core/local/
+.claude/settings.local.json
+.aiox/install-log.txt
+
+# AIOX framework/runtime are installed or generated locally in project mode.
+# Keep only the project-specific core configuration under version control.
+.aiox-core/*
+!.aiox-core/core-config.yaml
+.aiox/
+
+# Cirne Rotas local state (never commit credentials or generated data)
+**/.env
+**/.env.*
+!**/.env.example
+.next/
+*.tsbuildinfo
+coverage/
+.tmp/
+.ai/
+supabase/.temp/
+supabase/.branches/
+backups/

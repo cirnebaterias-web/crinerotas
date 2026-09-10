@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+  APP_BASE_URL: http://127.0.0.1:3000
+  CIRNE_WEB_PORT: "3100"
+
+jobs:
+  foundation:
+    name: Quality gates and local image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        # v7.0.1, verified through the official release/commit API on 2026-09-09.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        # v7.0.0, verified through the official release/commit API on 2026-09-09.
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Pin npm and install the lockfile
+        run: |
+          npm install --global npm@11.17.0 --no-audit --no-fund
+          npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: CLI and HTTP integration tests
+        run: npm run test:integration
+
+      - name: Build and start isolated local image
+        run: |
+          docker compose version
+          docker compose -p cirne-rotas-ci -f infrastructure/compose/compose.local.yaml up --build --wait --wait-timeout 120
+
+      - name: Check container privileges and HTTP canary
+        run: |
+          docker compose -p cirne-rotas-ci -f infrastructure/compose/compose.local.yaml exec -T web node -e "const fs=require('node:fs'); if(process.getuid()===0 || fs.existsSync('/var/run/docker.sock')) process.exit(1)"
+          npm run ops:live -- --url http://127.0.0.1:3100 --json
+
+      - name: Container diagnostics on failure
+        if: failure()
+        run: docker compose -p cirne-rotas-ci -f infrastructure/compose/compose.local.yaml logs --tail 100
+
+      - name: Stop ephemeral CI containers
+        if: always()
+        run: docker compose -p cirne-rotas-ci -f infrastructure/compose/compose.local.yaml down

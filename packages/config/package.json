@@ -1,0 +1,1 @@
+{"name":"@cirne/config","version":"0.1.0","private":true,"type":"module","exports":{"./server":"./src/server.ts","./public":"./src/public.ts"},"dependencies":{"zod":"4.5.4"}}
