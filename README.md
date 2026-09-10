@@ -114,4 +114,4 @@ No npm 11.17.0, `npm ci` pode avisar que o postinstall de esbuild não tem polí
 
 `apps/cli` consome o contrato de `packages/contracts`; `apps/web` expõe `/api/v1/health/live`. `packages/config/public` contém somente identificação pública; `/server` valida configurações e não é importável em componentes pela regra de lint. Logs de aplicação usam JSON, ID de correlação próprio e allowlist: rota-modelo, método, status e duração; não registrar URL bruta, token, GPS ou corpo. Mensagens internas do Next podem usar formato próprio.
 
-`scripts/` contém infraestrutura local; `supabase/` sua configuração; `infrastructure/` contém Docker/Compose; `Docs/` mantém PRD/arquitetura monolíticos, stories e evidências. O repositório Git local foi inicializado, sem commit, push ou publicação. Preserve os arquivos existentes das ferramentas AIOX.
+`scripts/` contém infraestrutura local; `supabase/` sua configuração; `infrastructure/` contém Docker/Compose; `Docs/` mantém PRD/arquitetura monolíticos, stories e evidências. O repositório Git local foi inicializado e possui checkpoints locais, ainda sem remoto, push ou publicação. Preserve os arquivos existentes das ferramentas AIOX.
