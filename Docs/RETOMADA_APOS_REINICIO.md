@@ -1,15 +1,19 @@
-# Checkpoint final — ambiente local e Story 1.1
+# Checkpoint final — ambiente local e Stories 1.1–1.2
 
-Salvo em 10/09/2026 antes da preparação do ambiente de containers e atualizado em 11/09/2026 após a conclusão. Este arquivo registra o checkpoint, o resultado e o ponto correto para uma futura retomada.
+Salvo em 10/09/2026 antes da preparação do ambiente de containers e atualizado em 11/09/2026 após a conclusão das duas primeiras stories. Este arquivo registra o checkpoint, o resultado e o ponto correto para uma futura retomada.
 
 ## Estado atual em 11/09/2026
 
-- Story 1.1 em **Done**, com QA Gate **PASS** e quality score 100/100.
-- Commits locais: `8eedcb3` (fundação), `5819b81` (robustez dos testes/CodeRabbit) e `972a631` (consistência do README), seguidos pelo checkpoint documental final.
-- CodeRabbit CLI 0.7.6 autenticado na conta GitHub correta; revisão por escopo concluída e correção final reavaliada com 0 apontamentos.
+- Stories 1.1 e 1.2 em **Done**, ambas com QA Gate **PASS** e quality score 100/100.
+- Commits locais da Story 1.2: `d9ad2de` (fundação de identidade) e `ef8462f` (hardening das barreiras), seguidos pelo checkpoint documental/QA final.
+- Identidade local entregue com cinco atores sintéticos, RLS/grants, `/api/v1/me`, `ops:identity`, reset/provisionamento idempotentes e rollback ensaiado duas vezes.
+- Gates finais da Story 1.2: lint, typecheck, 36 testes unitários, build, 43 pgTAP e 7 integrações reais — todos PASS.
+- CodeRabbit autenticado na conta GitHub correta; revisão final do commit `ef8462f` concluída com zero apontamentos.
 - Não há remoto Git configurado, push, PR, deploy, serviço Cloud ou dado real.
-- Serviços Compose/Supabase permanecem desligados; volumes sintéticos e rede dedicada foram preservados.
-- Próximo trabalho recomendado: preparar e validar uma nova story do Epic 1 para identidade e barreiras. Não iniciar implementação funcional sem a nova story.
+- Supabase local permanece iniciado na rede `cirne-rotas-dev-loopback`; o servidor Next usado pela integração foi encerrado. Use `npm run db:stop` se quiser liberar recursos, preservando os volumes.
+- Próximo trabalho recomendado pela arquitetura §20.6: preparar e validar a Story 1.3 do núcleo offline (shell, Dexie versionado, pacote de rota sintético, rascunho/outbox e estados visíveis). Não iniciar a implementação antes da nova story.
+
+Evidências atuais: `Docs/qa/1.2-implementation-evidence.md` e `Docs/qa/gates/1.2-identidade-local-perfis-e-barreiras-de-acesso.yml`.
 
 As instruções de instalação abaixo são históricas e já foram concluídas neste computador. Só devem ser repetidas em uma reinstalação ou após diagnóstico específico.
 
@@ -117,7 +121,7 @@ O agente deve então:
 
 Depois do reinício e das etapas acima, envie:
 
-> Retome a Story 1.1 pelo arquivo `Docs/RETOMADA_APOS_REINICIO.md`. Já executei as etapas de WSL2 e Rancher Desktop; pode conferir o ambiente e prosseguir com autonomia.
+> Retome após a conclusão da Story 1.2 pelo arquivo `Docs/RETOMADA_APOS_REINICIO.md`. Pode conferir o ambiente, preparar/validar a próxima story do núcleo offline e prosseguir com autonomia.
 
 Se algum comando falhar, envie a mesma mensagem acrescentando qual comando falhou. Não inclua senhas, tokens nem o conteúdo de arquivos `.env`.
 
