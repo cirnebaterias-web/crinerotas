@@ -5,13 +5,14 @@ Salvo em 10/09/2026 antes da preparação do ambiente de containers e atualizado
 ## Estado atual em 11/09/2026
 
 - Stories 1.1 e 1.2 em **Done**, ambas com QA Gate **PASS** e quality score 100/100.
+- Story 1.3, “Núcleo offline local e persistência durável”, em **Ready** após PO GO 9,2/10; ClickUp `86e380exg` em `in progress`.
 - Commits locais da Story 1.2: `d9ad2de` (fundação de identidade) e `ef8462f` (hardening das barreiras), seguidos pelo checkpoint documental/QA final.
 - Identidade local entregue com cinco atores sintéticos, RLS/grants, `/api/v1/me`, `ops:identity`, reset/provisionamento idempotentes e rollback ensaiado duas vezes.
 - Gates finais da Story 1.2: lint, typecheck, 36 testes unitários, build, 43 pgTAP e 7 integrações reais — todos PASS.
 - CodeRabbit autenticado na conta GitHub correta; revisão final do commit `ef8462f` concluída com zero apontamentos.
 - Não há remoto Git configurado, push, PR, deploy, serviço Cloud ou dado real.
 - Supabase local permanece iniciado na rede `cirne-rotas-dev-loopback`; o servidor Next usado pela integração foi encerrado. Use `npm run db:stop` se quiser liberar recursos, preservando os volumes.
-- Próximo trabalho recomendado pela arquitetura §20.6: preparar e validar a Story 1.3 do núcleo offline (shell, Dexie versionado, pacote de rota sintético, rascunho/outbox e estados visíveis). Não iniciar a implementação antes da nova story.
+- Próximo trabalho autorizado: iniciar a implementação da Story 1.3 do núcleo offline (shell, Dexie versionado, pacote de rota sintético, rascunho/outbox e estados visíveis), preservando seus limites.
 
 Evidências atuais: `Docs/qa/1.2-implementation-evidence.md` e `Docs/qa/gates/1.2-identidade-local-perfis-e-barreiras-de-acesso.yml`.
 
@@ -121,7 +122,7 @@ O agente deve então:
 
 Depois do reinício e das etapas acima, envie:
 
-> Retome após a conclusão da Story 1.2 pelo arquivo `Docs/RETOMADA_APOS_REINICIO.md`. Pode conferir o ambiente, preparar/validar a próxima story do núcleo offline e prosseguir com autonomia.
+> Retome a Story 1.3 em Ready pelo arquivo `Docs/RETOMADA_APOS_REINICIO.md`. Pode conferir o ambiente e implementar o núcleo offline com autonomia, preservando os limites da story.
 
 Se algum comando falhar, envie a mesma mensagem acrescentando qual comando falhou. Não inclua senhas, tokens nem o conteúdo de arquivos `.env`.
 
