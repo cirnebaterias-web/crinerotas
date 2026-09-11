@@ -1,6 +1,6 @@
 begin;
 
-select plan(38);
+select plan(43);
 
 select has_schema('api', 'api schema exists');
 select has_schema('private', 'private schema exists');
@@ -42,6 +42,18 @@ select is(
   'cirne_identity_executor',
   'private resolver has the dedicated owner'
 );
+select is(
+  (select pg_catalog.pg_get_userbyid(proowner)
+   from pg_catalog.pg_proc
+   where oid = 'api.get_my_identity()'::regprocedure),
+  'cirne_identity_executor',
+  'public wrapper has the dedicated owner'
+);
+select ok(
+  (select prosecdef from pg_catalog.pg_proc
+   where oid = 'api.get_my_identity()'::regprocedure),
+  'public wrapper is security definer under the non-bypass executor'
+);
 select ok(
   (select pg_catalog.pg_get_functiondef('private.resolve_current_identity()'::regprocedure)
      like '%SET search_path TO %'),
@@ -50,10 +62,12 @@ select ok(
 
 select ok(not has_schema_privilege('anon', 'api', 'USAGE'), 'anon cannot use api schema');
 select ok(not has_schema_privilege('anon', 'private', 'USAGE'), 'anon cannot use private schema');
+select ok(not has_schema_privilege('authenticated', 'private', 'USAGE'), 'authenticated cannot use private schema');
 select ok(not has_table_privilege('anon', 'api.user_profiles', 'SELECT'), 'anon cannot read profiles');
 select ok(has_table_privilege('authenticated', 'api.user_profiles', 'SELECT'), 'authenticated can read its RLS-filtered profile');
 select ok(not has_table_privilege('authenticated', 'api.roles', 'SELECT'), 'authenticated cannot read the role catalog directly');
 select ok(has_function_privilege('authenticated', 'api.get_my_identity()', 'EXECUTE'), 'authenticated can execute the identity wrapper');
+select ok(not has_function_privilege('authenticated', 'private.resolve_current_identity()', 'EXECUTE'), 'authenticated cannot execute the private resolver');
 select ok(not has_function_privilege('anon', 'api.get_my_identity()', 'EXECUTE'), 'anon cannot execute the identity wrapper');
 
 select is((select count(*)::integer from api.roles), 3, 'only confirmed roles are seeded');
@@ -76,6 +90,11 @@ select is(api.get_my_identity() -> 'scopeIds', jsonb_build_array(:'seller_a_id':
 select is((select count(*)::integer from api.user_profiles), 1, 'direct profile read is restricted to the caller');
 select is((select count(*)::integer from api.user_profiles where id = :'seller_b_id'::uuid), 0, 'seller A cannot read seller B profile');
 select throws_ok('select * from api.roles', '42501', null, 'direct role catalog access is denied');
+reset role;
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'not-a-uuid', true);
+select is(api.get_my_identity(), null::jsonb, 'malformed subject fails closed without a cast error');
 reset role;
 
 set local role authenticated;

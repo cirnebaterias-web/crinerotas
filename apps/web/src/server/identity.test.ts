@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CookieMethodsServer } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   IdentityRequestError,
   authCookiePrefix,
+  loadCallerIdentity,
   parseBearer,
   resolveIdentityRequest,
   type IdentityResolvers,
@@ -70,5 +72,19 @@ describe('identity request resolution', () => {
       .rejects.toMatchObject({ status: 503 });
     await expect(resolveIdentityRequest('Bearer token', cookieMethods(), resolvers({ ...identity, id: '57b2a846-7eaa-4fec-ab11-8e138b2008d3' })))
       .rejects.toMatchObject({ status: 403 });
+  });
+
+  it('distinguishes invalid credentials from retryable Auth failures', async () => {
+    const authClient = (status: number) => ({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: { status } }) },
+    }) as unknown as SupabaseClient;
+    await expect(loadCallerIdentity(authClient(401), 'token'))
+      .resolves.toEqual({ userId: null, identity: null });
+    await expect(loadCallerIdentity(authClient(503), 'token'))
+      .rejects.toMatchObject({ status: 503, code: 'identity_unavailable' });
+    await expect(loadCallerIdentity({
+      auth: { getUser: vi.fn().mockRejectedValue(new Error('network secret')) },
+    } as unknown as SupabaseClient, 'token'))
+      .rejects.toMatchObject({ status: 503, code: 'identity_unavailable' });
   });
 });

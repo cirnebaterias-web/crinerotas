@@ -33,11 +33,21 @@ export function authCookiePrefix(supabaseUrl: string) {
   return `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 }
 
-async function loadCallerIdentity(client: SupabaseClient, token?: string): Promise<ResolvedIdentity> {
-  const { data: userData, error: userError } = token
-    ? await client.auth.getUser(token)
-    : await client.auth.getUser();
-  if (userError || !userData.user) return { userId: null, identity: null };
+export async function loadCallerIdentity(client: SupabaseClient, token?: string): Promise<ResolvedIdentity> {
+  let userResult: Awaited<ReturnType<SupabaseClient['auth']['getUser']>>;
+  try {
+    userResult = token ? await client.auth.getUser(token) : await client.auth.getUser();
+  } catch {
+    throw new IdentityRequestError(503, 'identity_unavailable', 'Identidade temporariamente indisponível.', true);
+  }
+  const { data: userData, error: userError } = userResult;
+  if (userError) {
+    if (!userError.status || userError.status === 429 || userError.status >= 500) {
+      throw new IdentityRequestError(503, 'identity_unavailable', 'Identidade temporariamente indisponível.', true);
+    }
+    return { userId: null, identity: null };
+  }
+  if (!userData.user) return { userId: null, identity: null };
 
   const { data, error } = await client.schema('api').rpc('get_my_identity');
   if (error) {

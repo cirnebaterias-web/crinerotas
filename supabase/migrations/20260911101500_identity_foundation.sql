@@ -158,8 +158,8 @@ create policy user_seller_scopes_identity_executor_read
 on api.user_seller_scopes for select to cirne_identity_executor using (true);
 
 grant usage on schema api to authenticated, service_role, cirne_identity_executor;
+grant create on schema api to cirne_identity_executor;
 grant usage, create on schema private to cirne_identity_executor;
-grant usage on schema private to authenticated;
 grant select on api.user_profiles to authenticated;
 grant select on api.user_profiles, api.roles, api.role_permissions,
   api.user_role_assignments, api.user_seller_scopes to cirne_identity_executor;
@@ -175,15 +175,18 @@ security definer
 set search_path = ''
 as $function$
 declare
-  actor_id uuid := coalesce(
+  actor_id_text text := coalesce(
     nullif(current_setting('request.jwt.claim.sub', true), ''),
     nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'
-  )::uuid;
+  );
+  actor_id uuid;
   identity_document jsonb;
 begin
-  if actor_id is null then
+  if actor_id_text is null or actor_id_text !~
+      '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
     return null;
   end if;
+  actor_id := actor_id_text::uuid;
 
   select jsonb_build_object(
     'id', profile.id,
@@ -264,6 +267,17 @@ begin
 end
 $function$;
 
+create function api.get_my_identity()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $function$
+  select private.resolve_current_identity();
+$function$;
+comment on function api.get_my_identity() is 'Retorna somente o contexto vigente do chamador autenticado.';
+
 do $ownership$
 begin
   execute pg_catalog.format(
@@ -273,27 +287,21 @@ begin
 end
 $ownership$;
 alter function private.resolve_current_identity() owner to cirne_identity_executor;
+alter function api.get_my_identity() owner to cirne_identity_executor;
+revoke create on schema api from cirne_identity_executor;
+revoke create on schema private from cirne_identity_executor;
+
+set local role cirne_identity_executor;
+revoke all on function private.resolve_current_identity() from public, anon, authenticated;
+revoke all on function api.get_my_identity() from public, anon;
+grant execute on function api.get_my_identity() to authenticated;
+reset role;
+
 do $ownership$
 begin
   execute pg_catalog.format('revoke cirne_identity_executor from %I', current_user);
 end
 $ownership$;
-revoke create on schema private from cirne_identity_executor;
-revoke all on function private.resolve_current_identity() from public, anon;
-grant execute on function private.resolve_current_identity() to authenticated;
-
-create function api.get_my_identity()
-returns jsonb
-language sql
-stable
-security invoker
-set search_path = ''
-as $function$
-  select private.resolve_current_identity();
-$function$;
-
-revoke all on function api.get_my_identity() from public, anon;
-grant execute on function api.get_my_identity() to authenticated;
 
 alter default privileges in schema api revoke all on tables from public, anon, authenticated;
 alter default privileges in schema api revoke execute on functions from public, anon, authenticated;
@@ -302,6 +310,5 @@ alter default privileges in schema private revoke execute on functions from publ
 
 comment on schema api is 'Superficie deliberadamente exposta pela Data API do Cirne Rotas.';
 comment on schema private is 'Objetos internos; nunca expor na configuracao da Data API.';
-comment on function api.get_my_identity() is 'Retorna somente o contexto vigente do chamador autenticado.';
 
 commit;
