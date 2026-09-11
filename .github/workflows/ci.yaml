@@ -22,7 +22,7 @@ jobs:
   foundation:
     name: Quality gates and local image
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout
         # v7.0.1, verified through the official release/commit API on 2026-09-09.
@@ -55,6 +55,9 @@ jobs:
       - name: Production build
         run: npm run build
 
+      - name: Start isolated Supabase
+        run: npm run db:start
+
       - name: CLI and HTTP integration tests
         run: npm run test:integration
 
@@ -74,4 +77,6 @@ jobs:
 
       - name: Stop ephemeral CI containers
         if: always()
-        run: docker compose -p cirne-rotas-ci -f infrastructure/compose/compose.local.yaml down
+        run: |
+          npm run db:stop || true
+          docker compose -p cirne-rotas-ci -f infrastructure/compose/compose.local.yaml down

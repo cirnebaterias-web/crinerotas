@@ -10,11 +10,15 @@
     "lint": "eslint apps packages scripts tests *.ts *.mjs",
     "typecheck": "npm run typegen --workspace @cirne/web && tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
     "test": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
+    "test:integration": "npm run identity:provision -- --json && npm run db:test && vitest run --project integration",
     "local:doctor": "tsx scripts/local-doctor.ts",
     "db:start": "tsx scripts/supabase-local.ts start",
     "db:stop": "tsx scripts/supabase-local.ts stop",
-    "ops:live": "tsx apps/cli/src/index.ts"
+    "db:reset": "tsx scripts/supabase-reset.ts",
+    "db:test": "node node_modules/supabase/dist/supabase.js test db --network-id cirne-rotas-dev-loopback",
+    "identity:provision": "tsx scripts/run-provision-synthetic-actors.ts",
+    "ops:live": "tsx apps/cli/src/index.ts",
+    "ops:identity": "tsx apps/cli/src/identity-cli.ts"
   },
   "devDependencies": {
     "@types/node": "24.13.4", "@types/react": "19.3.0", "@types/react-dom": "19.3.0",

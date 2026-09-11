@@ -43,6 +43,7 @@ Thumbs.db
 coverage/
 .tmp/
 .ai/
+.local/
 supabase/.temp/
 supabase/.branches/
 backups/

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readServerConfig } from './server';
+import { readIdentityConfig, readServerConfig } from './server';
 import * as publicConfig from './public';
 
 describe('configuration boundaries', () => {
@@ -14,5 +14,18 @@ describe('configuration boundaries', () => {
   });
   it('public exports do not expose server configuration', () => {
     expect(Object.keys(publicConfig)).toEqual(['productName']);
+  });
+  it('loads only the public Supabase connection for caller-scoped access', () => {
+    const env = {
+      SUPABASE_PUBLIC_URL: 'http://127.0.0.1:54321',
+      SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_synthetic_value',
+      SUPABASE_SECRET_KEY: 'must-not-be-returned',
+    };
+    expect(readIdentityConfig(env)).toEqual({
+      SUPABASE_PUBLIC_URL: env.SUPABASE_PUBLIC_URL,
+      SUPABASE_PUBLISHABLE_KEY: env.SUPABASE_PUBLISHABLE_KEY,
+    });
+    expect(() => readIdentityConfig({ ...env, SUPABASE_PUBLIC_URL: 'https://user:secret@example.com' }))
+      .toThrow('SUPABASE_PUBLIC_URL');
   });
 });
