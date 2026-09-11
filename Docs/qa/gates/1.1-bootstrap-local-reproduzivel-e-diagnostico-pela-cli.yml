@@ -1,0 +1,47 @@
+schema: 1
+story: '1.1'
+story_title: 'Bootstrap local reproduzível e diagnóstico pela CLI'
+gate: PASS
+status_reason: 'Os oito critérios de aceite possuem evidência executável ou ensaio local documentado; todos os gates passaram e não há achados de severidade média ou alta pendentes.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:972a631774b1561ae26539913f58c3d9c2c01d4d'
+updated: '2026-09-11T08:53:54-03:00'
+top_issues: []
+waiver:
+  active: false
+quality_score: 100
+expires: '2026-09-25T08:53:54-03:00'
+
+evidence:
+  tests_reviewed: 24
+  risks_identified: 3
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8]
+    ac_gaps: []
+
+risk_summary:
+  highest_residual_score: 4
+  blocking_risks: 0
+  notes: 'Riscos residuais de segredos, isolamento local e disputa de porta estão limitados por allowlists, validações fail-closed, testes e ensaios reais.'
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Segredos excluídos de Git e imagem; logs usam allowlist/redaction; containers sem root, capabilities ou socket Docker; portas em loopback.'
+  performance:
+    status: PASS
+    notes: 'Canário mínimo, build standalone e limites de container adequados ao escopo de fundação; carga funcional pertence a incrementos posteriores.'
+  reliability:
+    status: PASS
+    notes: 'Falhas de configuração, HTTP, dependências e portas estão cobertas; persistência Supabase e reinício do ambiente foram ensaiados.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos e configuração compartilhados, TypeScript estrito, scripts sem shell e documentação operacional reproduzível.'
+
+recommendations:
+  immediate: []
+  future:
+    - action: 'Registrar a primeira execução real do workflow quando um remoto GitHub for autorizado; não inferir sucesso remoto a partir da validação local.'
+      refs: ['.github/workflows/ci.yaml', 'Docs/qa/1.1-implementation-evidence.md']
+    - action: 'Reconciliar a decisão Vercel para VPS no PRD antes de qualquer publicação remota.'
+      refs: ['Docs/architecture.md', 'Docs/stories/1.1.story.md']

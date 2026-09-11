@@ -1,6 +1,17 @@
-# Checkpoint de retomada — WSL2, Rancher Desktop e Story 1.1
+# Checkpoint final — ambiente local e Story 1.1
 
-Salvo em 10/09/2026 antes da preparação do ambiente de containers e atualizado depois da retomada. Este arquivo registra o checkpoint e seu resultado.
+Salvo em 10/09/2026 antes da preparação do ambiente de containers e atualizado em 11/09/2026 após a conclusão. Este arquivo registra o checkpoint, o resultado e o ponto correto para uma futura retomada.
+
+## Estado atual em 11/09/2026
+
+- Story 1.1 em **Done**, com QA Gate **PASS** e quality score 100/100.
+- Commits locais: `8eedcb3` (fundação), `5819b81` (robustez dos testes/CodeRabbit) e `972a631` (consistência do README), seguidos pelo checkpoint documental final.
+- CodeRabbit CLI 0.7.6 autenticado na conta GitHub correta; revisão por escopo concluída e correção final reavaliada com 0 apontamentos.
+- Não há remoto Git configurado, push, PR, deploy, serviço Cloud ou dado real.
+- Serviços Compose/Supabase permanecem desligados; volumes sintéticos e rede dedicada foram preservados.
+- Próximo trabalho recomendado: preparar e validar uma nova story do Epic 1 para identidade e barreiras. Não iniciar implementação funcional sem a nova story.
+
+As instruções de instalação abaixo são históricas e já foram concluídas neste computador. Só devem ser repetidas em uma reinstalação ou após diagnóstico específico.
 
 ## Resultado da retomada em 10/09/2026
 
@@ -12,7 +23,7 @@ Salvo em 10/09/2026 antes da preparação do ambiente de containers e atualizado
 - A imagem da aplicação foi construída e validada em `127.0.0.1:3100`: health OK, UID/GID 1000, raiz somente leitura, cache temporário gravável, sem socket Docker e sem privilégios.
 - Compose da aplicação e Supabase foram encerrados ao final. Os dois volumes Supabase e a rede dedicada permanecem preservados.
 - Gates finais repetidos com sucesso: lint, typecheck, 20 testes unitários, build e 4 testes de integração.
-- Revisão arquitetural interna concluída com PASS. Próximo ponto: preparar um commit-base seguro, instalar/autenticar o CodeRabbit no WSL e executar o gate formal de QA; sem push ou deploy.
+- Revisão arquitetural interna e QA formal concluídas com PASS. CodeRabbit instalado/autenticado e revisão técnica concluída; sem push ou deploy.
 
 ## Estado original antes da retomada
 
