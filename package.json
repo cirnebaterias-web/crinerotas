@@ -3,6 +3,10 @@
   "workspaces": ["apps/*", "packages/*"],
   "engines": {"node": ">=24.19.0 <25", "npm": ">=11.17.0 <12"},
   "packageManager": "npm@11.17.0",
+  "overrides": {
+    "browserslist": "4.28.9",
+    "@serwist/next": {"browserslist": "4.28.9"}
+  },
   "scripts": {
     "dev": "npm run dev --workspace @cirne/web",
     "build": "npm run build --workspace @cirne/web && node scripts/prepare-standalone.mjs",
@@ -10,6 +14,8 @@
     "lint": "eslint apps packages scripts tests *.ts *.mjs",
     "typecheck": "npm run typegen --workspace @cirne/web && tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
     "test": "vitest run --project unit",
+    "test:e2e": "playwright test",
+    "test:e2e:build": "npm run build && playwright test",
     "test:integration": "npm run identity:provision -- --json && npm run db:test && vitest run --project integration",
     "local:doctor": "tsx scripts/local-doctor.ts",
     "db:start": "tsx scripts/supabase-local.ts start",
@@ -18,10 +24,12 @@
     "db:test": "node node_modules/supabase/dist/supabase.js test db --network-id cirne-rotas-dev-loopback",
     "identity:provision": "tsx scripts/run-provision-synthetic-actors.ts",
     "ops:live": "tsx apps/cli/src/index.ts",
-    "ops:identity": "tsx apps/cli/src/identity-cli.ts"
+    "ops:identity": "tsx apps/cli/src/identity-cli.ts",
+    "ops:offline": "tsx apps/cli/src/offline-cli.ts"
   },
   "devDependencies": {
     "@types/node": "24.13.4", "@types/react": "19.3.0", "@types/react-dom": "19.3.0",
+    "browserslist": "4.28.9",
     "eslint": "10.10.0", "typescript-eslint": "8.70.0", "typescript": "6.0.3",
     "vitest": "5.0.0", "tsx": "4.23.13", "supabase": "2.117.0"
   }

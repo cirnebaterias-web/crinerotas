@@ -1,6 +1,6 @@
 # Cirne Rotas
 
-Fundação local das Stories 1.1 e 1.2: Next.js, canário HTTP, Supabase Auth, perfis/papéis/escopos protegidos por RLS, contrato autenticado e CLIs de diagnóstico. Ainda não há tela de login, cadastro de visitas ou telas operacionais. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
+Fundação local das Stories 1.1 a 1.3: Next.js, canário HTTP, Supabase Auth, perfis/papéis/escopos protegidos por RLS, contrato autenticado, núcleo offline com Dexie/IndexedDB e CLIs de diagnóstico. A rota disponível nesta etapa é exclusivamente sintética; ainda não há tela de login, visita completa, sincronização com servidor ou dados reais. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
 
 O checkpoint da preparação do host e o resultado da retomada estão em `Docs/RETOMADA_APOS_REINICIO.md`.
 
@@ -90,6 +90,24 @@ Remove-Item Env:CIRNE_ACCESS_TOKEN
 
 O resultado contém somente `id`, nome, papéis, capacidades, escopos e status. Também é possível fornecer o token por stdin, sem combiná-lo com a variável de ambiente. Vendedor A vê apenas seu próprio escopo; o Gestor A recebe somente o escopo do Vendedor A; o ator `blocked` é negado. Tokens ausentes, inválidos ou bloqueados retornam código diferente de zero sem revelar credenciais ou detalhes de conta. Esses atores existem apenas para desenvolvimento e testes locais.
 
+## Verificar o núcleo offline
+
+O diagnóstico CLI valida contratos, conteúdo sintético e os estados locais permitidos, sem abrir navegador nem afirmar sincronização com servidor:
+
+```powershell
+npm run --silent ops:offline -- --json
+```
+
+Resultado esperado: `status: "ok"`, `syntheticOnly: true` e `syncedEnabled: false`.
+
+Para a prova no navegador, gere o build de produção e execute o Playwright:
+
+```powershell
+npm run test:e2e:build
+```
+
+O teste instala o Service Worker, confirma sua revisão, carrega uma rota sintética, grava rascunho e outbox atomicamente e reabre o shell por hard refresh sem rede. Também valida migração do IndexedDB, isolamento dos dados em cache e recuperação após falha de quota. O navegador pode recusar persistência reforçada; isso é exibido como “não garantida” e não transforma o commit local em sincronização.
+
 ## Quality gates
 
 ```powershell
@@ -97,12 +115,13 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run test:e2e
 npm run test:integration
 ```
 
 `typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa 38 verificações pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio, CLI como processo, falhas e inicialização inválida. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
 
-CI em `.github/workflows/ci.yaml`: gates, integração e smoke da imagem com Actions por SHA, permissão de leitura, sem deploy. Não há remoto Git configurado nem execução GitHub comprovada. Evidências e pendências em `Docs/qa/1.1-implementation-evidence.md`.
+CI em `.github/workflows/ci.yaml`: gates, navegador offline, integração e smoke da imagem com Actions por SHA, permissão de leitura, sem deploy. Não há remoto Git configurado nem execução GitHub comprovada. Evidências da Story 1.3 ficam em `Docs/qa/1.3-implementation-evidence.md`.
 
 ## Imagem de produção local
 
@@ -130,6 +149,8 @@ Versões verificadas no registro npm e instaladas a partir do lockfile em 09–1
 | Zod / Pino | 4.5.4 / 10.3.1 |
 | Supabase JS / Supabase SSR | 2.116.0 / 0.12.7 |
 | Vitest / tsx | 5.0.0 / 4.23.13 |
+| Dexie / fake-indexeddb | 4.4.5 / 6.2.5 |
+| Serwist / Playwright | 9.5.12 / 1.63.0 |
 | Supabase CLI | 2.117.0 |
 | Tipos Node / React / React DOM | 24.13.4 / 19.3.0 / 19.3.0 |
 

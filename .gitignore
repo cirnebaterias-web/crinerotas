@@ -22,6 +22,7 @@ logs/
 Thumbs.db
 .idea/
 *.swp
+~$*
 
 # AIOX Local (AIOX)
 .aiox-core/local/
@@ -41,9 +42,15 @@ Thumbs.db
 .next/
 *.tsbuildinfo
 coverage/
+playwright-report/
+test-results/
 .tmp/
 .ai/
 .local/
 supabase/.temp/
 supabase/.branches/
 backups/
+apps/web/public/sw.js
+apps/web/public/sw.js.map
+apps/web/public/worker-*.js
+apps/web/public/worker-*.js.map
