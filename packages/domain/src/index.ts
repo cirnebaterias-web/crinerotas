@@ -1,4 +1,5 @@
 import {
+  maxSyncBatchEvents,
   localRouteBundleSchema,
   localSessionSchema,
   localVisitDraftSchema,
@@ -8,6 +9,9 @@ import {
   type LocalVisitDraft,
   type OfflineOutboxEvent,
   type OfflinePartition,
+  syncCommandSchema,
+  type SyncCommand,
+  type SyncErrorCode,
 } from '@cirne/contracts';
 
 export const localAccessWindowMs = 24 * 60 * 60 * 1_000;
@@ -124,4 +128,92 @@ export function createSyntheticRouteBundle(
     ],
     cachedAt,
   });
+}
+
+export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand {
+  const event = offlineOutboxEventSchema.parse(eventInput);
+  return syncCommandSchema.parse({
+    eventId: event.eventId,
+    idempotencyKey: event.idempotencyKey,
+    operation: event.operation,
+    schemaVersion: event.schemaVersion,
+    sequence: event.sequence,
+    aggregateType: 'visit_draft',
+    aggregateId: event.aggregateId,
+    occurredAt: event.occurredAt,
+    payload: event.payload,
+  });
+}
+
+function canonicalJsonValue(value: unknown): string {
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJsonValue).join(',')}]`;
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJsonValue(entry)}`).join(',')}}`;
+  }
+  throw new Error('Valor incompatível com JSON canônico.');
+}
+
+export function canonicalizeSyncCommand(commandInput: SyncCommand) {
+  const command = syncCommandSchema.parse(commandInput);
+  return canonicalJsonValue({
+    operation: command.operation,
+    schemaVersion: command.schemaVersion,
+    aggregateType: command.aggregateType,
+    aggregateId: command.aggregateId,
+    sequence: command.sequence,
+    occurredAt: command.occurredAt,
+    payload: command.payload,
+  });
+}
+
+export async function hashSyncCommand(command: SyncCommand) {
+  const bytes = new TextEncoder().encode(canonicalizeSyncCommand(command));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+export function orderOutboxEvents(events: readonly OfflineOutboxEvent[]) {
+  return events.map((event) => offlineOutboxEventSchema.parse(event)).sort((left, right) =>
+    left.aggregateId.localeCompare(right.aggregateId) ||
+    left.sequence - right.sequence ||
+    left.occurredAt.localeCompare(right.occurredAt));
+}
+
+export function createSyncBatches(events: readonly OfflineOutboxEvent[]) {
+  const ordered = orderOutboxEvents(events);
+  const batches: OfflineOutboxEvent[][] = [];
+  for (let index = 0; index < ordered.length; index += maxSyncBatchEvents) {
+    batches.push(ordered.slice(index, index + maxSyncBatchEvents));
+  }
+  return batches;
+}
+
+export type SyncFailureClass = 'recoverable' | 'authentication_required' | 'dependency' | 'action_required';
+
+export function classifySyncFailure(status: number, code?: SyncErrorCode): SyncFailureClass {
+  if (status === 401 || code === 'AUTH_REQUIRED') return 'authentication_required';
+  if (code === 'EVENT_OUT_OF_ORDER') return 'dependency';
+  if ([408, 429, 500, 502, 503, 504].includes(status) ||
+      code === 'RATE_LIMITED' || code === 'DEPENDENCY_UNAVAILABLE' || code === 'INTERNAL_ERROR') {
+    return 'recoverable';
+  }
+  return 'action_required';
+}
+
+export const retryScheduleMs = [2_000, 5_000, 15_000, 60_000, 300_000] as const;
+
+export function nextRetryDelayMs(attemptCount: number, random: () => number = Math.random) {
+  if (!Number.isInteger(attemptCount) || attemptCount < 1) {
+    throw new Error('Contagem de tentativa inválida.');
+  }
+  const nominal = retryScheduleMs[Math.min(attemptCount - 1, retryScheduleMs.length - 1)]!;
+  const jitter = 0.8 + Math.min(1, Math.max(0, random())) * 0.4;
+  return Math.round(nominal * jitter);
 }

@@ -10,9 +10,12 @@ import {
   type LocalVisitDraft,
   type OfflineOutboxEvent,
   type OfflinePartition,
+  type SyncErrorCode,
+  type SyncResult,
 } from '@cirne/contracts';
-import { createDraftMutation, type DraftMutationIds } from '@cirne/domain';
+import { createDraftMutation, orderOutboxEvents, type DraftMutationIds } from '@cirne/domain';
 import type { OfflineDatabase } from './database';
+import { SyncEventPersistenceError } from './sync-persistence-error';
 
 function assertPartition(partition: OfflinePartition, record: { userId: string; deviceId: string }) {
   offlinePartitionSchema.parse({ userId: partition.userId, deviceId: partition.deviceId });
@@ -28,6 +31,8 @@ export interface SaveDraftCommand {
   occurredAt: string;
   ids: DraftMutationIds;
 }
+
+type FailedOutboxStatus = Extract<OfflineOutboxEvent['status'], 'recoverable_error' | 'action_required'>;
 
 export class OfflineRepository {
   constructor(private readonly db: OfflineDatabase) {}
@@ -94,6 +99,115 @@ export class OfflineRepository {
       partition.userId,
       partition.deviceId,
     ]).sortBy('occurredAt');
+  }
+
+  async reserveOutboxBatch(
+    partitionInput: OfflinePartition,
+    now: string,
+    leaseUntil: string,
+    limit = 25,
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const nowMs = Date.parse(now);
+    const leaseUntilMs = Date.parse(leaseUntil);
+    if (!Number.isFinite(nowMs) || !Number.isFinite(leaseUntilMs) || leaseUntilMs <= nowMs) {
+      throw new Error('Janela de reserva inválida.');
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+      throw new Error('Limite de reserva inválido.');
+    }
+
+    return this.db.transaction('rw', this.db.outboxEvents, async () => {
+      const all = orderOutboxEvents(await this.db.outboxEvents.where('[userId+deviceId]').equals([
+        partition.userId,
+        partition.deviceId,
+      ]).toArray());
+      const blockedAggregates = new Set<string>();
+      const selected: OfflineOutboxEvent[] = [];
+
+      for (const event of all) {
+        if (selected.length >= limit) break;
+        if (blockedAggregates.has(event.aggregateId)) continue;
+        const eligible = event.status === 'pending' ||
+          (event.status === 'recoverable_error' && (!event.nextAttemptAt || Date.parse(event.nextAttemptAt) <= nowMs)) ||
+          (event.status === 'sending' && Boolean(event.leaseUntil) && Date.parse(event.leaseUntil!) <= nowMs);
+        if (!eligible) {
+          blockedAggregates.add(event.aggregateId);
+          continue;
+        }
+        const reserved = offlineOutboxEventSchema.parse({
+          ...event,
+          status: 'sending',
+          attemptCount: event.attemptCount + 1,
+          leaseUntil,
+          nextAttemptAt: undefined,
+        });
+        await this.db.outboxEvents.put(reserved);
+        selected.push(reserved);
+      }
+      return selected;
+    });
+  }
+
+  async recordOutboxFailure(
+    partitionInput: OfflinePartition,
+    eventId: string,
+    input: { status: FailedOutboxStatus; code: SyncErrorCode; nextAttemptAt?: string },
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.transaction('rw', this.db.outboxEvents, async () => {
+      const key: [string, string, string] = [partition.userId, partition.deviceId, eventId];
+      const current = await this.db.outboxEvents.get(key);
+      if (!current) return undefined;
+      const updated = offlineOutboxEventSchema.parse({
+        ...current,
+        status: input.status,
+        lastErrorCode: input.code,
+        nextAttemptAt: input.nextAttemptAt,
+        leaseUntil: undefined,
+      });
+      await this.db.outboxEvents.put(updated);
+      return updated;
+    });
+  }
+
+  async applySyncConfirmation(
+    partitionInput: OfflinePartition,
+    confirmationInput: SyncResult,
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    if (confirmationInput.status !== 'confirmed') {
+      throw new Error('Somente confirmação canônica pode concluir um evento local.');
+    }
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, async () => {
+      const key: [string, string, string] = [partition.userId, partition.deviceId, confirmationInput.eventId];
+      const event = await this.db.outboxEvents.get(key);
+      if (!event) return false;
+      assertPartition(partition, event);
+      if (confirmationInput.canonicalId !== event.aggregateId) {
+        throw new SyncEventPersistenceError('Confirmação canônica não corresponde ao agregado local.');
+      }
+      const draftKey: [string, string, string] = [partition.userId, partition.deviceId, event.aggregateId];
+      const draft = await this.db.visitDrafts.get(draftKey);
+      if (!draft) throw new SyncEventPersistenceError('Confirmação sem rascunho local correspondente.');
+
+      await this.db.outboxEvents.delete(key);
+      const remaining = await this.db.outboxEvents
+        .where('[userId+deviceId+aggregateId+sequence]')
+        .between(
+          [partition.userId, partition.deviceId, event.aggregateId, Dexie.minKey],
+          [partition.userId, partition.deviceId, event.aggregateId, Dexie.maxKey],
+        )
+        .count();
+      if (remaining === 0) {
+        await this.db.visitDrafts.put(localVisitDraftSchema.parse({
+          ...draft,
+          persistenceState: 'synced',
+          updatedAt: confirmationInput.confirmedAt,
+        }));
+      }
+      return true;
+    });
   }
 
   async saveDraftAndEnqueue(command: SaveDraftCommand): Promise<{

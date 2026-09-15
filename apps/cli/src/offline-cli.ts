@@ -21,7 +21,7 @@ try {
     userId: values.user,
     deviceId: values.device,
   }));
-  console.log(json ? JSON.stringify(result) : `OK: contrato offline v${result.schemaVersion}; ${result.stopCount} paradas sintéticas; sincronização desativada.`);
+  console.log(json ? JSON.stringify(result) : `OK: contrato offline v${result.schemaVersion}; ${result.stopCount} paradas sintéticas; sincronização habilitada.`);
 } catch {
   console.error(json ? JSON.stringify({ status: 'error', message: 'Partição offline inválida.' }) : 'Partição offline inválida. Use UUIDs em --user e --device.');
   process.exitCode = 1;

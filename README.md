@@ -1,6 +1,6 @@
 # Cirne Rotas
 
-Fundação local das Stories 1.1 a 1.3: Next.js, canário HTTP, Supabase Auth, perfis/papéis/escopos protegidos por RLS, contrato autenticado, núcleo offline com Dexie/IndexedDB e CLIs de diagnóstico. A rota disponível nesta etapa é exclusivamente sintética; ainda não há tela de login, visita completa, sincronização com servidor ou dados reais. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
+Fundação local das Stories 1.1 a 1.4: Next.js, canário HTTP, Supabase Auth, perfis/papéis/escopos protegidos por RLS, núcleo offline com Dexie/IndexedDB e sincronização idempotente por evento. A rota e o rascunho disponíveis nesta etapa são exclusivamente sintéticos; ainda não há tela de login, visita completa ou dados reais. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
 
 O checkpoint da preparação do host e o resultado da retomada estão em `Docs/RETOMADA_APOS_REINICIO.md`.
 
@@ -98,7 +98,20 @@ O diagnóstico CLI valida contratos, conteúdo sintético e os estados locais pe
 npm run --silent ops:offline -- --json
 ```
 
-Resultado esperado: `status: "ok"`, `syntheticOnly: true` e `syncedEnabled: false`.
+Resultado esperado: `status: "ok"` e `syntheticOnly: true`. Esse diagnóstico inspeciona a fundação local; a prova de sincronização servidor é o comando abaixo.
+
+## Verificar a sincronização pela CLI
+
+Com Supabase e aplicação iniciados, use o mesmo token sintético de `seller_a` por ambiente ou stdin:
+
+```powershell
+$actors = Get-Content .local/identity-actors.json | ConvertFrom-Json
+$env:CIRNE_ACCESS_TOKEN = $actors.actors.seller_a.accessToken
+npm run --silent ops:sync -- --url http://127.0.0.1:3000 --json
+Remove-Item Env:CIRNE_ACCESS_TOKEN
+```
+
+O comando envia somente IDs e conteúdo sintéticos e comprova três passos: primeira confirmação, repetição com a mesma resposta canônica sem duplicidade e rejeição da mesma chave com conteúdo divergente. A saída esperada é `{"status":"ok","checks":{"firstConfirmation":true,"replayMatched":true,"divergentRejected":true}}`. Token, IDs do evento e payload não aparecem na saída; falha retorna código 1.
 
 Para a prova no navegador, gere o build de produção e execute o Playwright:
 
@@ -119,9 +132,9 @@ npm run test:e2e
 npm run test:integration
 ```
 
-`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa 38 verificações pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio, CLI como processo, falhas e inicialização inválida. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
+`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, IndexedDB, motor de sincronização, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa 70 verificações pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio e CLIs como processos reais. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
 
-CI em `.github/workflows/ci.yaml`: gates, navegador offline, integração e smoke da imagem com Actions por SHA, permissão de leitura, sem deploy. Não há remoto Git configurado nem execução GitHub comprovada. Evidências da Story 1.3 ficam em `Docs/qa/1.3-implementation-evidence.md`.
+CI em `.github/workflows/ci.yaml`: gates, navegador offline, integração e smoke da imagem com Actions por SHA, permissão de leitura, sem deploy. O remoto existe, mas nenhuma publicação desta story é automática. Evidências concluídas ficam em `Docs/qa/`.
 
 ## Imagem de produção local
 
@@ -158,6 +171,6 @@ Divergências justificadas da arquitetura: TypeScript 7.0.2 não é aceito pelo 
 
 No npm 11.17.0, `npm ci` pode avisar que o postinstall de esbuild não tem política `allowScripts` explícita. Não foi feita aprovação global nem instalação forçada; build e testes foram executados com a instalação resultante. Reavalie scripts de instalação antes de aprová-los em futuras atualizações.
 
-`apps/cli` consome os contratos de `packages/contracts`; `apps/web` expõe `/api/v1/health/live` e `/api/v1/me`. `packages/config/public` contém somente identificação pública; `/server` valida configurações e não é importável em componentes pela regra de lint. Logs de aplicação usam JSON, ID de correlação próprio e allowlist: rota-modelo, método, status e duração; não registrar URL bruta, token, cookie, e-mail, GPS ou corpo. Mensagens internas do Next podem usar formato próprio.
+`apps/cli` consome os contratos de `packages/contracts`; `apps/web` expõe `/api/v1/health/live`, `/api/v1/me` e `POST /api/v1/sync/batches`. `packages/config/public` contém somente identificação pública; `/server` valida configurações e não é importável em componentes pela regra de lint. Logs de aplicação usam JSON, ID de correlação próprio e allowlist: rota-modelo, método, status e duração; não registrar URL bruta, token, cookie, e-mail, GPS ou corpo. Mensagens internas do Next podem usar formato próprio.
 
-`scripts/` contém infraestrutura local; `supabase/` sua configuração; `infrastructure/` contém Docker/Compose; `Docs/` mantém PRD/arquitetura monolíticos, stories e evidências. O repositório Git local foi inicializado e possui checkpoints locais, ainda sem remoto, push ou publicação. Preserve os arquivos existentes das ferramentas AIOX.
+`scripts/` contém infraestrutura local; `supabase/` sua configuração; `infrastructure/` contém Docker/Compose; `Docs/` mantém PRD/arquitetura monolíticos, stories e evidências. O repositório Git usa o remoto `origin` com a conta dedicada do projeto; push e publicação continuam operações explícitas de `@devops`. Preserve os arquivos existentes das ferramentas AIOX.

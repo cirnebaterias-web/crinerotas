@@ -33,6 +33,29 @@ export function authCookiePrefix(supabaseUrl: string) {
   return `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 }
 
+export function createCallerScopedClient(
+  authorization: string | null,
+  cookieMethods: CookieMethodsServer,
+): SupabaseClient {
+  let config: ReturnType<typeof readIdentityConfig>;
+  try {
+    config = readIdentityConfig(process.env);
+  } catch {
+    throw new IdentityRequestError(503, 'identity_unavailable', 'Identidade temporariamente indisponível.', true);
+  }
+
+  const bearer = parseBearer(authorization);
+  if (bearer) {
+    return createClient(config.SUPABASE_PUBLIC_URL, config.SUPABASE_PUBLISHABLE_KEY, {
+      auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${bearer}` } },
+    });
+  }
+  return createServerClient(config.SUPABASE_PUBLIC_URL, config.SUPABASE_PUBLISHABLE_KEY, {
+    cookies: cookieMethods,
+  });
+}
+
 export async function loadCallerIdentity(client: SupabaseClient, token?: string): Promise<ResolvedIdentity> {
   let userResult: Awaited<ReturnType<SupabaseClient['auth']['getUser']>>;
   try {

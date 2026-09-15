@@ -11,7 +11,7 @@ export function inspectOfflineFoundation(partition: OfflinePartition) {
     routeId: bundle.routeId,
     stopCount: bundle.stops.length,
     outboxStates: offlineOutboxStatusSchema.options,
-    syncedEnabled: false,
+    syncedEnabled: true,
     syntheticOnly: bundle.stops.every((stop) => stop.displayLabel.includes('sintética')),
   };
 }

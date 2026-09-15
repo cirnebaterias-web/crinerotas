@@ -174,7 +174,7 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   expect(await sellerResponse.json()).toMatchObject({
     id: seller.id,
     roles: ['seller'],
-    capabilities: ['identity.read_self'],
+    capabilities: ['identity.read_self', 'sync.write_self'],
     scopeIds: [seller.id],
     status: 'active',
   });
@@ -227,6 +227,93 @@ it('runs the identity CLI without placing the token in process arguments or outp
   });
   expect(JSON.parse(result.stdout)).toMatchObject({ id: seller.id, roles: ['seller'] });
   expect(result.stdout + result.stderr).not.toContain(seller.accessToken);
+});
+
+it('runs the synthetic sync round-trip CLI without exposing the token or payload', async () => {
+  const seller = actorManifest.actors.seller_a;
+  if (!seller) throw new Error('Seller synthetic actor missing');
+  const result = await runWithClosedInput(process.execPath, [
+    '--import', 'tsx', 'apps/cli/src/sync-cli.ts', '--url', origin, '--json',
+  ], {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      CIRNE_ACCESS_TOKEN: seller.accessToken,
+    },
+  });
+  expect(JSON.parse(result.stdout)).toEqual({
+    status: 'ok',
+    checks: { firstConfirmation: true, replayMatched: true, divergentRejected: true },
+  });
+  expect(result.stdout + result.stderr).not.toContain(seller.accessToken);
+  expect(result.stdout + result.stderr).not.toMatch(/draftOfflineId|routeVersionStopId|acknowledged/);
+});
+
+it('enforces sync BFF authorization and preserves independent partial progress', async () => {
+  const seller = actorManifest.actors.seller_a;
+  const manager = actorManifest.actors.manager_a;
+  if (!seller || !manager) throw new Error('Synthetic actors missing');
+  const deviceId = crypto.randomUUID();
+  const failedAggregateId = crypto.randomUUID();
+  const independentAggregateId = crypto.randomUUID();
+  const makeCommand = (aggregateId: string, sequence: number) => ({
+    eventId: crypto.randomUUID(),
+    idempotencyKey: crypto.randomUUID(),
+    operation: 'visit.draft.saved',
+    schemaVersion: 1,
+    sequence,
+    aggregateType: 'visit_draft',
+    aggregateId,
+    occurredAt: new Date().toISOString(),
+    payload: {
+      draftOfflineId: aggregateId,
+      routeVersionStopId: '44444444-4444-4444-8444-444444444441',
+      acknowledged: true,
+    },
+  });
+  const events = [makeCommand(failedAggregateId, 2), makeCommand(independentAggregateId, 1)];
+  const headers = {
+    Authorization: `Bearer ${seller.accessToken}`,
+    'Content-Type': 'application/json',
+  };
+
+  const partial = await fetch(`${origin}/api/v1/sync/batches`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ deviceId, events }),
+  });
+  expect(partial.status).toBe(200);
+  expect(await partial.json()).toMatchObject({
+    results: [
+      { eventId: events[0]!.eventId, status: 'rejected', error: { code: 'EVENT_OUT_OF_ORDER' } },
+      { eventId: events[1]!.eventId, status: 'confirmed' },
+    ],
+  });
+  expect(partial.headers.get('cache-control')).toContain('no-store');
+
+  const forbidden = await fetch(`${origin}/api/v1/sync/batches`, {
+    method: 'POST',
+    headers: { ...headers, Authorization: `Bearer ${manager.accessToken}` },
+    body: JSON.stringify({ deviceId, events: [makeCommand(crypto.randomUUID(), 1)] }),
+  });
+  expect(forbidden.status).toBe(403);
+
+  const unsupported = await fetch(`${origin}/api/v1/sync/batches`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'text/plain' },
+    body: '{}',
+  });
+  expect(unsupported.status).toBe(415);
+
+  const duplicate = makeCommand(crypto.randomUUID(), 1);
+  const invalidBatch = await fetch(`${origin}/api/v1/sync/batches`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ deviceId, events: [duplicate, { ...duplicate, sequence: 2 }] }),
+  });
+  expect(invalidBatch.status).toBe(422);
+  expect(output).not.toMatch(/draftOfflineId|routeVersionStopId|acknowledged/);
 });
 
 it('refuses startup with an invalid required configuration without leaking its value', async () => {

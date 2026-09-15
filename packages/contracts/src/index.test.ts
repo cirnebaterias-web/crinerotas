@@ -9,6 +9,10 @@ import {
   meResponseSchema,
   offlineOutboxEventSchema,
   offlineOutboxStatusSchema,
+  syncBatchRequestSchema,
+  syncBatchExchangeSchema,
+  syncBatchResponseSchema,
+  syncCommandSchema,
 } from './index';
 
 it('rejects extra fields and incompatible health responses', () => {
@@ -123,4 +127,103 @@ it('exposes all visible states while keeping synced out of the local outbox', ()
     'synced',
   ]);
   expect(offlineOutboxStatusSchema.options).not.toContain('synced');
+  expect(offlineOutboxStatusSchema.options).toContain('sending');
+});
+
+const syncCommand = {
+  eventId: '66666666-6666-4666-8666-666666666666',
+  idempotencyKey: '77777777-7777-4777-8777-777777777777',
+  operation: 'visit.draft.saved' as const,
+  schemaVersion: 1 as const,
+  sequence: 1,
+  aggregateType: 'visit_draft' as const,
+  aggregateId: '55555555-5555-4555-8555-555555555555',
+  occurredAt: '2026-09-11T12:01:00.000Z',
+  payload: {
+    draftOfflineId: '55555555-5555-4555-8555-555555555555',
+    routeVersionStopId: '44444444-4444-4444-8444-444444444444',
+    acknowledged: true,
+  },
+};
+
+it('validates strict sync commands and limits batches to 25 events', () => {
+  expect(syncCommandSchema.parse(syncCommand)).toEqual(syncCommand);
+  expect(syncCommandSchema.safeParse({
+    ...syncCommand,
+    aggregateId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  }).success).toBe(false);
+  expect(syncBatchRequestSchema.parse({ deviceId: partition.deviceId, events: [syncCommand] }))
+    .toEqual({ deviceId: partition.deviceId, events: [syncCommand] });
+  expect(syncBatchRequestSchema.safeParse({
+    deviceId: partition.deviceId,
+    events: Array.from({ length: 26 }, () => syncCommand),
+  }).success).toBe(false);
+  expect(syncBatchRequestSchema.safeParse({
+    deviceId: partition.deviceId,
+    events: [syncCommand, { ...syncCommand, sequence: 2 }],
+  }).success).toBe(false);
+  expect(syncBatchRequestSchema.safeParse({
+    deviceId: partition.deviceId,
+    events: [{ ...syncCommand, eventId: crypto.randomUUID() }, syncCommand],
+  }).success).toBe(false);
+});
+
+it('keeps canonical confirmations distinct from recoverable and rejected results', () => {
+  const confirmed = {
+    eventId: syncCommand.eventId,
+    status: 'confirmed' as const,
+    canonicalId: syncCommand.aggregateId,
+    confirmedAt: '2026-09-11T12:02:00.000Z',
+  };
+  expect(syncBatchResponseSchema.parse({
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    results: [confirmed],
+  }).results[0]).toEqual(confirmed);
+  expect(syncBatchResponseSchema.safeParse({
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    results: [{ ...confirmed, status: 'rejected' }],
+  }).success).toBe(false);
+  expect(syncBatchResponseSchema.safeParse({
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    results: [confirmed, confirmed],
+  }).success).toBe(false);
+  expect(syncBatchResponseSchema.safeParse({
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    results: [{
+      eventId: syncCommand.eventId,
+      status: 'recoverable_error',
+      error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Tente novamente.', recoverable: false },
+    }],
+  }).success).toBe(false);
+  expect(syncBatchResponseSchema.safeParse({
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    results: [{
+      eventId: syncCommand.eventId,
+      status: 'recoverable_error',
+      error: { code: 'FORBIDDEN', message: 'Operação negada.', recoverable: true },
+    }],
+  }).success).toBe(false);
+  expect(syncBatchResponseSchema.safeParse({
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    results: [{
+      eventId: syncCommand.eventId,
+      status: 'rejected',
+      error: { code: 'RATE_LIMITED', message: 'Limite atingido.', recoverable: false },
+    }],
+  }).success).toBe(false);
+  expect(syncBatchResponseSchema.safeParse({
+    requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    results: [{
+      eventId: syncCommand.eventId,
+      status: 'rejected',
+      error: { code: 'VALIDATION_FAILED', message: 'Evento inválido.', recoverable: true },
+    }],
+  }).success).toBe(false);
+  expect(syncBatchExchangeSchema.safeParse({
+    request: { deviceId: partition.deviceId, events: [syncCommand] },
+    response: {
+      requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      results: [{ ...confirmed, eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }],
+    },
+  }).success).toBe(false);
 });

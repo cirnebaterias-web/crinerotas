@@ -1,10 +1,11 @@
 import Dexie from 'dexie';
 import { IDBKeyRange, indexedDB } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mePath } from '@cirne/contracts';
 import { createSyntheticRouteBundle, createValidatedLocalSession } from '@cirne/domain';
 import { OfflineDatabase } from './database';
 import { OfflineRepository } from './repository';
-import { OfflineFoundationService } from './service';
+import { OfflineFoundationService, refreshBrowserSession } from './service';
 
 const partition = {
   userId: '11111111-1111-4111-8111-111111111111',
@@ -110,5 +111,24 @@ describe('OfflineFoundationService online authorization', () => {
     expect(localStorage.getItem('cirne-rotas.last-user-id')).toBeNull();
     expect(await repository.getLocalSession(partition)).toBeUndefined();
     expect(await repository.listRouteBundles(partition)).toHaveLength(1);
+  });
+});
+
+describe('refreshBrowserSession', () => {
+  it('uses the same-origin identity endpoint so refreshed cookies can be persisted', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(refreshBrowserSession()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(mePath, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+  });
+
+  it('reports an unavailable refresh without throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+
+    await expect(refreshBrowserSession()).resolves.toBe(false);
   });
 });
