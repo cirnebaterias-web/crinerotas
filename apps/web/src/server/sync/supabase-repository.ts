@@ -37,7 +37,7 @@ export class SupabaseSyncEventRepository implements SyncEventRepository {
     if (error) throw mapDatabaseFailure(error.message);
 
     const parsed = syncResultSchema.safeParse(data);
-    if (!parsed.success || parsed.data.status !== 'confirmed') {
+    if (!parsed.success || parsed.data.status !== 'confirmed' || parsed.data.eventId !== command.eventId) {
       throw new SyncEventFailure(
         'DEPENDENCY_UNAVAILABLE',
         publicSyncMessage('DEPENDENCY_UNAVAILABLE'),

@@ -7,6 +7,7 @@ import {
 } from '@cirne/contracts';
 import { classifySyncFailure, nextRetryDelayMs, toSyncCommand } from '@cirne/domain';
 import type { OfflineRepository } from './repository';
+import { SyncEventPersistenceError } from './sync-persistence-error';
 import { SyncTransportError, type SyncTransport } from './sync-transport';
 
 export interface SyncQueueRepository {
@@ -94,7 +95,13 @@ export class SyncEngine {
     }
 
     const results = new Map(response.results.map((result) => [result.eventId, result]));
+    const locallyBlockedAggregates = new Set<string>();
     for (const event of events) {
+      if (locallyBlockedAggregates.has(event.aggregateId)) {
+        await this.persistRecoverable(partition, event, 'EVENT_OUT_OF_ORDER');
+        summary.recoverable += 1;
+        continue;
+      }
       const result = results.get(event.eventId);
       if (!result) {
         await this.persistRecoverable(partition, event, 'DEPENDENCY_UNAVAILABLE');
@@ -102,8 +109,21 @@ export class SyncEngine {
         continue;
       }
       if (result.status === 'confirmed') {
-        await this.repository.applySyncConfirmation(partition, result);
-        summary.confirmed += 1;
+        try {
+          const applied = await this.repository.applySyncConfirmation(partition, result);
+          if (!applied) {
+            throw new SyncEventPersistenceError('A confirmação canônica não foi aplicada localmente.');
+          }
+          summary.confirmed += 1;
+        } catch (error) {
+          if (!(error instanceof SyncEventPersistenceError)) throw error;
+          await this.repository.recordOutboxFailure(partition, event.eventId, {
+            status: 'action_required',
+            code: 'INTERNAL_ERROR',
+          });
+          summary.actionRequired += 1;
+          locallyBlockedAggregates.add(event.aggregateId);
+        }
         continue;
       }
       if (result.status === 'recoverable_error' || result.error.code === 'EVENT_OUT_OF_ORDER') {

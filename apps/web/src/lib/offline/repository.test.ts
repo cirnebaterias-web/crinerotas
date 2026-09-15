@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSyntheticRouteBundle, createValidatedLocalSession } from '@cirne/domain';
 import { OfflineDatabase, offlineV2Stores } from './database';
 import { OfflineRepository, type SaveDraftCommand } from './repository';
+import { SyncEventPersistenceError } from './sync-persistence-error';
 
 const partitionA = {
   userId: '11111111-1111-4111-8111-111111111111',
@@ -236,12 +237,16 @@ describe('OfflineRepository', () => {
     const { repository } = makeRepository();
     await seed(repository);
     const saved = await repository.saveDraftAndEnqueue(command());
-    await expect(repository.applySyncConfirmation(partitionA, {
+    const confirmation = repository.applySyncConfirmation(partitionA, {
       eventId: saved.event.eventId,
       status: 'confirmed',
       canonicalId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       confirmedAt: '2026-09-11T12:05:00.000Z',
-    })).rejects.toThrow('Confirmação canônica não corresponde');
+    });
+    await expect(confirmation).rejects.toMatchObject({
+      name: SyncEventPersistenceError.name,
+      message: expect.stringContaining('Confirmação canônica não corresponde'),
+    });
     expect(await repository.listOutbox(partitionA)).toHaveLength(1);
     expect(await repository.listDrafts(partitionA)).toMatchObject([{ persistenceState: 'saved_on_device' }]);
   });

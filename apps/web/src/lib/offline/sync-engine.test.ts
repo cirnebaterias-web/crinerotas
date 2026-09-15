@@ -170,4 +170,76 @@ describe('SyncEngine', () => {
       vi.useRealTimers();
     }
   });
+
+  it('continues independent aggregates after an event-specific local persistence failure', async () => {
+    const first = event(1);
+    const dependent = event(2);
+    const independentAggregateId = '50000000-0000-4000-8000-000000000002';
+    const independent = {
+      ...event(3),
+      aggregateId: independentAggregateId,
+      payload: {
+        ...event(3).payload,
+        draftOfflineId: independentAggregateId,
+      },
+    };
+    const queued = [first, dependent, independent];
+    const queue = repository(queued);
+    vi.mocked(queue.applySyncConfirmation).mockImplementation(async (_partition, result) => {
+      if (result.eventId === first.eventId) return false;
+      return true;
+    });
+    const transport: SyncTransport = {
+      send: vi.fn().mockResolvedValue({
+        requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        results: queued.map((item) => ({
+          eventId: item.eventId,
+          status: 'confirmed' as const,
+          canonicalId: item.aggregateId,
+          confirmedAt: '2026-09-14T12:01:00.000Z',
+        })),
+      }),
+    };
+
+    await expect(new SyncEngine(queue, transport).synchronize(partition)).resolves.toEqual({
+      attempted: 3,
+      confirmed: 1,
+      recoverable: 1,
+      actionRequired: 1,
+      authenticationRequired: false,
+    });
+    expect(queue.applySyncConfirmation).toHaveBeenCalledTimes(2);
+    expect(queue.recordOutboxFailure).toHaveBeenCalledWith(partition, first.eventId, {
+      status: 'action_required',
+      code: 'INTERNAL_ERROR',
+    });
+    expect(queue.recordOutboxFailure).toHaveBeenCalledWith(
+      partition,
+      dependent.eventId,
+      expect.objectContaining({
+        status: 'recoverable_error',
+        code: 'EVENT_OUT_OF_ORDER',
+      }),
+    );
+  });
+
+  it('propagates systemic local persistence failures', async () => {
+    const queued = [event()];
+    const queue = repository(queued);
+    vi.mocked(queue.applySyncConfirmation).mockRejectedValue(new Error('IndexedDB unavailable'));
+    const transport: SyncTransport = {
+      send: vi.fn().mockResolvedValue({
+        requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        results: [{
+          eventId: queued[0]!.eventId,
+          status: 'confirmed',
+          canonicalId: queued[0]!.aggregateId,
+          confirmedAt: '2026-09-14T12:01:00.000Z',
+        }],
+      }),
+    };
+
+    await expect(new SyncEngine(queue, transport).synchronize(partition))
+      .rejects.toThrow('IndexedDB unavailable');
+  });
 });

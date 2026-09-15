@@ -9,7 +9,7 @@ import {
 } from '@cirne/domain';
 import { OfflineDatabase } from './database';
 import { OfflineRepository, type SaveDraftCommand } from './repository';
-import { SyncEngine, type SyncRunSummary } from './sync-engine';
+import { SyncEngine, type RefreshSession, type SyncRunSummary } from './sync-engine';
 import { FetchSyncTransport } from './sync-transport';
 import {
   isCurrentOfflineRevisionResponse,
@@ -82,6 +82,16 @@ async function requestStoragePersistence() {
   try { return await navigator.storage.persist(); } catch { return false; }
 }
 
+export async function refreshBrowserSession(): Promise<boolean> {
+  try {
+    // The server-scoped Supabase client consumes the refresh cookie and returns replacements on this request.
+    const response = await fetch(mePath, { credentials: 'same-origin', cache: 'no-store' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export class OfflineFoundationService {
   private readonly repository: OfflineRepository;
   private readonly syncEngine: SyncEngine;
@@ -90,9 +100,10 @@ export class OfflineFoundationService {
     database = new OfflineDatabase(),
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createId: () => string = () => crypto.randomUUID(),
+    refreshSession: RefreshSession = refreshBrowserSession,
   ) {
     this.repository = new OfflineRepository(database);
-    this.syncEngine = new SyncEngine(this.repository, new FetchSyncTransport());
+    this.syncEngine = new SyncEngine(this.repository, new FetchSyncTransport(), refreshSession);
   }
 
   async initialize(): Promise<OfflineShellResult> {

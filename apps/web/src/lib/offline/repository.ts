@@ -15,6 +15,7 @@ import {
 } from '@cirne/contracts';
 import { createDraftMutation, orderOutboxEvents, type DraftMutationIds } from '@cirne/domain';
 import type { OfflineDatabase } from './database';
+import { SyncEventPersistenceError } from './sync-persistence-error';
 
 function assertPartition(partition: OfflinePartition, record: { userId: string; deviceId: string }) {
   offlinePartitionSchema.parse({ userId: partition.userId, deviceId: partition.deviceId });
@@ -184,11 +185,11 @@ export class OfflineRepository {
       if (!event) return false;
       assertPartition(partition, event);
       if (confirmationInput.canonicalId !== event.aggregateId) {
-        throw new Error('Confirmação canônica não corresponde ao agregado local.');
+        throw new SyncEventPersistenceError('Confirmação canônica não corresponde ao agregado local.');
       }
       const draftKey: [string, string, string] = [partition.userId, partition.deviceId, event.aggregateId];
       const draft = await this.db.visitDrafts.get(draftKey);
-      if (!draft) throw new Error('Confirmação sem rascunho local correspondente.');
+      if (!draft) throw new SyncEventPersistenceError('Confirmação sem rascunho local correspondente.');
 
       await this.db.outboxEvents.delete(key);
       const remaining = await this.db.outboxEvents
