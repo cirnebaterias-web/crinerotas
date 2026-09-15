@@ -2,7 +2,7 @@ import Dexie from 'dexie';
 import { IDBKeyRange, indexedDB } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSyntheticRouteBundle, createValidatedLocalSession } from '@cirne/domain';
-import { OfflineDatabase, offlineV1Stores } from './database';
+import { OfflineDatabase, offlineV2Stores } from './database';
 import { OfflineRepository, type SaveDraftCommand } from './repository';
 
 const partitionA = {
@@ -52,14 +52,15 @@ async function seed(repository: OfflineRepository, partition = partitionA) {
 }
 
 describe('OfflineRepository', () => {
-  it('preserves local route data after reopen and a schema v1 to v2 upgrade', async () => {
+  it('preserves route, session, draft and outbox during the schema v2 to v3 upgrade', async () => {
     const name = `offline-migration-${crypto.randomUUID()}`;
     names.push(name);
     const legacy = new Dexie(name, { indexedDB, IDBKeyRange });
-    legacy.version(1).stores(offlineV1Stores);
+    legacy.version(2).stores(offlineV2Stores);
     await legacy.open();
     const bundle = createSyntheticRouteBundle(partitionA, '2026-09-11T12:00:00.000Z');
     await legacy.table('routeBundles').put(bundle);
+    await legacy.table('localSessions').put(createValidatedLocalSession(partitionA, '2026-09-11T12:00:00.000Z'));
     await legacy.table('visitDrafts').put({
       schemaVersion: 1,
       ...partitionA,
@@ -91,6 +92,7 @@ describe('OfflineRepository', () => {
     expect(await repository.listRouteBundles(partitionA)).toEqual([bundle]);
     expect(await repository.listDrafts(partitionA)).toHaveLength(1);
     expect(await repository.listOutbox(partitionA)).toHaveLength(1);
+    expect(await repository.getLocalSession(partitionA)).toBeDefined();
     repository.close();
   });
 
@@ -150,5 +152,97 @@ describe('OfflineRepository', () => {
     const { repository } = makeRepository();
     await seed(repository, partitionB);
     await expect(repository.saveDraftAndEnqueue(command())).rejects.toThrow('Parada indisponível nesta partição offline.');
+  });
+
+  it('reserves only eligible ordered events and recovers an expired lease', async () => {
+    const { repository } = makeRepository();
+    await seed(repository);
+    const first = await repository.saveDraftAndEnqueue(command());
+    const second = await repository.saveDraftAndEnqueue(command({
+      occurredAt: '2026-09-11T12:02:00.000Z',
+      ids: {
+        ...command().ids,
+        eventId: '88888888-8888-4888-8888-888888888888',
+        idempotencyKey: '99999999-9999-4999-8999-999999999999',
+      },
+    }));
+
+    const reserved = await repository.reserveOutboxBatch(
+      partitionA,
+      '2026-09-11T12:03:00.000Z',
+      '2026-09-11T12:03:30.000Z',
+    );
+    expect(reserved.map(({ eventId, status, attemptCount }) => ({ eventId, status, attemptCount }))).toEqual([
+      { eventId: first.event.eventId, status: 'sending', attemptCount: 1 },
+      { eventId: second.event.eventId, status: 'sending', attemptCount: 1 },
+    ]);
+    expect(await repository.reserveOutboxBatch(
+      partitionA,
+      '2026-09-11T12:03:10.000Z',
+      '2026-09-11T12:03:40.000Z',
+    )).toEqual([]);
+    expect(await repository.reserveOutboxBatch(
+      partitionA,
+      '2026-09-11T12:03:31.000Z',
+      '2026-09-11T12:04:00.000Z',
+    )).toHaveLength(2);
+  });
+
+  it('persists recoverable/actionable failures without losing the event or idempotency key', async () => {
+    const { repository } = makeRepository();
+    await seed(repository);
+    const saved = await repository.saveDraftAndEnqueue(command());
+    await repository.reserveOutboxBatch(partitionA, '2026-09-11T12:02:00.000Z', '2026-09-11T12:02:30.000Z');
+
+    const failed = await repository.recordOutboxFailure(partitionA, saved.event.eventId, {
+      status: 'recoverable_error',
+      code: 'DEPENDENCY_UNAVAILABLE',
+      nextAttemptAt: '2026-09-11T12:03:00.000Z',
+    });
+    expect(failed).toMatchObject({
+      status: 'recoverable_error',
+      attemptCount: 1,
+      idempotencyKey: saved.event.idempotencyKey,
+      lastErrorCode: 'DEPENDENCY_UNAVAILABLE',
+    });
+    expect(await repository.reserveOutboxBatch(
+      partitionA,
+      '2026-09-11T12:02:59.000Z',
+      '2026-09-11T12:03:30.000Z',
+    )).toEqual([]);
+  });
+
+  it('removes an event and marks its draft synced in the same confirmation transaction', async () => {
+    const { repository } = makeRepository();
+    await seed(repository);
+    const saved = await repository.saveDraftAndEnqueue(command());
+    const applied = await repository.applySyncConfirmation(partitionA, {
+      eventId: saved.event.eventId,
+      status: 'confirmed',
+      canonicalId: saved.event.aggregateId,
+      confirmedAt: '2026-09-11T12:05:00.000Z',
+    });
+
+    expect(applied).toBe(true);
+    expect(await repository.listOutbox(partitionA)).toEqual([]);
+    expect(await repository.listDrafts(partitionA)).toMatchObject([{
+      offlineId: saved.event.aggregateId,
+      persistenceState: 'synced',
+      updatedAt: '2026-09-11T12:05:00.000Z',
+    }]);
+  });
+
+  it('keeps local work when a confirmation identifies another aggregate', async () => {
+    const { repository } = makeRepository();
+    await seed(repository);
+    const saved = await repository.saveDraftAndEnqueue(command());
+    await expect(repository.applySyncConfirmation(partitionA, {
+      eventId: saved.event.eventId,
+      status: 'confirmed',
+      canonicalId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      confirmedAt: '2026-09-11T12:05:00.000Z',
+    })).rejects.toThrow('Confirmação canônica não corresponde');
+    expect(await repository.listOutbox(partitionA)).toHaveLength(1);
+    expect(await repository.listDrafts(partitionA)).toMatchObject([{ persistenceState: 'saved_on_device' }]);
   });
 });

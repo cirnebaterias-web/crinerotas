@@ -9,6 +9,8 @@ import {
 } from '@cirne/domain';
 import { OfflineDatabase } from './database';
 import { OfflineRepository, type SaveDraftCommand } from './repository';
+import { SyncEngine, type SyncRunSummary } from './sync-engine';
+import { FetchSyncTransport } from './sync-transport';
 import {
   isCurrentOfflineRevisionResponse,
   offlineRevisionRequestType,
@@ -82,6 +84,7 @@ async function requestStoragePersistence() {
 
 export class OfflineFoundationService {
   private readonly repository: OfflineRepository;
+  private readonly syncEngine: SyncEngine;
 
   constructor(
     database = new OfflineDatabase(),
@@ -89,6 +92,7 @@ export class OfflineFoundationService {
     private readonly createId: () => string = () => crypto.randomUUID(),
   ) {
     this.repository = new OfflineRepository(database);
+    this.syncEngine = new SyncEngine(this.repository, new FetchSyncTransport());
   }
 
   async initialize(): Promise<OfflineShellResult> {
@@ -182,6 +186,19 @@ export class OfflineFoundationService {
 
   async refresh(partition: OfflinePartition) {
     return this.loadAuthorizedPartition(partition, false);
+  }
+
+  async synchronize(partition: OfflinePartition): Promise<SyncRunSummary> {
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de sincronizar.');
+    if (!navigator.onLine) return {
+      attempted: 0,
+      confirmed: 0,
+      recoverable: 0,
+      actionRequired: 0,
+      authenticationRequired: false,
+    };
+    return this.syncEngine.synchronize(partition);
   }
 
   close() {

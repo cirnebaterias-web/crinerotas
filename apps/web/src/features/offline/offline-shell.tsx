@@ -14,7 +14,7 @@ function StateLegend() {
         <li><strong>Pendente</strong> — aguarda a futura sincronização.</li>
         <li><strong>Erro recuperável</strong> — poderá ser tentado novamente.</li>
         <li><strong>Ação necessária</strong> — precisa de intervenção antes do envio.</li>
-        <li><strong>Sincronizado</strong> — indisponível nesta versão; nenhum evento local recebe esse estado.</li>
+        <li><strong>Sincronizado</strong> — confirmação canônica persistida; o evento saiu da fila local.</li>
       </ul>
     </section>
   );
@@ -25,11 +25,13 @@ function ReadyRoute({
   busy,
   saveError,
   onSave,
+  onSync,
 }: {
   snapshot: OfflineSnapshot;
   busy: boolean;
   saveError: string | null;
   onSave: (bundle: LocalRouteBundle) => void;
+  onSync: () => void;
 }) {
   const bundle = snapshot.routes[0];
   if (!bundle) {
@@ -51,9 +53,12 @@ function ReadyRoute({
         <button className="primary" disabled={busy || !available} onClick={() => onSave(bundle)}>
           {busy ? 'Salvando…' : snapshot.drafts.length ? 'Salvar nova edição local' : 'Iniciar rascunho local'}
         </button>
+        <button disabled={busy || !available || snapshot.outbox.length === 0} onClick={onSync}>
+          {busy ? 'Processando…' : 'Sincronizar agora'}
+        </button>
         {saveError ? <p className="status" data-kind="error" role="alert">{saveError}</p> : null}
-        {snapshot.drafts.length ? <p role="status"><strong>Rascunho salvo no aparelho.</strong></p> : null}
-        <p><strong>{snapshot.outbox.length}</strong> evento(s) <span className="badge">Pendente</span></p>
+        {snapshot.drafts.length ? <p role="status"><strong>Rascunho {snapshot.drafts[0]?.persistenceState === 'synced' ? 'sincronizado' : 'salvo no aparelho'}.</strong></p> : null}
+        <p><strong>{snapshot.outbox.length}</strong> evento(s) ainda na fila local.</p>
         <p className="muted">Persistência reforçada pelo navegador: {snapshot.storagePersisted ? 'concedida' : 'não garantida'}.</p>
       </section>
     </>
@@ -104,6 +109,22 @@ export function OfflineShell() {
     } finally { setBusy(false); }
   }
 
+  async function synchronize() {
+    const service = serviceRef.current;
+    if (!service || result?.kind !== 'ready') return;
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const summary = await service.synchronize(result.partition);
+      setResult(await service.refresh(result.partition));
+      if (summary.authenticationRequired) setSaveError('Revalide sua identidade online antes de sincronizar.');
+      else if (summary.actionRequired) setSaveError('Há evento que exige ação antes de um novo envio.');
+      else if (summary.recoverable) setSaveError('A conexão falhou; o evento foi preservado para nova tentativa.');
+    } catch {
+      setSaveError('Não foi possível sincronizar. Os eventos locais foram preservados.');
+    } finally { setBusy(false); }
+  }
+
   return (
     <main className="offline-shell">
       <header><p className="eyebrow">Cirne Rotas · núcleo local</p><h1>Rota de campo</h1><p className="lede">Shell genérico. Identidade, token e conteúdo privado não fazem parte do HTML em cache.</p></header>
@@ -112,7 +133,7 @@ export function OfflineShell() {
         <section className="panel"><h2>Sem rota offline</h2><p>{result.message}</p>{result.demoAvailable ? <button className="primary" disabled={busy} onClick={provision}>{busy ? 'Carregando…' : 'Carregar rota sintética local'}</button> : null}{saveError ? <p className="status" data-kind="error" role="alert">{saveError}</p> : null}</section>
       ) : null}
       {result?.kind === 'blocked' ? <div className="status" data-kind="warning" role="alert"><span aria-hidden>!</span><span><strong>Acesso local bloqueado</strong><br />{result.message}</span></div> : null}
-      {result?.kind === 'ready' ? <ReadyRoute snapshot={result} busy={busy} saveError={saveError} onSave={saveDraft} /> : null}
+      {result?.kind === 'ready' ? <ReadyRoute snapshot={result} busy={busy} saveError={saveError} onSave={saveDraft} onSync={synchronize} /> : null}
       <StateLegend />
     </main>
   );
