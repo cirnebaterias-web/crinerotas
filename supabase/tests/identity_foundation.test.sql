@@ -71,7 +71,7 @@ select ok(not has_function_privilege('authenticated', 'private.resolve_current_i
 select ok(not has_function_privilege('anon', 'api.get_my_identity()', 'EXECUTE'), 'anon cannot execute the identity wrapper');
 
 select is((select count(*)::integer from api.roles), 3, 'only confirmed roles are seeded');
-select is((select count(*)::integer from api.role_permissions), 5, 'only minimal identity and sync capabilities are seeded');
+select is((select count(*)::integer from api.role_permissions), 8, 'only minimal identity, sync and route capabilities are seeded');
 select is((select count(*)::integer from api.user_profiles), 5, 'five synthetic profiles were provisioned');
 select is((select count(*)::integer from api.user_role_assignments where revoked_at is null), 5, 'each synthetic actor has one active role');
 select is((select count(*)::integer from api.user_seller_scopes where revoked_at is null), 1, 'only manager A to seller A scope exists');
@@ -85,7 +85,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
 select is(api.get_my_identity() ->> 'id', :'seller_a_id', 'seller A resolves only its own identity');
 select is(api.get_my_identity() -> 'roles', '["seller"]'::jsonb, 'seller A receives its active role');
-select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "sync.write_self"]'::jsonb, 'seller A receives minimal capabilities');
+select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "route.read_self", "sync.write_self"]'::jsonb, 'seller A receives minimal capabilities');
 select is(api.get_my_identity() -> 'scopeIds', jsonb_build_array(:'seller_a_id'::uuid), 'seller A scope is itself');
 select is((select count(*)::integer from api.user_profiles), 1, 'direct profile read is restricted to the caller');
 select is((select count(*)::integer from api.user_profiles where id = :'seller_b_id'::uuid), 0, 'seller A cannot read seller B profile');

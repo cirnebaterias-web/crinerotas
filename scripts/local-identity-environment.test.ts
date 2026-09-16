@@ -14,6 +14,7 @@ describe('local identity environment', () => {
       values,
     );
     expect(result).toContain('APP_BASE_URL=http://127.0.0.1:3000');
+    expect(result).toContain('OPERATIONAL_TIME_ZONE=America/Sao_Paulo');
     expect(result).toContain('LOG_LEVEL=debug');
     expect(result.match(/^SUPABASE_PUBLIC_URL=/gm)).toHaveLength(1);
     expect(result).toContain(`SUPABASE_PUBLISHABLE_KEY=${values.PUBLISHABLE_KEY}`);
@@ -33,5 +34,11 @@ describe('local identity environment', () => {
       ...values,
       PUBLISHABLE_KEY: `  ${values.PUBLISHABLE_KEY}  `,
     })).toContain(`SUPABASE_PUBLISHABLE_KEY=${values.PUBLISHABLE_KEY}\n`);
+  });
+
+  it('preserves an explicitly configured operational time zone', () => {
+    const result = mergeLocalIdentityEnvironment('OPERATIONAL_TIME_ZONE=UTC\n', values);
+    expect(result.match(/^OPERATIONAL_TIME_ZONE=/gm)).toHaveLength(1);
+    expect(result).toContain('OPERATIONAL_TIME_ZONE=UTC');
   });
 });

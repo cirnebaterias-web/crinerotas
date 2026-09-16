@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertExpectedRouteVersion,
   createDraftMutation,
   createSyntheticRouteBundle,
   createValidatedLocalSession,
@@ -11,8 +12,38 @@ import {
   localAccessWindowMs,
   nextRetryDelayMs,
   orderOutboxEvents,
+  normalizeRouteDraft,
+  toRouteTodayResponse,
   toSyncCommand,
 } from './index';
+
+it('normalizes a valid route draft while preserving non-contiguous business order', () => {
+  const normalized = normalizeRouteDraft({
+    schemaVersion: 1,
+    serviceDate: '2026-09-15',
+    sellerId: '11111111-1111-4111-8111-111111111111',
+    stops: [
+      { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', plannedOrder: 3, priority: 0 },
+      { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', plannedOrder: 1, priority: 1 },
+    ],
+  });
+  expect(normalized.stops.map(({ plannedOrder }) => plannedOrder)).toEqual([1, 3]);
+  expect(() => normalizeRouteDraft({
+    ...normalized,
+    stops: [normalized.stops[0]!, { ...normalized.stops[1]!, plannedOrder: 1 }],
+  })).toThrow('Rota em rascunho inválida.');
+});
+
+it('checks optimistic route versions and creates a stable empty route response', () => {
+  expect(() => assertExpectedRouteVersion(2, 1)).toThrow('A versão enviada conflita com o servidor.');
+  expect(() => assertExpectedRouteVersion(0, 0)).toThrow('Versão de rota inválida.');
+  expect(assertExpectedRouteVersion(2, 2)).toBeUndefined();
+  expect(toRouteTodayResponse(null, '2026-09-15')).toEqual({
+    schemaVersion: 1,
+    availability: 'empty',
+    serviceDate: '2026-09-15',
+  });
+});
 
 const partition = {
   userId: '11111111-1111-4111-8111-111111111111',

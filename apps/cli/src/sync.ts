@@ -5,7 +5,7 @@ import {
   type SyncBatchRequest,
 } from '@cirne/contracts';
 
-function parseLocalOrigin(baseUrl: string) {
+export function parseLocalOrigin(baseUrl: string) {
   try {
     const url = new URL(baseUrl);
     const loopbackHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);

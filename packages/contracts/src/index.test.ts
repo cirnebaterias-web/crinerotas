@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest';
 import {
   apiErrorResponseSchema,
+  canonicalRouteSchema,
+  createRouteDraftRequestSchema,
   liveResponseSchema,
   localPersistenceStateSchema,
   localRouteBundleSchema,
@@ -9,11 +11,105 @@ import {
   meResponseSchema,
   offlineOutboxEventSchema,
   offlineOutboxStatusSchema,
+  publishRouteRequestSchema,
+  routeDraftSchema,
+  routePublicationSchema,
+  routeTodayResponseSchema,
   syncBatchRequestSchema,
   syncBatchExchangeSchema,
   syncBatchResponseSchema,
   syncCommandSchema,
 } from './index';
+
+const routeRequest = {
+  schemaVersion: 1 as const,
+  serviceDate: '2026-09-15',
+  sellerId: '11111111-1111-4111-8111-111111111111',
+  stops: [
+    { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', plannedOrder: 1, priority: 1 },
+    { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', plannedOrder: 3, priority: 0 },
+  ],
+};
+
+it('validates a route draft command without inventing contiguous order', () => {
+  expect(createRouteDraftRequestSchema.parse(routeRequest)).toEqual(routeRequest);
+  expect(createRouteDraftRequestSchema.safeParse({
+    ...routeRequest,
+    stops: [routeRequest.stops[0]!, { ...routeRequest.stops[1]!, clientId: routeRequest.stops[0]!.clientId }],
+  }).success).toBe(false);
+  expect(createRouteDraftRequestSchema.safeParse({
+    ...routeRequest,
+    stops: [routeRequest.stops[0]!, { ...routeRequest.stops[1]!, plannedOrder: 1 }],
+  }).success).toBe(false);
+  expect(createRouteDraftRequestSchema.safeParse({ ...routeRequest, internalStatus: 'published' }).success).toBe(false);
+});
+
+it('keeps draft, publication and canonical route responses strict', () => {
+  const draft = {
+    ...routeRequest,
+    routeId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    routeVersionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    versionNumber: 1,
+    expectedVersion: 1,
+    status: 'draft' as const,
+    stops: routeRequest.stops.map((stop, index) => ({
+      ...stop,
+      routeVersionStopId: `dddddddd-dddd-4ddd-8ddd-${String(index + 1).padStart(12, '0')}`,
+    })),
+  };
+  expect(routeDraftSchema.parse(draft)).toEqual(draft);
+  expect(publishRouteRequestSchema.parse({ schemaVersion: 1, expectedVersion: 1 }))
+    .toEqual({ schemaVersion: 1, expectedVersion: 1 });
+  const publication = {
+    schemaVersion: 1 as const,
+    routeId: draft.routeId,
+    routeVersionId: draft.routeVersionId,
+    versionNumber: 1,
+    expectedVersion: 2,
+    status: 'published' as const,
+    publishedBy: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    publishedAt: '2026-09-15T12:00:00.000Z',
+    stopCount: 2,
+  };
+  expect(routePublicationSchema.parse(publication)).toEqual(publication);
+
+  const route = {
+    schemaVersion: 1 as const,
+    routeId: draft.routeId,
+    routeVersionId: draft.routeVersionId,
+    versionNumber: 1,
+    serviceDate: routeRequest.serviceDate,
+    status: 'published' as const,
+    publishedAt: publication.publishedAt,
+    seller: { id: routeRequest.sellerId, displayName: 'Vendedor A Sintético' },
+    stops: draft.stops.map((stop, index) => ({
+      routeVersionStopId: stop.routeVersionStopId,
+      plannedOrder: stop.plannedOrder,
+      executionOrder: stop.plannedOrder,
+      priority: stop.priority,
+      status: 'pending' as const,
+      executionVersion: 1,
+      client: {
+        id: stop.clientId,
+        externalReference: `SYN-${index + 1}`,
+        name: `Cliente Sintético ${index + 1}`,
+        address: `Endereço sintético ${index + 1}`,
+        latitude: null,
+        longitude: null,
+        portfolioReference: null,
+      },
+    })),
+  };
+  expect(canonicalRouteSchema.parse(route)).toEqual(route);
+  expect(routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'available', route }))
+    .toEqual({ schemaVersion: 1, availability: 'available', route });
+  expect(routeTodayResponseSchema.parse({
+    schemaVersion: 1,
+    availability: 'empty',
+    serviceDate: routeRequest.serviceDate,
+  })).toEqual({ schemaVersion: 1, availability: 'empty', serviceDate: routeRequest.serviceDate });
+  expect(canonicalRouteSchema.safeParse({ ...route, token: 'private' }).success).toBe(false);
+});
 
 it('rejects extra fields and incompatible health responses', () => {
   for (const value of [{ status: 'down' }, { status: 'ok', secret: 'private' }, null, {}]) {

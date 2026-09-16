@@ -14,6 +14,7 @@ let identityEnvironment: { SUPABASE_PUBLIC_URL: string; SUPABASE_PUBLISHABLE_KEY
 let actorManifest: {
   actors: Record<string, { id: string; accessToken: string }>;
 };
+let publishedRouteId = '';
 
 async function listenOnRandomPort(socket: Server) {
   await new Promise<void>((resolve, reject) => {
@@ -96,6 +97,7 @@ beforeAll(async () => {
         PORT: String(port),
         NODE_ENV: 'production',
         APP_BASE_URL: candidateOrigin,
+        OPERATIONAL_TIME_ZONE: 'America/Sao_Paulo',
         LOG_LEVEL: 'info',
         NEXT_TELEMETRY_DISABLED: '1',
         ...identityEnvironment,
@@ -174,7 +176,7 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   expect(await sellerResponse.json()).toMatchObject({
     id: seller.id,
     roles: ['seller'],
-    capabilities: ['identity.read_self', 'sync.write_self'],
+    capabilities: ['identity.read_self', 'route.read_self', 'sync.write_self'],
     scopeIds: [seller.id],
     status: 'active',
   });
@@ -248,6 +250,92 @@ it('runs the synthetic sync round-trip CLI without exposing the token or payload
   });
   expect(result.stdout + result.stderr).not.toContain(seller.accessToken);
   expect(result.stdout + result.stderr).not.toMatch(/draftOfflineId|routeVersionStopId|acknowledged/);
+});
+
+it('runs the synthetic route round-trip CLI without exposing tokens or client snapshots', async () => {
+  const seller = actorManifest.actors.seller_a;
+  const manager = actorManifest.actors.manager_a;
+  if (!seller || !manager) throw new Error('Synthetic route actors missing');
+  const cliArguments = [
+    '--import', 'tsx', 'apps/cli/src/routes-cli.ts', '--url', origin, '--json',
+  ];
+  const cliOptions = {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken,
+      CIRNE_SELLER_ACCESS_TOKEN: seller.accessToken,
+    },
+  };
+  const result = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
+  const body = JSON.parse(result.stdout) as { routeId: string; stopCount: number; checks: object };
+  publishedRouteId = body.routeId;
+  expect(body).toMatchObject({
+    status: 'ok',
+    routeVersion: 1,
+    routeStatus: 'published',
+    stopCount: 2,
+    checks: { created: true, published: true, loadedBySeller: true },
+  });
+  expect(result.stdout + result.stderr).not.toContain(manager.accessToken);
+  expect(result.stdout + result.stderr).not.toContain(seller.accessToken);
+  expect(result.stdout + result.stderr).not.toMatch(/Cliente Sintético|Endereço sintético|snapshot/i);
+
+  const repeated = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
+  expect(JSON.parse(repeated.stdout)).toEqual(body);
+  expect(repeated.stdout + repeated.stderr).not.toContain(manager.accessToken);
+  expect(repeated.stdout + repeated.stderr).not.toContain(seller.accessToken);
+});
+
+it('enforces route scope at the BFF while preserving the published aggregate', async () => {
+  const seller = actorManifest.actors.seller_a;
+  const sellerB = actorManifest.actors.seller_b;
+  const manager = actorManifest.actors.manager_a;
+  if (!seller || !sellerB || !manager || !publishedRouteId) throw new Error('Published synthetic route missing');
+
+  const ownRoute = await fetch(`${origin}/api/v1/me/routes/today`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(ownRoute.status).toBe(200);
+  expect(await ownRoute.json()).toMatchObject({
+    availability: 'available',
+    route: { routeId: publishedRouteId, seller: { id: seller.id }, status: 'published' },
+  });
+  expect(ownRoute.headers.get('cache-control')).toContain('no-store');
+
+  const emptyRoute = await fetch(`${origin}/api/v1/me/routes/today`, {
+    headers: { Authorization: `Bearer ${sellerB.accessToken}` },
+  });
+  expect(emptyRoute.status).toBe(200);
+  expect(await emptyRoute.json()).toMatchObject({ availability: 'empty' });
+
+  const hiddenRoute = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+    headers: { Authorization: `Bearer ${sellerB.accessToken}` },
+  });
+  expect(hiddenRoute.status).toBe(404);
+  expect(JSON.stringify(await hiddenRoute.json())).not.toMatch(/seller|client|scope/i);
+
+  const managerRoute = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(managerRoute.status).toBe(200);
+  expect(await managerRoute.json()).toMatchObject({ routeId: publishedRouteId, status: 'published' });
+
+  const stalePublication = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/publish`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${manager.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schemaVersion: 1, expectedVersion: 1 }),
+  });
+  expect(stalePublication.status).toBe(409);
+
+  const forbiddenCreate = await fetch(`${origin}/api/v1/routes`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  expect(forbiddenCreate.status).toBe(403);
+  expect(output).not.toMatch(/Cliente Sintético|Endereço sintético|CARTEIRA-SINTETICA/i);
 });
 
 it('enforces sync BFF authorization and preserves independent partial progress', async () => {
