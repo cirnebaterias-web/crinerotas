@@ -16,12 +16,13 @@ Crie `apps/web/.env.local` a partir de `apps/web/.env.example`, **somente se o a
 
 ```dotenv
 APP_BASE_URL=http://127.0.0.1:3000
+OPERATIONAL_TIME_ZONE=America/Sao_Paulo
 LOG_LEVEL=info
 SUPABASE_PUBLIC_URL=http://127.0.0.1:54321
 SUPABASE_PUBLISHABLE_KEY=replace-with-local-publishable-key
 ```
 
-`APP_BASE_URL` é obrigatório: origem HTTP(S), sem caminho, credenciais ou parâmetros. `LOG_LEVEL` aceita fatal/error/warn/info/debug/trace/silent. A aplicação recusa configuração inválida na inicialização. O canário não precisa de credenciais Supabase; `/api/v1/me` requer a URL e a chave **publicável** locais. `npm run db:reset` e `npm run identity:provision` atualizam esses dois valores públicos automaticamente, preservando as demais opções. O script recusa origem remota e qualquer chave administrativa no arquivo da aplicação. Em automação, injete as variáveis no processo. Nunca use `SECRET_KEY` ou `SERVICE_ROLE_KEY` no web/CLI.
+`APP_BASE_URL` é obrigatório: origem HTTP(S), sem caminho, credenciais ou parâmetros. `OPERATIONAL_TIME_ZONE` também é obrigatório e aceita um fuso IANA válido; o valor local é explícito e o deploy deve confirmar o fuso operacional, sem depender de UTC ou do relógio do host. `LOG_LEVEL` aceita fatal/error/warn/info/debug/trace/silent. A aplicação recusa configuração inválida na inicialização. O canário não precisa de credenciais Supabase; `/api/v1/me` requer a URL e a chave **publicável** locais. `npm run db:reset` e `npm run identity:provision` atualizam esses dois valores públicos automaticamente e acrescentam o fuso local se estiver ausente, preservando uma configuração explícita existente. O script recusa origem remota e qualquer chave administrativa no arquivo da aplicação. Em automação, injete as variáveis no processo. Nunca use `SECRET_KEY` ou `SERVICE_ROLE_KEY` no web/CLI.
 
 ```powershell
 npm run dev
@@ -113,6 +114,21 @@ Remove-Item Env:CIRNE_ACCESS_TOKEN
 
 O comando envia somente IDs e conteúdo sintéticos e comprova três passos: primeira confirmação, repetição com a mesma resposta canônica sem duplicidade e rejeição da mesma chave com conteúdo divergente. A saída esperada é `{"status":"ok","checks":{"firstConfirmation":true,"replayMatched":true,"divergentRejected":true}}`. Token, IDs do evento e payload não aparecem na saída; falha retorna código 1.
 
+## Verificar a rota canônica sintética pela CLI
+
+Com Supabase e aplicação iniciados, carregue os tokens sintéticos do Gestor A e do Vendedor A no ambiente. O comando cria o rascunho, publica a versão 1 e confirma que o vendedor consegue carregar a rota do dia:
+
+```powershell
+$actors = Get-Content .local/identity-actors.json | ConvertFrom-Json
+$env:CIRNE_MANAGER_ACCESS_TOKEN = $actors.actors.manager_a.accessToken
+$env:CIRNE_SELLER_ACCESS_TOKEN = $actors.actors.seller_a.accessToken
+npm run --silent ops:routes -- --url http://127.0.0.1:3000 --json
+Remove-Item Env:CIRNE_MANAGER_ACCESS_TOKEN
+Remove-Item Env:CIRNE_SELLER_ACCESS_TOKEN
+```
+
+A saída contém somente o ID e a versão da rota, status, quantidade de paradas e os três checks do round-trip. Tokens e snapshots de cliente não são exibidos. O diagnóstico usa exclusivamente os dois clientes sintéticos provisionados pelo reset local; não use dados reais. Como alternativa, forneça os dois tokens em um único JSON por stdin, sem combiná-los com as variáveis de ambiente.
+
 Para a prova no navegador, gere o build de produção e execute o Playwright:
 
 ```powershell
@@ -132,7 +148,7 @@ npm run test:e2e
 npm run test:integration
 ```
 
-`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, IndexedDB, motor de sincronização, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa 70 verificações pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio e CLIs como processos reais. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
+`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, IndexedDB, motor de sincronização, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa 122 verificações pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio e CLIs como processos reais. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
 
 CI em `.github/workflows/ci.yaml`: gates, navegador offline, integração e smoke da imagem com Actions por SHA, permissão de leitura, sem deploy. O remoto existe, mas nenhuma publicação desta story é automática. Evidências concluídas ficam em `Docs/qa/`.
 
@@ -171,6 +187,6 @@ Divergências justificadas da arquitetura: TypeScript 7.0.2 não é aceito pelo 
 
 No npm 11.17.0, `npm ci` pode avisar que o postinstall de esbuild não tem política `allowScripts` explícita. Não foi feita aprovação global nem instalação forçada; build e testes foram executados com a instalação resultante. Reavalie scripts de instalação antes de aprová-los em futuras atualizações.
 
-`apps/cli` consome os contratos de `packages/contracts`; `apps/web` expõe `/api/v1/health/live`, `/api/v1/me` e `POST /api/v1/sync/batches`. `packages/config/public` contém somente identificação pública; `/server` valida configurações e não é importável em componentes pela regra de lint. Logs de aplicação usam JSON, ID de correlação próprio e allowlist: rota-modelo, método, status e duração; não registrar URL bruta, token, cookie, e-mail, GPS ou corpo. Mensagens internas do Next podem usar formato próprio.
+`apps/cli` consome os contratos de `packages/contracts`; `apps/web` expõe `/api/v1/health/live`, `/api/v1/me`, `POST /api/v1/sync/batches` e os endpoints autenticados de criação, publicação e leitura de rotas. `packages/config/public` contém somente identificação pública; `/server` valida configurações e não é importável em componentes pela regra de lint. Logs de aplicação usam JSON, ID de correlação próprio e allowlist: rota-modelo, método, status e duração; não registrar URL bruta, token, cookie, e-mail, GPS ou corpo. Mensagens internas do Next podem usar formato próprio.
 
 `scripts/` contém infraestrutura local; `supabase/` sua configuração; `infrastructure/` contém Docker/Compose; `Docs/` mantém PRD/arquitetura monolíticos, stories e evidências. O repositório Git usa o remoto `origin` com a conta dedicada do projeto; push e publicação continuam operações explícitas de `@devops`. Preserve os arquivos existentes das ferramentas AIOX.

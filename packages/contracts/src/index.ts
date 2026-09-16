@@ -17,6 +17,134 @@ export const meResponseSchema = z.object({
 export type MeResponse = z.infer<typeof meResponseSchema>;
 export const mePath = '/api/v1/me';
 
+export const routesPath = '/api/v1/routes';
+export const myTodayRoutePath = '/api/v1/me/routes/today';
+export const routePath = (routeId: string) => `${routesPath}/${routeId}`;
+export const routePublishPath = (routeId: string) => `${routePath(routeId)}/publish`;
+
+export const routeErrorCodeSchema = z.enum([
+  'AUTH_REQUIRED',
+  'FORBIDDEN',
+  'NOT_FOUND',
+  'VALIDATION_FAILED',
+  'VERSION_CONFLICT',
+  'DEPENDENCY_UNAVAILABLE',
+  'INTERNAL_ERROR',
+]);
+export type RouteErrorCode = z.infer<typeof routeErrorCodeSchema>;
+
+export const routeStopInputSchema = z.object({
+  clientId: z.uuid(),
+  plannedOrder: z.number().int().positive().max(50),
+  priority: z.number().int().min(0).max(9),
+}).strict();
+
+export const createRouteDraftRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  serviceDate: z.iso.date(),
+  sellerId: z.uuid(),
+  stops: z.array(routeStopInputSchema).min(1).max(50),
+}).strict().superRefine(({ stops }, context) => {
+  const clients = new Set<string>();
+  const orders = new Set<number>();
+  stops.forEach((stop, index) => {
+    if (clients.has(stop.clientId)) {
+      context.addIssue({ code: 'custom', path: ['stops', index, 'clientId'], message: 'Cliente repetido na rota.' });
+    }
+    if (orders.has(stop.plannedOrder)) {
+      context.addIssue({ code: 'custom', path: ['stops', index, 'plannedOrder'], message: 'Ordem planejada repetida.' });
+    }
+    clients.add(stop.clientId);
+    orders.add(stop.plannedOrder);
+  });
+});
+export type CreateRouteDraftRequest = z.infer<typeof createRouteDraftRequestSchema>;
+
+export const routeDraftStopSchema = routeStopInputSchema.extend({
+  routeVersionStopId: z.uuid(),
+}).strict();
+export const routeDraftSchema = z.object({
+  schemaVersion: z.literal(1),
+  routeId: z.uuid(),
+  routeVersionId: z.uuid(),
+  versionNumber: z.number().int().positive(),
+  expectedVersion: z.number().int().positive(),
+  serviceDate: z.iso.date(),
+  sellerId: z.uuid(),
+  status: z.literal('draft'),
+  stops: z.array(routeDraftStopSchema).min(1).max(50),
+}).strict();
+export type RouteDraft = z.infer<typeof routeDraftSchema>;
+
+export const publishRouteRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  expectedVersion: z.number().int().positive(),
+}).strict();
+export type PublishRouteRequest = z.infer<typeof publishRouteRequestSchema>;
+
+export const routePublicationSchema = z.object({
+  schemaVersion: z.literal(1),
+  routeId: z.uuid(),
+  routeVersionId: z.uuid(),
+  versionNumber: z.number().int().positive(),
+  expectedVersion: z.number().int().positive(),
+  status: z.literal('published'),
+  publishedBy: z.uuid(),
+  publishedAt: z.iso.datetime({ offset: true }),
+  stopCount: z.number().int().positive().max(50),
+}).strict();
+export type RoutePublication = z.infer<typeof routePublicationSchema>;
+
+const nullableDecimalSchema = z.string().regex(/^-?\d+(\.\d+)?$/).nullable();
+export const routeSellerSnapshotSchema = z.object({
+  id: z.uuid(),
+  displayName: z.string().trim().min(1).max(120),
+}).strict();
+export const routeClientSnapshotSchema = z.object({
+  id: z.uuid(),
+  externalReference: z.string().trim().min(1).max(120).nullable(),
+  name: z.string().trim().min(1).max(160),
+  address: z.string().trim().min(1).max(300),
+  latitude: nullableDecimalSchema,
+  longitude: nullableDecimalSchema,
+  portfolioReference: z.string().trim().min(1).max(120).nullable(),
+}).strict();
+export const canonicalRouteStopSchema = z.object({
+  routeVersionStopId: z.uuid(),
+  plannedOrder: z.number().int().positive().max(50),
+  executionOrder: z.number().int().positive().max(50),
+  priority: z.number().int().min(0).max(9),
+  status: z.literal('pending'),
+  executionVersion: z.number().int().positive(),
+  client: routeClientSnapshotSchema,
+}).strict();
+export const canonicalRouteSchema = z.object({
+  schemaVersion: z.literal(1),
+  routeId: z.uuid(),
+  routeVersionId: z.uuid(),
+  versionNumber: z.number().int().positive(),
+  serviceDate: z.iso.date(),
+  status: z.literal('published'),
+  publishedAt: z.iso.datetime({ offset: true }),
+  seller: routeSellerSnapshotSchema,
+  stops: z.array(canonicalRouteStopSchema).min(1).max(50),
+}).strict();
+export type CanonicalRoute = z.infer<typeof canonicalRouteSchema>;
+
+export const routeTodayResponseSchema = z.discriminatedUnion('availability', [
+  z.object({
+    schemaVersion: z.literal(1),
+    availability: z.literal('empty'),
+    serviceDate: z.iso.date(),
+  }).strict(),
+  z.object({
+    schemaVersion: z.literal(1),
+    availability: z.literal('available'),
+    route: canonicalRouteSchema,
+  }).strict(),
+]);
+export type RouteTodayResponse = z.infer<typeof routeTodayResponseSchema>;
+
 export const apiErrorResponseSchema = z.object({
   error: z.object({
     code: z.string().min(1),

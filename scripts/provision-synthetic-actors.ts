@@ -3,9 +3,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { configureLocalIdentityEnvironment } from './local-identity-environment';
 import { root, run, supabaseBinary, type Run } from './process';
+import { syntheticClientIds } from '@cirne/domain';
 
 export const actorKeys = ['administrator', 'seller_a', 'seller_b', 'manager_a', 'blocked'] as const;
 export type ActorKey = (typeof actorKeys)[number];
+export { syntheticClientIds };
 
 type StoredActor = {
   email: string;
@@ -293,6 +295,16 @@ export async function provisionSyntheticActors(options: {
       seller_user_id: actors.seller_a.id,
     });
   }
+
+  await restWrite(fetcher, status, 'clients?on_conflict=id', syntheticClientIds.map((id, index) => ({
+    id,
+    external_reference: `SYN-${String(index + 1).padStart(3, '0')}`,
+    name: `Cliente Sintético ${String(index + 1).padStart(2, '0')}`,
+    address: `Endereço sintético ${String(index + 1).padStart(2, '0')}`,
+    portfolio_reference: 'CARTEIRA-SINTETICA-A',
+    status: 'active',
+    archived_at: null,
+  })), 'resolution=merge-duplicates,return=minimal');
 
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });

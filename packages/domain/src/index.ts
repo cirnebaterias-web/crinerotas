@@ -1,4 +1,6 @@
 import {
+  canonicalRouteSchema,
+  createRouteDraftRequestSchema,
   maxSyncBatchEvents,
   localRouteBundleSchema,
   localSessionSchema,
@@ -9,10 +11,49 @@ import {
   type LocalVisitDraft,
   type OfflineOutboxEvent,
   type OfflinePartition,
+  type CanonicalRoute,
+  type CreateRouteDraftRequest,
+  routeTodayResponseSchema,
   syncCommandSchema,
   type SyncCommand,
   type SyncErrorCode,
 } from '@cirne/contracts';
+
+export class RouteDomainError extends Error {
+  constructor(public readonly code: 'VALIDATION_FAILED' | 'VERSION_CONFLICT', message: string) {
+    super(message);
+  }
+}
+
+export function normalizeRouteDraft(input: CreateRouteDraftRequest): CreateRouteDraftRequest {
+  const parsed = createRouteDraftRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RouteDomainError('VALIDATION_FAILED', 'Rota em rascunho inválida.');
+  return {
+    ...parsed.data,
+    stops: [...parsed.data.stops].sort((left, right) => left.plannedOrder - right.plannedOrder),
+  };
+}
+
+export function assertExpectedRouteVersion(currentVersion: number, expectedVersion: number) {
+  if (!Number.isInteger(currentVersion) || currentVersion < 1 ||
+      !Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new RouteDomainError('VALIDATION_FAILED', 'Versão de rota inválida.');
+  }
+  if (currentVersion !== expectedVersion) {
+    throw new RouteDomainError('VERSION_CONFLICT', 'A versão enviada conflita com o servidor.');
+  }
+}
+
+export function toRouteTodayResponse(route: CanonicalRoute | null, serviceDate: string) {
+  if (route === null) {
+    return routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'empty', serviceDate });
+  }
+  const parsedRoute = canonicalRouteSchema.parse(route);
+  if (parsedRoute.serviceDate !== serviceDate) {
+    throw new RouteDomainError('VALIDATION_FAILED', 'A rota não corresponde à data solicitada.');
+  }
+  return routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'available', route: parsedRoute });
+}
 
 export const localAccessWindowMs = 24 * 60 * 60 * 1_000;
 
@@ -110,6 +151,11 @@ export const syntheticRouteIds = {
   firstStopId: '44444444-4444-4444-8444-444444444441',
   secondStopId: '44444444-4444-4444-8444-444444444442',
 } as const;
+
+export const syntheticClientIds = [
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000002',
+] as const;
 
 export function createSyntheticRouteBundle(
   partition: OfflinePartition,

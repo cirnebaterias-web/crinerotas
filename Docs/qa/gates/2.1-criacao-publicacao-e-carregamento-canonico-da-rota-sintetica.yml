@@ -1,0 +1,48 @@
+schema: 1
+story: '2.1'
+story_title: 'Criação, publicação e carregamento canônico da rota sintética'
+gate: PASS
+status_reason: 'Os oito critérios estão rastreados e verdes em contratos, domínio, pgTAP, BFF, CLI e integração real. O QA corrigiu fuso operacional implícito, isolamento dos testes e imutabilidade de versões superseded; duas revisões automáticas finais terminaram sem achados.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'working-tree-git-digest:37831ea6b25df465118864dd553f5716ee532719'
+updated: '2026-09-16T12:26:13Z'
+
+top_issues: []
+waiver:
+  active: false
+quality_score: 100
+expires: '2026-09-30T12:26:13Z'
+
+evidence:
+  tests_reviewed: 243
+  risks_identified: 5
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8]
+    ac_gaps: []
+
+risk_summary:
+  highest_residual_score: 3
+  blocking_risks: 0
+  notes: 'Autorização por escopo, concorrência, snapshots, histórico, dia operacional e vazamento de dados foram mitigados por contratos estritos, transações, RLS forçada, controle otimista, fuso explícito e testes negativos em camadas.'
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Identidade caller-scoped, capacidades atuais, escopo gerencial, wrappers estreitos, search_path vazio, RLS forçada, CSRF para cookie e logs/CLI sem tokens ou snapshots foram verificados.'
+  performance:
+    status: PASS
+    notes: 'Rotas estão limitadas a 50 paradas, consultas críticas possuem índices e chamadas externas usam timeouts de 10 ou 30 segundos; adequado ao volume sintético deste incremento.'
+  reliability:
+    status: PASS
+    notes: 'Criação/publicação/auditoria são transacionais; versão esperada retorna conflito; rollback/reaplicação, execução repetida da CLI e pgTAP após integração foram comprovados.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos, domínio, aplicação, adaptador Supabase, HTTP e CLI mantêm fronteiras explícitas; configuração de fuso, README, evidência e testes são reproduzíveis.'
+
+recommendations:
+  immediate: []
+  future:
+    - action: 'Confirmar o valor de OPERATIONAL_TIME_ZONE no ambiente do piloto antes de qualquer deploy com dados reais.'
+      refs: ['README.md', 'Docs/stories/2.1.story.md']
+    - action: 'Conectar o agregado canônico ao IndexedDB e à UI somente em story posterior, preservando os bloqueios AB-12, AB-13 e AB-15.'
+      refs: ['Docs/stories/2.1.story.md', 'Docs/architecture.md']

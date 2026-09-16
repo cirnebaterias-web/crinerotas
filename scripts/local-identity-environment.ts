@@ -27,15 +27,19 @@ export function mergeLocalIdentityEnvironment(
     throw new Error('Remova a chave privilegiada de apps/web/.env.local antes de continuar.');
   }
 
-  const keptLines = existing.replaceAll('\r\n', '\n').split('\n').filter((line) =>
+  const normalizedLines = existing.replaceAll('\r\n', '\n').split('\n');
+  const hasOperationalTimeZone = normalizedLines.some((line) =>
+    /^\s*OPERATIONAL_TIME_ZONE\s*=/.test(line));
+  const keptLines = normalizedLines.filter((line) =>
     !/^\s*SUPABASE_(?:PUBLIC_URL|PUBLISHABLE_KEY)\s*=/.test(line));
   while (keptLines.at(-1) === '') keptLines.pop();
-  return `${keptLines.join('\n')}\nSUPABASE_PUBLIC_URL=${url.origin}\n` +
+  return `${keptLines.join('\n')}\n${hasOperationalTimeZone ? '' : 'OPERATIONAL_TIME_ZONE=America/Sao_Paulo\n'}` +
+    `SUPABASE_PUBLIC_URL=${url.origin}\n` +
     `SUPABASE_PUBLISHABLE_KEY=${publishableKey}\n`;
 }
 
 export async function configureLocalIdentityEnvironment(values: PublicIdentityEnvironment) {
-  let existing = 'APP_BASE_URL=http://127.0.0.1:3000\nLOG_LEVEL=info\n';
+  let existing = 'APP_BASE_URL=http://127.0.0.1:3000\nOPERATIONAL_TIME_ZONE=America/Sao_Paulo\nLOG_LEVEL=info\n';
   try {
     existing = await readFile(localEnvironmentPath, 'utf8');
   } catch (error) {

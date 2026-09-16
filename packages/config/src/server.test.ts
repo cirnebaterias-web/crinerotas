@@ -5,12 +5,26 @@ import * as publicConfig from './public';
 describe('configuration boundaries', () => {
   it('requires a valid origin without exposing invalid inputs', () => {
     for (const APP_BASE_URL of [undefined, 'secret-value', 'ftp://example.com', 'https://user:password@example.com', 'http://localhost/path', 'http://localhost?token=secret']) {
-      expect(() => readServerConfig({ APP_BASE_URL })).toThrow('Configuração inválida: APP_BASE_URL.');
+      expect(() => readServerConfig({ APP_BASE_URL, OPERATIONAL_TIME_ZONE: 'America/Sao_Paulo' }))
+        .toThrow('Configuração inválida: APP_BASE_URL.');
     }
   });
+  it('requires an explicit valid IANA operational time zone', () => {
+    expect(() => readServerConfig({ APP_BASE_URL: 'http://localhost:3000' }))
+      .toThrow('OPERATIONAL_TIME_ZONE');
+    expect(() => readServerConfig({
+      APP_BASE_URL: 'http://localhost:3000',
+      OPERATIONAL_TIME_ZONE: 'synthetic-invalid-zone',
+    })).toThrow('OPERATIONAL_TIME_ZONE');
+  });
   it('validates log level and discards unrelated privileged configuration', () => {
-    expect(() => readServerConfig({ APP_BASE_URL: 'http://localhost:3000', LOG_LEVEL: 'secret' })).toThrow('LOG_LEVEL');
-    expect(readServerConfig({ APP_BASE_URL: 'http://localhost:3000', SUPABASE_SECRET_KEY: 'private' })).toEqual({ APP_BASE_URL: 'http://localhost:3000', NODE_ENV: 'development', LOG_LEVEL: 'info' });
+    const base = { APP_BASE_URL: 'http://localhost:3000', OPERATIONAL_TIME_ZONE: 'America/Sao_Paulo' };
+    expect(() => readServerConfig({ ...base, LOG_LEVEL: 'secret' })).toThrow('LOG_LEVEL');
+    expect(readServerConfig({ ...base, SUPABASE_SECRET_KEY: 'private' })).toEqual({
+      ...base,
+      NODE_ENV: 'development',
+      LOG_LEVEL: 'info',
+    });
   });
   it('public exports do not expose server configuration', () => {
     expect(Object.keys(publicConfig)).toEqual(['productName']);

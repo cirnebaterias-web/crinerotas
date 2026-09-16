@@ -7,8 +7,17 @@ const httpOrigin = z.string().url().refine((value) => {
       url.pathname === '/' && !url.search && !url.hash;
   } catch { return false; }
 });
+const ianaTimeZone = z.string().trim().min(1).refine((value) => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+});
 const schema = z.object({
   APP_BASE_URL: httpOrigin,
+  OPERATIONAL_TIME_ZONE: ianaTimeZone,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });

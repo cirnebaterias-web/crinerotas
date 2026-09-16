@@ -12,6 +12,7 @@ services:
       - "127.0.0.1:${CIRNE_WEB_PORT:-3000}:3000"
     environment:
       APP_BASE_URL: "http://127.0.0.1:${CIRNE_WEB_PORT:-3000}"
+      OPERATIONAL_TIME_ZONE: "${OPERATIONAL_TIME_ZONE:-America/Sao_Paulo}"
       LOG_LEVEL: "${CIRNE_LOG_LEVEL:-info}"
     read_only: true
     tmpfs:
