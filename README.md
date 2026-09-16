@@ -116,7 +116,7 @@ O comando envia somente IDs e conteúdo sintéticos e comprova três passos: pri
 
 ## Verificar a rota canônica sintética pela CLI
 
-Com Supabase e aplicação iniciados, carregue os tokens sintéticos do Gestor A e do Vendedor A no ambiente. O comando cria o rascunho, publica a versão 1 e confirma que o vendedor consegue carregar a rota do dia:
+Com Supabase e aplicação iniciados, carregue os tokens sintéticos do Gestor A e do Vendedor A no ambiente. O comando cria ou reutiliza a rota publicada do dia, reordena as paradas pendentes por ordem planejada decrescente e confirma a leitura canônica do Vendedor:
 
 ```powershell
 $actors = Get-Content .local/identity-actors.json | ConvertFrom-Json
@@ -127,7 +127,9 @@ Remove-Item Env:CIRNE_MANAGER_ACCESS_TOKEN
 Remove-Item Env:CIRNE_SELLER_ACCESS_TOKEN
 ```
 
-A saída contém somente o ID e a versão da rota, status, quantidade de paradas e os três checks do round-trip. Tokens e snapshots de cliente não são exibidos. O diagnóstico usa exclusivamente os dois clientes sintéticos provisionados pelo reset local; não use dados reais. Como alternativa, forneça os dois tokens em um único JSON por stdin, sem combiná-los com as variáveis de ambiente.
+A saída contém o ID e a versão publicada da rota, `executionVersion`, status, quantidade de paradas e os checks do round-trip. `checks.reordered` informa `applied` quando houve mudança ou `already_canonical` na repetição, sem novo incremento nem auditoria. `created` e `published` confirmam que o agregado existe e está publicado, inclusive quando reutilizado. Tokens e snapshots de cliente não são exibidos. O diagnóstico usa exclusivamente os dois clientes sintéticos provisionados pelo reset local; não use dados reais. Como alternativa, forneça os dois tokens em um único JSON por stdin, sem combiná-los com as variáveis de ambiente.
+
+As leituras canônicas usam `schemaVersion: 2`. A reordenação usa `PUT /api/v1/routes/{routeId}/execution-order`, com `schemaVersion: 1`, `expectedVersion` do agregado e `pendingStopIds` contendo exatamente todas as paradas pendentes na ordem desejada. A composição publicada e `plannedOrder` permanecem imutáveis; conflito de versão retorna `409`. Para verificar rollback/reaplicação sem persistir mudanças no banco local, execute `node --import tsx scripts/verify-route-execution-rollback.ts` após `db:reset` e novamente após a integração.
 
 Para a prova no navegador, gere o build de produção e execute o Playwright:
 
@@ -148,7 +150,7 @@ npm run test:e2e
 npm run test:integration
 ```
 
-`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, IndexedDB, motor de sincronização, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa 122 verificações pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio e CLIs como processos reais. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
+`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, IndexedDB, motor de sincronização, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa a suíte pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio, concorrência e CLIs como processos reais. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
 
 CI em `.github/workflows/ci.yaml`: gates, navegador offline, integração e smoke da imagem com Actions por SHA, permissão de leitura, sem deploy. O remoto existe, mas nenhuma publicação desta story é automática. Evidências concluídas ficam em `Docs/qa/`.
 

@@ -4,8 +4,11 @@ import {
   createRouteDraftRequestSchema,
   myTodayRoutePath,
   routeDraftSchema,
+  routeExecutionOrderPath,
   routePublishPath,
   routePublicationSchema,
+  reorderRouteExecutionRequestSchema,
+  reorderRouteExecutionResultSchema,
   routeTodayResponseSchema,
   routesPath,
 } from '@cirne/contracts';
@@ -17,7 +20,7 @@ async function requestJson(
   origin: URL,
   path: string,
   token: string,
-  init: { method?: 'GET' | 'POST'; body?: unknown },
+  init: { method?: 'GET' | 'POST' | 'PUT'; body?: unknown },
   request: typeof fetch,
 ) {
   let response: Response;
@@ -54,12 +57,14 @@ export interface RouteRoundTripResult {
   status: 'ok';
   routeId: string;
   routeVersion: number;
+  executionVersion: number;
   routeStatus: 'published';
   stopCount: number;
   checks: {
     created: true;
     published: true;
     loadedBySeller: true;
+    reordered: 'applied' | 'already_canonical';
   };
 }
 
@@ -79,6 +84,7 @@ export async function runRouteRoundTrip(
     throw new Error('O token de Gestor não possui capacidade de planejamento de rota.');
   }
   if (!seller.roles.includes('seller') || !seller.capabilities.includes('route.read_self') ||
+      !seller.capabilities.includes('route.reorder_self') ||
       !manager.scopeIds.includes(seller.id)) {
     throw new Error('O Vendedor não está ativo ou não pertence ao escopo do Gestor.');
   }
@@ -114,57 +120,105 @@ export async function runRouteRoundTrip(
     expected?: { routeId: string; routeVersionId: string; versionNumber: number },
   ) => {
     const route = canonicalRouteSchema.parse(input);
-    const loadedStops = route.stops.map(({ client, plannedOrder, priority }) => ({
-      clientId: client.id,
-      plannedOrder,
-      priority,
-    }));
+    const loadedStops = route.stops
+      .map(({ client, plannedOrder, priority }) => ({ clientId: client.id, plannedOrder, priority }))
+      .sort((left, right) => left.plannedOrder - right.plannedOrder);
+    const executionOrders = route.stops.map(({ executionOrder }) => executionOrder);
     if (route.serviceDate !== serviceDate || route.seller.id !== seller.id ||
         JSON.stringify(loadedStops) !== JSON.stringify(expectedStops) ||
+        executionOrders.some((value, index) => index > 0 && executionOrders[index - 1]! >= value) ||
         (expected && (route.routeId !== expected.routeId ||
           route.routeVersionId !== expected.routeVersionId || route.versionNumber !== expected.versionNumber))) {
       throw new Error('O carregamento do Vendedor diverge da versão publicada.');
     }
     return route;
   };
-  const asResult = (route: ReturnType<typeof validateLoadedRoute>): RouteRoundTripResult => ({
+  const asResult = (
+    route: ReturnType<typeof validateLoadedRoute>,
+    reordered: RouteRoundTripResult['checks']['reordered'],
+  ): RouteRoundTripResult => ({
     status: 'ok',
     routeId: route.routeId,
     routeVersion: route.versionNumber,
+    executionVersion: route.executionVersion,
     routeStatus: route.status,
     stopCount: route.stops.length,
-    checks: { created: true, published: true, loadedBySeller: true },
+    checks: { created: true, published: true, loadedBySeller: true, reordered },
   });
 
-  if (existing.availability === 'available') return asResult(validateLoadedRoute(existing.route));
+  let loadedRoute: ReturnType<typeof validateLoadedRoute>;
+  if (existing.availability === 'available') {
+    loadedRoute = validateLoadedRoute(existing.route);
+  } else {
+    const draft = routeDraftSchema.parse(await requestJson(
+      origin,
+      routesPath,
+      managerAccessToken,
+      { method: 'POST', body: command },
+      request,
+    ));
+    if (draft.sellerId !== seller.id || draft.serviceDate !== serviceDate) {
+      throw new Error('O rascunho retornado não corresponde ao comando enviado.');
+    }
 
-  const draft = routeDraftSchema.parse(await requestJson(
-    origin,
-    routesPath,
-    managerAccessToken,
-    { method: 'POST', body: command },
-    request,
-  ));
-  if (draft.sellerId !== seller.id || draft.serviceDate !== serviceDate) {
-    throw new Error('O rascunho retornado não corresponde ao comando enviado.');
+    const publication = routePublicationSchema.parse(await requestJson(
+      origin,
+      routePublishPath(draft.routeId),
+      managerAccessToken,
+      { method: 'POST', body: { schemaVersion: 1, expectedVersion: draft.expectedVersion } },
+      request,
+    ));
+    if (publication.routeId !== draft.routeId || publication.routeVersionId !== draft.routeVersionId) {
+      throw new Error('A publicação retornada não corresponde ao rascunho criado.');
+    }
+
+    const loaded = await loadToday();
+    if (loaded.availability !== 'available') throw new Error('A rota publicada não foi carregada pelo Vendedor.');
+    loadedRoute = validateLoadedRoute(loaded.route, {
+      routeId: draft.routeId,
+      routeVersionId: draft.routeVersionId,
+      versionNumber: publication.versionNumber,
+    });
   }
 
-  const publication = routePublicationSchema.parse(await requestJson(
+  const pendingStopIds = [...loadedRoute.stops]
+    .filter(({ status }) => status === 'pending')
+    .sort((left, right) => right.plannedOrder - left.plannedOrder ||
+      right.routeVersionStopId.localeCompare(left.routeVersionStopId))
+    .map(({ routeVersionStopId }) => routeVersionStopId);
+  const reorderCommand = reorderRouteExecutionRequestSchema.parse({
+    schemaVersion: 1,
+    expectedVersion: loadedRoute.executionVersion,
+    pendingStopIds,
+  });
+  const reordered = reorderRouteExecutionResultSchema.parse(await requestJson(
     origin,
-    routePublishPath(draft.routeId),
-    managerAccessToken,
-    { method: 'POST', body: { schemaVersion: 1, expectedVersion: draft.expectedVersion } },
+    routeExecutionOrderPath(loadedRoute.routeId),
+    sellerAccessToken,
+    { method: 'PUT', body: reorderCommand },
     request,
   ));
-  if (publication.routeId !== draft.routeId || publication.routeVersionId !== draft.routeVersionId) {
-    throw new Error('A publicação retornada não corresponde ao rascunho criado.');
+  if (reordered.routeId !== loadedRoute.routeId ||
+      reordered.routeVersionId !== loadedRoute.routeVersionId ||
+      reordered.executionVersion !== loadedRoute.executionVersion + (reordered.changed ? 1 : 0) ||
+      reordered.pendingStopIds.length !== pendingStopIds.length ||
+      reordered.pendingStopIds.some((stopId, index) => stopId !== pendingStopIds[index])) {
+    throw new Error('A reordenação retornada diverge do comando enviado.');
   }
 
-  const loaded = await loadToday();
-  if (loaded.availability !== 'available') throw new Error('A rota publicada não foi carregada pelo Vendedor.');
-  return asResult(validateLoadedRoute(loaded.route, {
-    routeId: draft.routeId,
-    routeVersionId: draft.routeVersionId,
-    versionNumber: publication.versionNumber,
-  }));
+  const confirmed = await loadToday();
+  if (confirmed.availability !== 'available') throw new Error('A rota reordenada deixou de estar disponível.');
+  const confirmedRoute = validateLoadedRoute(confirmed.route, {
+    routeId: loadedRoute.routeId,
+    routeVersionId: loadedRoute.routeVersionId,
+    versionNumber: loadedRoute.versionNumber,
+  });
+  const confirmedPendingStops = confirmedRoute.stops.filter(({ status }) => status === 'pending');
+  if (confirmedRoute.executionVersion !== reordered.executionVersion ||
+      confirmedPendingStops.length !== pendingStopIds.length ||
+      confirmedPendingStops
+        .some((stop, index) => stop.routeVersionStopId !== pendingStopIds[index])) {
+    throw new Error('A leitura canônica não confirmou a ordem de execução solicitada.');
+  }
+  return asResult(confirmedRoute, reordered.changed ? 'applied' : 'already_canonical');
 }

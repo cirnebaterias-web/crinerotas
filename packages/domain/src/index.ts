@@ -14,6 +14,8 @@ import {
   type CanonicalRoute,
   type CreateRouteDraftRequest,
   routeTodayResponseSchema,
+  reorderRouteExecutionRequestSchema,
+  type ReorderRouteExecutionRequest,
   syncCommandSchema,
   type SyncCommand,
   type SyncErrorCode,
@@ -44,15 +46,28 @@ export function assertExpectedRouteVersion(currentVersion: number, expectedVersi
   }
 }
 
+export function normalizePendingStopOrder(
+  input: ReorderRouteExecutionRequest,
+): ReorderRouteExecutionRequest {
+  const parsed = reorderRouteExecutionRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new RouteDomainError('VALIDATION_FAILED', 'Ordem de execução inválida.');
+  }
+  return {
+    ...parsed.data,
+    pendingStopIds: [...parsed.data.pendingStopIds],
+  };
+}
+
 export function toRouteTodayResponse(route: CanonicalRoute | null, serviceDate: string) {
   if (route === null) {
-    return routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'empty', serviceDate });
+    return routeTodayResponseSchema.parse({ schemaVersion: 2, availability: 'empty', serviceDate });
   }
   const parsedRoute = canonicalRouteSchema.parse(route);
   if (parsedRoute.serviceDate !== serviceDate) {
     throw new RouteDomainError('VALIDATION_FAILED', 'A rota não corresponde à data solicitada.');
   }
-  return routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'available', route: parsedRoute });
+  return routeTodayResponseSchema.parse({ schemaVersion: 2, availability: 'available', route: parsedRoute });
 }
 
 export const localAccessWindowMs = 24 * 60 * 60 * 1_000;

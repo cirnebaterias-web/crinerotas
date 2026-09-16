@@ -13,6 +13,7 @@ import {
   nextRetryDelayMs,
   orderOutboxEvents,
   normalizeRouteDraft,
+  normalizePendingStopOrder,
   toRouteTodayResponse,
   toSyncCommand,
 } from './index';
@@ -39,10 +40,26 @@ it('checks optimistic route versions and creates a stable empty route response',
   expect(() => assertExpectedRouteVersion(0, 0)).toThrow('Versão de rota inválida.');
   expect(assertExpectedRouteVersion(2, 2)).toBeUndefined();
   expect(toRouteTodayResponse(null, '2026-09-15')).toEqual({
-    schemaVersion: 1,
+    schemaVersion: 2,
     availability: 'empty',
     serviceDate: '2026-09-15',
   });
+});
+
+it('validates aggregate execution order without sorting away the seller intent', () => {
+  const command = {
+    schemaVersion: 1 as const,
+    expectedVersion: 2,
+    pendingStopIds: [
+      '40000000-0000-4000-8000-000000000002',
+      '40000000-0000-4000-8000-000000000001',
+    ],
+  };
+  expect(normalizePendingStopOrder(command)).toEqual(command);
+  expect(() => normalizePendingStopOrder({
+    ...command,
+    pendingStopIds: [command.pendingStopIds[0]!, command.pendingStopIds[0]!],
+  })).toThrow('Ordem de execução inválida.');
 });
 
 const partition = {

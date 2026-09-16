@@ -21,6 +21,7 @@ export const routesPath = '/api/v1/routes';
 export const myTodayRoutePath = '/api/v1/me/routes/today';
 export const routePath = (routeId: string) => `${routesPath}/${routeId}`;
 export const routePublishPath = (routeId: string) => `${routePath(routeId)}/publish`;
+export const routeExecutionOrderPath = (routeId: string) => `${routePath(routeId)}/execution-order`;
 
 export const routeErrorCodeSchema = z.enum([
   'AUTH_REQUIRED',
@@ -95,6 +96,35 @@ export const routePublicationSchema = z.object({
 }).strict();
 export type RoutePublication = z.infer<typeof routePublicationSchema>;
 
+export const reorderRouteExecutionRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  expectedVersion: z.number().int().positive(),
+  pendingStopIds: z.array(z.uuid()).min(1).max(50).superRefine((stopIds, context) => {
+    const seen = new Set<string>();
+    stopIds.forEach((stopId, index) => {
+      if (seen.has(stopId)) {
+        context.addIssue({
+          code: 'custom',
+          path: [index],
+          message: 'Parada repetida na ordem de execução.',
+        });
+      }
+      seen.add(stopId);
+    });
+  }),
+}).strict();
+export type ReorderRouteExecutionRequest = z.infer<typeof reorderRouteExecutionRequestSchema>;
+
+export const reorderRouteExecutionResultSchema = z.object({
+  schemaVersion: z.literal(1),
+  routeId: z.uuid(),
+  routeVersionId: z.uuid(),
+  executionVersion: z.number().int().positive(),
+  changed: z.boolean(),
+  pendingStopIds: z.array(z.uuid()).min(1).max(50),
+}).strict();
+export type ReorderRouteExecutionResult = z.infer<typeof reorderRouteExecutionResultSchema>;
+
 const nullableDecimalSchema = z.string().regex(/^-?\d+(\.\d+)?$/).nullable();
 export const routeSellerSnapshotSchema = z.object({
   id: z.uuid(),
@@ -114,18 +144,19 @@ export const canonicalRouteStopSchema = z.object({
   plannedOrder: z.number().int().positive().max(50),
   executionOrder: z.number().int().positive().max(50),
   priority: z.number().int().min(0).max(9),
-  status: z.literal('pending'),
+  status: z.enum(['pending', 'in_visit', 'completed', 'not_visited']),
   executionVersion: z.number().int().positive(),
   client: routeClientSnapshotSchema,
 }).strict();
 export const canonicalRouteSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   routeId: z.uuid(),
   routeVersionId: z.uuid(),
   versionNumber: z.number().int().positive(),
   serviceDate: z.iso.date(),
   status: z.literal('published'),
   publishedAt: z.iso.datetime({ offset: true }),
+  executionVersion: z.number().int().positive(),
   seller: routeSellerSnapshotSchema,
   stops: z.array(canonicalRouteStopSchema).min(1).max(50),
 }).strict();
@@ -133,12 +164,12 @@ export type CanonicalRoute = z.infer<typeof canonicalRouteSchema>;
 
 export const routeTodayResponseSchema = z.discriminatedUnion('availability', [
   z.object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     availability: z.literal('empty'),
     serviceDate: z.iso.date(),
   }).strict(),
   z.object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     availability: z.literal('available'),
     route: canonicalRouteSchema,
   }).strict(),

@@ -5,11 +5,13 @@ import type {
   RouteDraft,
   RoutePublication,
   RouteTodayResponse,
+  ReorderRouteExecutionResult,
 } from '@cirne/contracts';
 import {
   createRouteDraft,
   getMyRouteForDate,
   publishRoute,
+  reorderRouteExecution,
   type RouteRepository,
 } from './service';
 
@@ -56,9 +58,17 @@ function repository(overrides: Partial<RouteRepository> = {}): RouteRepository {
     publish: vi.fn(async () => publication),
     getById: vi.fn(async () => ({} as CanonicalRoute)),
     getForDate: vi.fn(async (serviceDate): Promise<RouteTodayResponse> => ({
-      schemaVersion: 1,
+      schemaVersion: 2,
       availability: 'empty',
       serviceDate,
+    })),
+    reorder: vi.fn(async (routeId, request): Promise<ReorderRouteExecutionResult> => ({
+      schemaVersion: 1,
+      routeId,
+      routeVersionId: draft.routeVersionId,
+      executionVersion: request.expectedVersion + 1,
+      changed: true,
+      pendingStopIds: request.pendingStopIds,
     })),
     ...overrides,
   };
@@ -93,9 +103,25 @@ describe('route application services', () => {
 
   it('returns a stable empty state for the injected service date', async () => {
     expect(await getMyRouteForDate('2026-09-15', repository())).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       availability: 'empty',
       serviceDate: '2026-09-15',
     });
+  });
+
+  it('validates and forwards one aggregate execution order command with audit context', async () => {
+    const target = repository();
+    const request = {
+      schemaVersion: 1 as const,
+      expectedVersion: 2,
+      pendingStopIds: [
+        '40000000-0000-4000-8000-000000000002',
+        '40000000-0000-4000-8000-000000000001',
+      ],
+    };
+    const context = { requestId: '60000000-0000-4000-8000-000000000001', origin: 'cli' as const };
+    await expect(reorderRouteExecution(draftFor().routeId, request, context, target))
+      .resolves.toMatchObject({ changed: true, executionVersion: 3 });
+    expect(target.reorder).toHaveBeenCalledWith(draftFor().routeId, request, context);
   });
 });

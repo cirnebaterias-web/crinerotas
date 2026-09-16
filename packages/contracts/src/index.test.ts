@@ -12,6 +12,8 @@ import {
   offlineOutboxEventSchema,
   offlineOutboxStatusSchema,
   publishRouteRequestSchema,
+  reorderRouteExecutionRequestSchema,
+  reorderRouteExecutionResultSchema,
   routeDraftSchema,
   routePublicationSchema,
   routeTodayResponseSchema,
@@ -74,13 +76,14 @@ it('keeps draft, publication and canonical route responses strict', () => {
   expect(routePublicationSchema.parse(publication)).toEqual(publication);
 
   const route = {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     routeId: draft.routeId,
     routeVersionId: draft.routeVersionId,
     versionNumber: 1,
     serviceDate: routeRequest.serviceDate,
     status: 'published' as const,
     publishedAt: publication.publishedAt,
+    executionVersion: 2,
     seller: { id: routeRequest.sellerId, displayName: 'Vendedor A Sintético' },
     stops: draft.stops.map((stop, index) => ({
       routeVersionStopId: stop.routeVersionStopId,
@@ -101,14 +104,37 @@ it('keeps draft, publication and canonical route responses strict', () => {
     })),
   };
   expect(canonicalRouteSchema.parse(route)).toEqual(route);
-  expect(routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'available', route }))
-    .toEqual({ schemaVersion: 1, availability: 'available', route });
+  expect(routeTodayResponseSchema.parse({ schemaVersion: 2, availability: 'available', route }))
+    .toEqual({ schemaVersion: 2, availability: 'available', route });
   expect(routeTodayResponseSchema.parse({
-    schemaVersion: 1,
+    schemaVersion: 2,
     availability: 'empty',
     serviceDate: routeRequest.serviceDate,
-  })).toEqual({ schemaVersion: 1, availability: 'empty', serviceDate: routeRequest.serviceDate });
+  })).toEqual({ schemaVersion: 2, availability: 'empty', serviceDate: routeRequest.serviceDate });
   expect(canonicalRouteSchema.safeParse({ ...route, token: 'private' }).success).toBe(false);
+});
+
+it('validates a strict aggregate execution order command and result', () => {
+  const first = 'dddddddd-dddd-4ddd-8ddd-000000000001';
+  const second = 'dddddddd-dddd-4ddd-8ddd-000000000002';
+  const request = { schemaVersion: 1, expectedVersion: 2, pendingStopIds: [second, first] };
+  expect(reorderRouteExecutionRequestSchema.parse(request)).toEqual(request);
+  expect(reorderRouteExecutionRequestSchema.safeParse({
+    ...request,
+    pendingStopIds: [first, first],
+  }).success).toBe(false);
+  expect(reorderRouteExecutionRequestSchema.safeParse({ ...request, sellerId: routeRequest.sellerId }).success)
+    .toBe(false);
+
+  const result = {
+    schemaVersion: 1,
+    routeId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    routeVersionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    executionVersion: 3,
+    changed: true,
+    pendingStopIds: [second, first],
+  };
+  expect(reorderRouteExecutionResultSchema.parse(result)).toEqual(result);
 });
 
 it('rejects extra fields and incompatible health responses', () => {

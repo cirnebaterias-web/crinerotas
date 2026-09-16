@@ -4,9 +4,11 @@ import {
   routeErrorCodeSchema,
   routePublicationSchema,
   routeTodayResponseSchema,
+  reorderRouteExecutionResultSchema,
   type CreateRouteDraftRequest,
   type PublishRouteRequest,
   type RouteErrorCode,
+  type ReorderRouteExecutionRequest,
 } from '@cirne/contracts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { publicRouteMessage, RouteServiceFailure, type RouteRepository } from './service';
@@ -98,6 +100,28 @@ export class SupabaseRouteRepository implements RouteRepository {
     if (!parsed.success || (parsed.data.availability === 'empty'
       ? parsed.data.serviceDate !== serviceDate
       : parsed.data.route.serviceDate !== serviceDate)) {
+      throw unavailable();
+    }
+    return parsed.data;
+  }
+
+  async reorder(
+    routeId: string,
+    request: ReorderRouteExecutionRequest,
+    context: { requestId: string; origin: 'web' | 'pwa' | 'cli' },
+  ) {
+    const { data, error } = await resolveRpc(this.client.schema('api').rpc('reorder_route_execution', {
+      p_route_id: routeId,
+      p_command: request,
+      p_request_id: context.requestId,
+      p_origin: context.origin,
+    }).abortSignal(AbortSignal.timeout(30_000)));
+    if (error) throw mapDatabaseFailure(error.message);
+    const parsed = reorderRouteExecutionResultSchema.safeParse(data);
+    if (!parsed.success || parsed.data.routeId !== routeId ||
+        parsed.data.executionVersion !== request.expectedVersion + (parsed.data.changed ? 1 : 0) ||
+        parsed.data.pendingStopIds.length !== request.pendingStopIds.length ||
+        parsed.data.pendingStopIds.some((stopId, index) => stopId !== request.pendingStopIds[index])) {
       throw unavailable();
     }
     return parsed.data;

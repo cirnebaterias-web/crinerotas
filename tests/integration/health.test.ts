@@ -176,7 +176,7 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   expect(await sellerResponse.json()).toMatchObject({
     id: seller.id,
     roles: ['seller'],
-    capabilities: ['identity.read_self', 'route.read_self', 'sync.write_self'],
+    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'sync.write_self'],
     scopeIds: [seller.id],
     status: 'active',
   });
@@ -268,22 +268,42 @@ it('runs the synthetic route round-trip CLI without exposing tokens or client sn
       CIRNE_SELLER_ACCESS_TOKEN: seller.accessToken,
     },
   };
+  const beforeResponse = await fetch(`${origin}/api/v1/me/routes/today`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(beforeResponse.status).toBe(200);
+  const before = await beforeResponse.json() as {
+    availability: string;
+    route?: { executionVersion: number; stops: Array<{ plannedOrder: number }> };
+  };
+  const alreadyCanonical = before.route?.stops[0]?.plannedOrder === 3;
+  const expectedExecutionVersion = (before.route?.executionVersion ?? 2) + (alreadyCanonical ? 0 : 1);
   const result = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
-  const body = JSON.parse(result.stdout) as { routeId: string; stopCount: number; checks: object };
+  const body = JSON.parse(result.stdout) as {
+    routeId: string;
+    stopCount: number;
+    executionVersion: number;
+    checks: { reordered: string };
+  };
   publishedRouteId = body.routeId;
   expect(body).toMatchObject({
     status: 'ok',
     routeVersion: 1,
+    executionVersion: expectedExecutionVersion,
     routeStatus: 'published',
     stopCount: 2,
-    checks: { created: true, published: true, loadedBySeller: true },
+    checks: { created: true, published: true, loadedBySeller: true,
+      reordered: alreadyCanonical ? 'already_canonical' : 'applied' },
   });
   expect(result.stdout + result.stderr).not.toContain(manager.accessToken);
   expect(result.stdout + result.stderr).not.toContain(seller.accessToken);
   expect(result.stdout + result.stderr).not.toMatch(/Cliente Sintético|Endereço sintético|snapshot/i);
 
   const repeated = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
-  expect(JSON.parse(repeated.stdout)).toEqual(body);
+  expect(JSON.parse(repeated.stdout)).toEqual({
+    ...body,
+    checks: { ...body.checks, reordered: 'already_canonical' },
+  });
   expect(repeated.stdout + repeated.stderr).not.toContain(manager.accessToken);
   expect(repeated.stdout + repeated.stderr).not.toContain(seller.accessToken);
 });
@@ -298,9 +318,21 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
     headers: { Authorization: `Bearer ${seller.accessToken}` },
   });
   expect(ownRoute.status).toBe(200);
-  expect(await ownRoute.json()).toMatchObject({
+  const ownRouteBody = await ownRoute.json() as {
+    route: {
+      routeId: string;
+      executionVersion: number;
+      stops: Array<{ routeVersionStopId: string; status: string }>;
+    };
+  };
+  expect(ownRouteBody).toMatchObject({
     availability: 'available',
-    route: { routeId: publishedRouteId, seller: { id: seller.id }, status: 'published' },
+    route: {
+      routeId: publishedRouteId,
+      executionVersion: expect.any(Number),
+      seller: { id: seller.id },
+      status: 'published',
+    },
   });
   expect(ownRoute.headers.get('cache-control')).toContain('no-store');
 
@@ -321,6 +353,57 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
   });
   expect(managerRoute.status).toBe(200);
   expect(await managerRoute.json()).toMatchObject({ routeId: publishedRouteId, status: 'published' });
+
+  const competingOrder = [...ownRouteBody.route.stops]
+    .filter(({ status }) => status === 'pending')
+    .reverse()
+    .map(({ routeVersionStopId }) => routeVersionStopId);
+  const reorderBody = JSON.stringify({
+    schemaVersion: 1,
+    expectedVersion: ownRouteBody.route.executionVersion,
+    pendingStopIds: competingOrder,
+  });
+  for (const [accessToken, body, expectedStatus] of [
+    [sellerB.accessToken, reorderBody, 404],
+    [seller.accessToken, '{}', 422],
+    [seller.accessToken, JSON.stringify({ schemaVersion: 1,
+      expectedVersion: ownRouteBody.route.executionVersion,
+      pendingStopIds: [competingOrder[0], competingOrder[0]] }), 422],
+  ] as const) {
+    const rejected = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+      method: 'PUT', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body,
+    });
+    expect(rejected.status).toBe(expectedStatus);
+    expect(rejected.headers.get('cache-control')).toContain('no-store');
+  }
+  const [sellerReorder, managerReorder] = await Promise.all([
+    fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
+      body: reorderBody,
+    }),
+    fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${manager.accessToken}`, 'Content-Type': 'application/json' },
+      body: reorderBody,
+    }),
+  ]);
+  expect([sellerReorder.status, managerReorder.status].sort()).toEqual([200, 409]);
+  const successfulReorder = sellerReorder.ok ? sellerReorder : managerReorder;
+  const conflictedReorder = sellerReorder.ok ? managerReorder : sellerReorder;
+  expect(await successfulReorder.json()).toMatchObject({
+    changed: true, executionVersion: ownRouteBody.route.executionVersion + 1,
+  });
+  expect(await conflictedReorder.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+  const confirmed = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(confirmed.status).toBe(200);
+  const confirmedBody = await confirmed.json() as {
+    executionVersion: number; stops: Array<{ routeVersionStopId: string }>;
+  };
+  expect(confirmedBody.executionVersion).toBe(ownRouteBody.route.executionVersion + 1);
+  expect(confirmedBody.stops.map((stop) => stop.routeVersionStopId)).toEqual(competingOrder);
 
   const stalePublication = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/publish`, {
     method: 'POST',

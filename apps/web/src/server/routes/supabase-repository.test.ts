@@ -87,4 +87,30 @@ describe('SupabaseRouteRepository', () => {
       recoverable: true,
     });
   });
+
+  it('rejects a reorder result that does not preserve the requested pending order', async () => {
+    const routeId = '20000000-0000-4000-8000-000000000001';
+    const request = {
+      schemaVersion: 1 as const,
+      expectedVersion: 2,
+      pendingStopIds: ['40000000-0000-4000-8000-000000000001'],
+    };
+    const { repository, rpc } = clientReturning({
+      schemaVersion: 1,
+      routeId,
+      routeVersionId: '30000000-0000-4000-8000-000000000001',
+      executionVersion: 3,
+      changed: true,
+      pendingStopIds: ['40000000-0000-4000-8000-000000000002'],
+    });
+    await expect(repository.reorder(routeId, request, {
+      requestId: '60000000-0000-4000-8000-000000000001',
+      origin: 'cli',
+    })).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+    expect(rpc).toHaveBeenCalledWith('reorder_route_execution', expect.objectContaining({
+      p_route_id: routeId,
+      p_command: request,
+      p_origin: 'cli',
+    }));
+  });
 });
