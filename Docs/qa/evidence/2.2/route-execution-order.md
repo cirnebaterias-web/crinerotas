@@ -15,7 +15,7 @@ O banco valida identidade/capacidade antes de procurar a rota e escopo antes de 
 | `npm run db:reset` | PASS; migrações limpas e atores sintéticos provisionados |
 | `npm run lint` | PASS |
 | `npm run typecheck` | PASS |
-| `npm test` | PASS; 25 arquivos, 114 testes |
+| `npm test` | PASS; 25 arquivos, 116 testes após normalização de UUIDs em QA |
 | `npm run build` | PASS; endpoint de reordenação dinâmico |
 | `npm run db:test` | PASS; 4 arquivos, 182 testes, 59 específicos desta story |
 | `npm run test:integration` | PASS; 11 testes, incluindo duas execuções do CLI e disputa vendedor/gestor |
@@ -43,7 +43,9 @@ O comando legado `--prompt-only -t uncommitted` não existe na versão instalada
 
 O achado sugeriu alterar os checks `created`/`published` quando uma rota é reutilizada. Eles são checks de existência/publicação herdados do contrato operacional da Story 2.1, não contadores de mutações. A semântica foi explicitada no README; `reordered` já distingue mudança e no-op. Alterar esses campos nesta story quebraria a interface existente sem necessidade.
 
-As validações adicionais de segurança/CLI e o script de rollback foram incluídos durante a revisão. A revisão de QA deve considerar o commit final completo.
+As validações adicionais de segurança/CLI e o script de rollback foram incluídos durante a revisão. A rodada de QA com `coderabbit review --committed --base master --agent` cobriu os 22 arquivos do commit `51475c5` e concluiu com apenas um minor documental: atualizar a checklist para o comando efetivamente instalado. Nenhum crítico/alto.
+
+A revisão manual encontrou UUIDs equivalentes em caixa diferente sendo tratados como IDs distintos no contrato. A normalização para minúsculas passou a anteceder a detecção de duplicidade e o envio da rota ao repositório. Dois testes unitários e um caso HTTP de no-op com IDs em maiúsculas cobrem a correção. A revisão automática committed antecedeu essa correção; o parecer final inclui a inspeção manual do diff posterior e sua regressão executada.
 
 ## Definition of Done — autoavaliação dev
 

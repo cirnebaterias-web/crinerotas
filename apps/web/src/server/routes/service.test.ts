@@ -124,4 +124,14 @@ describe('route application services', () => {
       .resolves.toMatchObject({ changed: true, executionVersion: 3 });
     expect(target.reorder).toHaveBeenCalledWith(draftFor().routeId, request, context);
   });
+
+  it('normalizes route and stop UUIDs before comparing the canonical database result', async () => {
+    const target = repository();
+    const routeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
+    const stopId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
+    const request = { schemaVersion: 1 as const, expectedVersion: 2, pendingStopIds: [stopId.toUpperCase()] };
+    const context = { requestId: '60000000-0000-4000-8000-000000000001', origin: 'cli' as const };
+    await reorderRouteExecution(routeId.toUpperCase(), request, context, target);
+    expect(target.reorder).toHaveBeenCalledWith(routeId, { ...request, pendingStopIds: [stopId] }, context);
+  });
 });

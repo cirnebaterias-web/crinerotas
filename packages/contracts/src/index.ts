@@ -99,7 +99,7 @@ export type RoutePublication = z.infer<typeof routePublicationSchema>;
 export const reorderRouteExecutionRequestSchema = z.object({
   schemaVersion: z.literal(1),
   expectedVersion: z.number().int().positive(),
-  pendingStopIds: z.array(z.uuid()).min(1).max(50).superRefine((stopIds, context) => {
+  pendingStopIds: z.array(z.uuid().transform((id) => id.toLowerCase())).min(1).max(50).superRefine((stopIds, context) => {
     const seen = new Set<string>();
     stopIds.forEach((stopId, index) => {
       if (seen.has(stopId)) {

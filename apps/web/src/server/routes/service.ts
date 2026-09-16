@@ -106,7 +106,7 @@ export async function reorderRouteExecution(
     throw new RouteServiceFailure('VALIDATION_FAILED', publicRouteMessage('VALIDATION_FAILED'), false);
   }
   const command = normalizePendingStopOrder(parsed.data);
-  return reorderRouteExecutionResultSchema.parse(await repository.reorder(routeId, command, context));
+  return reorderRouteExecutionResultSchema.parse(await repository.reorder(routeId.toLowerCase(), command, context));
 }
 
 export async function getMyRouteForDate(serviceDate: string, repository: RouteRepository) {

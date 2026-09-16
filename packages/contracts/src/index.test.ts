@@ -290,6 +290,15 @@ it('validates strict sync commands and limits batches to 25 events', () => {
   }).success).toBe(false);
 });
 
+it('normalizes UUID case before validating pending stop uniqueness', () => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
+  const command = { schemaVersion: 1, expectedVersion: 2, pendingStopIds: [id.toUpperCase()] };
+  expect(reorderRouteExecutionRequestSchema.parse(command).pendingStopIds).toEqual([id]);
+  expect(reorderRouteExecutionRequestSchema.safeParse({
+    ...command, pendingStopIds: [id, id.toUpperCase()],
+  }).success).toBe(false);
+});
+
 it('keeps canonical confirmations distinct from recoverable and rejected results', () => {
   const confirmed = {
     eventId: syncCommand.eventId,

@@ -404,6 +404,16 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
   };
   expect(confirmedBody.executionVersion).toBe(ownRouteBody.route.executionVersion + 1);
   expect(confirmedBody.stops.map((stop) => stop.routeVersionStopId)).toEqual(competingOrder);
+  const uppercaseNoOp = await fetch(`${origin}/api/v1/routes/${publishedRouteId.toUpperCase()}/execution-order`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schemaVersion: 1, expectedVersion: confirmedBody.executionVersion,
+      pendingStopIds: competingOrder.map((id) => id.toUpperCase()) }),
+  });
+  expect(uppercaseNoOp.status).toBe(200);
+  expect(await uppercaseNoOp.json()).toMatchObject({
+    changed: false, executionVersion: confirmedBody.executionVersion, pendingStopIds: competingOrder,
+  });
 
   const stalePublication = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/publish`, {
     method: 'POST',
