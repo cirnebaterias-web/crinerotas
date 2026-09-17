@@ -371,6 +371,8 @@ it('runs the synthetic route round-trip CLI without exposing tokens or client sn
   const expectedRouteVersion = before.route
     ? before.route.versionNumber + (alreadyCurrent ? 0 : 1)
     : 2;
+  const expectedCreated = !before.route;
+  const expectedPublished = !before.route || !alreadyCurrent;
   const result = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
   const body = JSON.parse(result.stdout) as {
     routeId: string;
@@ -385,7 +387,7 @@ it('runs the synthetic route round-trip CLI without exposing tokens or client sn
     executionVersion: expect.any(Number),
     routeStatus: 'published',
     stopCount: 2,
-    checks: { created: true, published: true, loadedBySeller: true,
+    checks: { created: expectedCreated, published: expectedPublished, loadedBySeller: true,
       composition: alreadyCurrent ? 'already_current' : 'applied',
       reasonConfirmed: true,
       reordered: expect.stringMatching(/^(applied|already_canonical)$/) },
@@ -397,7 +399,13 @@ it('runs the synthetic route round-trip CLI without exposing tokens or client sn
   const repeated = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
   expect(JSON.parse(repeated.stdout)).toEqual({
     ...body,
-    checks: { ...body.checks, composition: 'already_current', reordered: 'already_canonical' },
+    checks: {
+      ...body.checks,
+      created: false,
+      published: false,
+      composition: 'already_current',
+      reordered: 'already_canonical',
+    },
   });
   expect(repeated.stdout + repeated.stderr).not.toContain(manager.accessToken);
   expect(repeated.stdout + repeated.stderr).not.toContain(seller.accessToken);
