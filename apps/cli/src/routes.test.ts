@@ -242,6 +242,35 @@ describe('route round-trip CLI service', () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it('rejects a canonical confirmation that omits a pending stop', async () => {
+    const targetOrder = [secondStopId, firstStopId];
+    let todayLoads = 0;
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      const authorization = new Headers(init?.headers).get('authorization');
+      const identity = identityResponse(url, authorization);
+      if (identity) return identity;
+      if (url.pathname === myTodayRoutePath) {
+        todayLoads += 1;
+        const response = revisedPublishedTodayRoute(targetOrder, 5);
+        if (todayLoads === 2) response.route.stops[1]!.status = 'completed';
+        return Response.json(response);
+      }
+      if (url.pathname === routeExecutionOrderPath(routeId)) {
+        const body = JSON.parse(String(init?.body)) as { pendingStopIds: string[] };
+        return Response.json({
+          schemaVersion: 1, routeId, routeVersionId: revisedRouteVersionId,
+          executionVersion: 5, changed: false, pendingStopIds: body.pendingStopIds,
+        });
+      }
+      return Response.json({}, { status: 404 });
+    });
+
+    await expect(runRouteRoundTrip(
+      'http://127.0.0.1:3000', managerToken, sellerToken, request,
+    )).rejects.toThrow('não confirmou a rota sucessora');
+  });
+
   it('recognizes an already revised composition and canonical execution order', async () => {
     const targetOrder = [secondStopId, firstStopId];
     const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -266,7 +295,7 @@ describe('route round-trip CLI service', () => {
       status: 'ok', routeId, routeVersion: 2, executionVersion: 5,
       routeStatus: 'published', stopCount: 2,
       checks: {
-        created: true, published: true, loadedBySeller: true,
+        created: false, published: false, loadedBySeller: true,
         composition: 'already_current', reasonConfirmed: true,
         reordered: 'already_canonical',
       },

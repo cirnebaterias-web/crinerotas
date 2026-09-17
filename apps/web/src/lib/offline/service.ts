@@ -113,6 +113,7 @@ export class OfflineFoundationService {
   private readonly syncEngine: SyncEngine;
   private currentDeviceId: string | null = null;
   private revocationBarrier: Promise<void> | null = null;
+  private readonly persistenceOperations = new Set<Promise<CanonicalRouteCacheResult>>();
   private accessRevoked = false;
 
   constructor(
@@ -200,7 +201,13 @@ export class OfflineFoundationService {
     if (this.accessRevoked || this.revocationBarrier) {
       throw new Error('O acesso local está sendo revogado.');
     }
-    return this.persistCanonicalRoute(userId, route);
+    const operation = this.persistCanonicalRoute(userId, route);
+    this.persistenceOperations.add(operation);
+    void operation.then(
+      () => this.persistenceOperations.delete(operation),
+      () => this.persistenceOperations.delete(operation),
+    );
+    return operation;
   }
 
   private async persistCanonicalRoute(userId: string, route: CanonicalRoute): Promise<CanonicalRouteCacheResult> {
@@ -218,6 +225,10 @@ export class OfflineFoundationService {
     const stored = await this.repository.saveValidatedRoute(bundle, session);
     if (stored.schemaVersion !== 2 && stored.schemaVersion !== 3) {
       throw new Error('O snapshot canônico não foi persistido.');
+    }
+    if (this.accessRevoked) {
+      await this.invalidateLocalAccess(partition.deviceId, partition.userId);
+      throw new Error('O acesso local foi revogado.');
     }
     window.localStorage.setItem(userStorageKey, userId);
     const compositionUpdated = stored.schemaVersion === 3 && stored.compositionChange !== null &&
@@ -238,6 +249,7 @@ export class OfflineFoundationService {
   }
 
   private async performLocalRevocation(userId?: string) {
+    await Promise.allSettled([...this.persistenceOperations]);
     await this.repository.open();
     const deviceId = this.getDeviceId();
     let previousUserId: string | null = null;

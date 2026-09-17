@@ -70,8 +70,8 @@ export interface RouteRoundTripResult {
   routeStatus: 'published';
   stopCount: number;
   checks: {
-    created: true;
-    published: true;
+    created: boolean;
+    published: boolean;
     loadedBySeller: true;
     composition: 'applied' | 'already_current';
     reasonConfirmed: true;
@@ -117,6 +117,8 @@ export async function runRouteRoundTrip(
     : existing.serviceDate;
 
   let loadedRoute: CanonicalRoute;
+  let createdNow = false;
+  let publishedNow = false;
   if (existing.availability === 'available') {
     loadedRoute = canonicalRouteSchema.parse(existing.route);
   } else {
@@ -139,6 +141,8 @@ export async function runRouteRoundTrip(
     if (publication.routeVersionId !== draft.routeVersionId) {
       throw new Error('A publicação retornada não corresponde ao rascunho criado.');
     }
+    createdNow = true;
+    publishedNow = true;
     const loaded = await loadToday();
     if (loaded.availability !== 'available') throw new Error('A rota publicada não foi carregada pelo Vendedor.');
     loadedRoute = canonicalRouteSchema.parse(loaded.route);
@@ -175,6 +179,7 @@ export async function runRouteRoundTrip(
     if (publication.versionNumber !== loadedRoute.versionNumber + 1) {
       throw new Error('A publicação sucessora não avançou a versão da rota.');
     }
+    publishedNow = true;
     const reloaded = await loadToday();
     if (reloaded.availability !== 'available') throw new Error('A rota sucessora não foi carregada.');
     loadedRoute = canonicalRouteSchema.parse(reloaded.route);
@@ -220,6 +225,7 @@ export async function runRouteRoundTrip(
   const confirmedRoute = canonicalRouteSchema.parse(confirmed.route);
   const confirmedPending = confirmedRoute.stops.filter(({ status }) => status === 'pending');
   if (confirmedRoute.executionVersion !== reordered.executionVersion ||
+      confirmedPending.length !== pendingStopIds.length ||
       confirmedPending.some((stop, index) => stop.routeVersionStopId !== pendingStopIds[index]) ||
       confirmedRoute.schemaVersion !== 3 || confirmedRoute.compositionChange?.reason !== changeReason) {
     throw new Error('A leitura canônica não confirmou a rota sucessora.');
@@ -233,8 +239,8 @@ export async function runRouteRoundTrip(
     routeStatus: confirmedRoute.status,
     stopCount: confirmedRoute.stops.length,
     checks: {
-      created: true,
-      published: true,
+      created: createdNow,
+      published: publishedNow,
       loadedBySeller: true,
       composition,
       reasonConfirmed: true,

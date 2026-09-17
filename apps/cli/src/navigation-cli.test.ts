@@ -18,6 +18,9 @@ it('rejects unknown arguments without echoing their values', () => {
   const result = spawnSync(process.execPath, ['--import', 'tsx', 'apps/cli/src/navigation-cli.ts', '--json', '--token=do-not-log'], processOptions);
   expect(result.error).toBeUndefined();
   expect(result.status).toBe(1);
-  expect(JSON.parse(result.stderr).status).toBe('error');
+  expect(JSON.parse(result.stderr)).toEqual({
+    status: 'error',
+    message: 'Diagnóstico inválido. Use apenas --json.',
+  });
   expect(result.stderr + result.stdout).not.toContain('do-not-log');
 }, processTestTimeout);

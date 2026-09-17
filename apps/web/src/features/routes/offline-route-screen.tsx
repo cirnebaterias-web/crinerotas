@@ -27,6 +27,7 @@ export function OfflineRouteScreen() {
   const serviceRef = useRef<OfflineFoundationService | null>(null);
   const [result, setResult] = useState<OfflineShellResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [revocationError, setRevocationError] = useState<string | null>(null);
   const bundle = useMemo(() => newestCanonicalRoute(result), [result]);
   const route = useMemo(() => bundle ? restoreCanonicalRoute(bundle) : null, [bundle]);
   const stops = orderedStops(route?.stops ?? []);
@@ -56,6 +57,7 @@ export function OfflineRouteScreen() {
   async function revokeLocalAccess() {
     if (!serviceRef.current || !bundle) return;
     setBusy(true);
+    setRevocationError(null);
     try {
       await serviceRef.current.revokeLocalAccess(bundle.userId);
       setResult({
@@ -64,11 +66,7 @@ export function OfflineRouteScreen() {
         message: 'O acesso local foi bloqueado. Conecte-se e entre novamente para liberar esta rota.',
       });
     } catch {
-      setResult({
-        kind: 'blocked',
-        reason: 'authentication_required',
-        message: 'O acesso local foi bloqueado neste navegador. Reconecte-se antes de usar a rota novamente.',
-      });
+      setRevocationError('Não foi possível bloquear o acesso local. A rota continua disponível neste aparelho; tente novamente.');
     } finally {
       setBusy(false);
     }
@@ -86,6 +84,7 @@ export function OfflineRouteScreen() {
         <span className="seller-connection is-offline"><span aria-hidden="true">●</span> Sem conexão</span>
       </div>
       {route && <p className="seller-notice" role="status">Você está vendo a última rota salva neste aparelho. Atualizações, reordenação e Google Maps precisam de conexão.</p>}
+      {revocationError && <p className="seller-notice" role="alert">{revocationError}</p>}
       {!result && <div className="seller-state" role="status"><span className="seller-loading" aria-hidden="true" /><h2>Abrindo sua rota salva…</h2><p>Validando o acesso local sem consultar dados privados na rede.</p></div>}
       {result?.kind === 'blocked' && <section className="seller-state"><h2>Acesso local bloqueado</h2><p>{result.message}</p><a className="seller-button seller-primary" href="/login">Entrar quando houver conexão</a></section>}
       {result?.kind === 'empty' && <section className="seller-state"><h2>Sem rota offline</h2><p>{result.message}</p><a className="seller-button seller-primary" href="/route">Tentar carregar minha rota</a></section>}

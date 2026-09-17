@@ -17,8 +17,10 @@ try {
   if (!Object.values(checks).every(Boolean)) throw new Error('Navigation check failed');
   console.log(json ? JSON.stringify({ status: 'ok', synthetic: true, networkRequests: 0, checks })
     : 'OK: destino por endereço/coordenadas e fallback validados; diagnóstico sintético sem rede.');
-} catch {
-  console.error(json ? JSON.stringify({ status: 'error', message: 'Diagnóstico inválido. Use apenas --json.' })
-    : 'Diagnóstico inválido. Use apenas --json.');
+} catch (error) {
+  const message = error instanceof Error && error.message === 'Navigation check failed'
+    ? 'Diagnóstico falhou: destino ou fallback de navegação inválido.'
+    : 'Diagnóstico inválido. Use apenas --json.';
+  console.error(json ? JSON.stringify({ status: 'error', message }) : message);
   process.exitCode = 1;
 }

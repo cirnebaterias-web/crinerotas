@@ -300,7 +300,6 @@ describe('canonical route cache', () => {
     const revoke = service.revokeLocalAccess(partition.userId);
     await expect(service.cacheCanonicalRoute(partition.userId, canonicalRoute()))
       .rejects.toThrow('O acesso local está sendo revogado.');
-    await revoke;
     releaseWorker?.({
       active: {
         postMessage: (_message, ports) => ports[0]?.postMessage({
@@ -310,10 +309,37 @@ describe('canonical route cache', () => {
       },
     });
     await expect(cache).rejects.toThrow('O acesso local foi revogado.');
+    await revoke;
 
     expect(localStorage.getItem('cirne-rotas.last-user-id')).toBeNull();
     expect(await repository.getLocalSession(partition)).toBeUndefined();
     expect(await repository.listRouteBundles(partition)).toMatchObject([{ schemaVersion: 1 }]);
+  });
+
+  it('removes a session written while local revocation is waiting for persistence', async () => {
+    const { localStorage, repository, service } = await setup();
+    const serviceRepository = Reflect.get(service, 'repository') as OfflineRepository;
+    const originalSave = serviceRepository.saveValidatedRoute.bind(serviceRepository);
+    let reportSaved: (() => void) | undefined;
+    let releaseSave: (() => void) | undefined;
+    const saved = new Promise<void>((resolve) => { reportSaved = resolve; });
+    const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    vi.spyOn(serviceRepository, 'saveValidatedRoute').mockImplementationOnce(async (bundle, session) => {
+      const stored = await originalSave(bundle, session);
+      reportSaved?.();
+      await saveGate;
+      return stored;
+    });
+
+    const cache = service.cacheCanonicalRoute(partition.userId, canonicalRoute());
+    await saved;
+    const revoke = service.revokeLocalAccess(partition.userId);
+    releaseSave?.();
+
+    await expect(cache).rejects.toThrow('O acesso local foi revogado.');
+    await expect(revoke).resolves.toBeUndefined();
+    expect(localStorage.getItem('cirne-rotas.last-user-id')).toBeNull();
+    expect(await repository.getLocalSession(partition)).toBeUndefined();
   });
 
   it('keeps the newest canonical version when concurrent cache writes finish in reverse order', async () => {
