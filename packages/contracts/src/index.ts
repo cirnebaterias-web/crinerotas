@@ -17,9 +17,10 @@ export const meResponseSchema = z.object({
 export type MeResponse = z.infer<typeof meResponseSchema>;
 export const mePath = '/api/v1/me';
 export const authSessionPath = '/api/v1/auth/session';
+const passwordSchema = z.string().min(1).max(256);
 export const loginRequestSchema = z.object({
   email: z.string().trim().email().max(254),
-  password: z.string().min(1).max(256),
+  password: passwordSchema,
 }).strict();
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
@@ -82,6 +83,42 @@ export const routeDraftSchema = z.object({
   stops: z.array(routeDraftStopSchema).min(1).max(50),
 }).strict();
 export type RouteDraft = z.infer<typeof routeDraftSchema>;
+
+export const changeRouteCompositionRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(1).max(500),
+  stops: z.array(routeStopInputSchema).min(1).max(50),
+}).strict().superRefine(({ stops }, context) => {
+  const clients = new Set<string>();
+  const orders = new Set<number>();
+  stops.forEach((stop, index) => {
+    const clientId = stop.clientId.toLowerCase();
+    if (clients.has(clientId)) {
+      context.addIssue({ code: 'custom', path: ['stops', index, 'clientId'], message: 'Cliente repetido na rota.' });
+    }
+    if (orders.has(stop.plannedOrder)) {
+      context.addIssue({ code: 'custom', path: ['stops', index, 'plannedOrder'], message: 'Ordem planejada repetida.' });
+    }
+    clients.add(clientId);
+    orders.add(stop.plannedOrder);
+  });
+});
+export type ChangeRouteCompositionRequest = z.infer<typeof changeRouteCompositionRequestSchema>;
+
+export const routeCompositionDiffSchema = z.object({
+  addedClientIds: z.array(z.uuid()).max(50),
+  removedClientIds: z.array(z.uuid()).max(50),
+  retainedClientIds: z.array(z.uuid()).max(50),
+}).strict();
+export type RouteCompositionDiff = z.infer<typeof routeCompositionDiffSchema>;
+
+export const routeCompositionDraftSchema = routeDraftSchema.extend({
+  changed: z.boolean(),
+  changeReason: z.string().trim().min(1).max(500),
+  changeSummary: routeCompositionDiffSchema,
+}).strict();
+export type RouteCompositionDraft = z.infer<typeof routeCompositionDraftSchema>;
 
 export const publishRouteRequestSchema = z.object({
   schemaVersion: z.literal(1),
@@ -154,7 +191,7 @@ export const canonicalRouteStopSchema = z.object({
   executionVersion: z.number().int().positive(),
   client: routeClientSnapshotSchema,
 }).strict();
-export const canonicalRouteSchema = z.object({
+export const canonicalRouteV2Schema = z.object({
   schemaVersion: z.literal(2),
   routeId: z.uuid(),
   routeVersionId: z.uuid(),
@@ -166,9 +203,28 @@ export const canonicalRouteSchema = z.object({
   seller: routeSellerSnapshotSchema,
   stops: z.array(canonicalRouteStopSchema).min(1).max(50),
 }).strict();
+export const routeCompositionChangedClientSchema = z.object({
+  id: z.uuid(),
+  name: z.string().trim().min(1).max(160),
+}).strict();
+export const routeCompositionChangeSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
+  previousVersionNumber: z.number().int().positive(),
+  added: z.array(routeCompositionChangedClientSchema).max(50),
+  removed: z.array(routeCompositionChangedClientSchema).max(50),
+}).strict();
+export type RouteCompositionChange = z.infer<typeof routeCompositionChangeSchema>;
+export const canonicalRouteV3Schema = canonicalRouteV2Schema.omit({ schemaVersion: true }).extend({
+  schemaVersion: z.literal(3),
+  compositionChange: routeCompositionChangeSchema.nullable(),
+}).strict();
+export const canonicalRouteSchema = z.discriminatedUnion('schemaVersion', [
+  canonicalRouteV2Schema,
+  canonicalRouteV3Schema,
+]);
 export type CanonicalRoute = z.infer<typeof canonicalRouteSchema>;
 
-export const routeTodayResponseSchema = z.discriminatedUnion('availability', [
+export const routeTodayResponseSchema = z.union([
   z.object({
     schemaVersion: z.literal(2),
     availability: z.literal('empty'),
@@ -177,7 +233,17 @@ export const routeTodayResponseSchema = z.discriminatedUnion('availability', [
   z.object({
     schemaVersion: z.literal(2),
     availability: z.literal('available'),
-    route: canonicalRouteSchema,
+    route: canonicalRouteV2Schema,
+  }).strict(),
+  z.object({
+    schemaVersion: z.literal(3),
+    availability: z.literal('empty'),
+    serviceDate: z.iso.date(),
+  }).strict(),
+  z.object({
+    schemaVersion: z.literal(3),
+    availability: z.literal('available'),
+    route: canonicalRouteV3Schema,
   }).strict(),
 ]);
 export type RouteTodayResponse = z.infer<typeof routeTodayResponseSchema>;
@@ -371,7 +437,7 @@ export const localRouteBundleSchema = z.object({
 }).strict();
 export type LocalRouteBundle = z.infer<typeof localRouteBundleSchema>;
 
-export const canonicalLocalRouteBundleSchema = canonicalRouteSchema.omit({ schemaVersion: true }).extend({
+export const canonicalLocalRouteBundleSchema = canonicalRouteV2Schema.omit({ schemaVersion: true }).extend({
   schemaVersion: z.literal(2),
   userId: z.uuid(),
   deviceId: z.uuid(),
@@ -379,9 +445,19 @@ export const canonicalLocalRouteBundleSchema = canonicalRouteSchema.omit({ schem
 }).strict();
 export type CanonicalLocalRouteBundle = z.infer<typeof canonicalLocalRouteBundleSchema>;
 
+export const canonicalLocalRouteBundleV3Schema = canonicalRouteV3Schema.omit({ schemaVersion: true }).extend({
+  schemaVersion: z.literal(3),
+  userId: z.uuid(),
+  deviceId: z.uuid(),
+  cachedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type CanonicalLocalRouteBundleV3 = z.infer<typeof canonicalLocalRouteBundleV3Schema>;
+export type AnyCanonicalLocalRouteBundle = CanonicalLocalRouteBundle | CanonicalLocalRouteBundleV3;
+
 export const offlineRouteBundleSchema = z.discriminatedUnion('schemaVersion', [
   localRouteBundleSchema,
   canonicalLocalRouteBundleSchema,
+  canonicalLocalRouteBundleV3Schema,
 ]);
 export type OfflineRouteBundle = z.infer<typeof offlineRouteBundleSchema>;
 

@@ -12,6 +12,8 @@ import {
   hashSyncCommand,
   localAccessWindowMs,
   nextRetryDelayMs,
+  normalizeRouteComposition,
+  diffRouteComposition,
   orderOutboxEvents,
   normalizeRouteDraft,
   normalizePendingStopOrder,
@@ -62,6 +64,28 @@ it('validates aggregate execution order without sorting away the seller intent',
     ...command,
     pendingStopIds: [command.pendingStopIds[0]!, command.pendingStopIds[0]!],
   })).toThrow('Ordem de execução inválida.');
+});
+
+it('normalizes a composition reason/order and computes a stable client diff', () => {
+  const normalized = normalizeRouteComposition({
+    schemaVersion: 1,
+    expectedVersion: 2,
+    reason: '  Ajuste   solicitado  ',
+    stops: [
+      { clientId: '10000000-0000-4000-8000-000000000003', plannedOrder: 2, priority: 1 },
+      { clientId: '10000000-0000-4000-8000-000000000002', plannedOrder: 1, priority: 0 },
+    ],
+  });
+  expect(normalized.reason).toBe('Ajuste solicitado');
+  expect(normalized.stops.map(({ plannedOrder }) => plannedOrder)).toEqual([1, 2]);
+  expect(diffRouteComposition(
+    ['10000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002'],
+    ['10000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000003'],
+  )).toEqual({
+    addedClientIds: ['10000000-0000-4000-8000-000000000003'],
+    removedClientIds: ['10000000-0000-4000-8000-000000000001'],
+    retainedClientIds: ['10000000-0000-4000-8000-000000000002'],
+  });
 });
 
 const partition = {
@@ -186,6 +210,11 @@ it('creates an exact canonical local snapshot without synthetic parameters', () 
   expect(snapshot).toMatchObject({ ...partition, ...route });
   expect(snapshot).not.toHaveProperty('parameterSetVersion');
   expect(restoreCanonicalRoute(snapshot)).toEqual(route);
+  expect(toRouteTodayResponse(route, route.serviceDate, 3)).toMatchObject({
+    schemaVersion: 2,
+    availability: 'available',
+    route: { schemaVersion: 2 },
+  });
   expect(() => createCanonicalLocalRouteBundle(
     { ...partition, userId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
     route,

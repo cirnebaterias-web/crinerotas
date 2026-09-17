@@ -1,14 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
   CanonicalRoute,
+  ChangeRouteCompositionRequest,
   CreateRouteDraftRequest,
   RouteDraft,
   RoutePublication,
+  RouteCompositionDraft,
   RouteTodayResponse,
   ReorderRouteExecutionResult,
 } from '@cirne/contracts';
 import {
   createRouteDraft,
+  changeRouteComposition,
   getMyRouteForDate,
   publishRoute,
   reorderRouteExecution,
@@ -55,6 +58,26 @@ function repository(overrides: Partial<RouteRepository> = {}): RouteRepository {
   };
   return {
     createDraft: vi.fn(async () => draft),
+    changeComposition: vi.fn(async (
+      _routeId: string,
+      request: ChangeRouteCompositionRequest,
+    ): Promise<RouteCompositionDraft> => ({
+      ...draft,
+      routeVersionId: '30000000-0000-4000-8000-000000000002',
+      versionNumber: 2,
+      expectedVersion: request.expectedVersion + 1,
+      changed: true,
+      changeReason: request.reason,
+      changeSummary: {
+        addedClientIds: [],
+        removedClientIds: [],
+        retainedClientIds: request.stops.map(({ clientId }) => clientId),
+      },
+      stops: request.stops.map((stop, index) => ({
+        ...stop,
+        routeVersionStopId: `70000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      })),
+    })),
     publish: vi.fn(async () => publication),
     getById: vi.fn(async () => ({} as CanonicalRoute)),
     getForDate: vi.fn(async (serviceDate): Promise<RouteTodayResponse> => ({
@@ -89,6 +112,27 @@ describe('route application services', () => {
     await expect(publishRoute('not-a-uuid', { schemaVersion: 1, expectedVersion: 1 }, target))
       .rejects.toMatchObject({ code: 'VALIDATION_FAILED', recoverable: false });
     expect(target.publish).not.toHaveBeenCalled();
+  });
+
+  it('normalizes and forwards a scoped composition command with idempotency context', async () => {
+    const target = repository();
+    const request: ChangeRouteCompositionRequest = {
+      schemaVersion: 1,
+      expectedVersion: 2,
+      reason: '  Ajuste   operacional  ',
+      stops: [...command.stops],
+    };
+    const context = {
+      idempotencyKey: '60000000-0000-4000-8000-000000000001',
+      origin: 'cli' as const,
+    };
+    await expect(changeRouteComposition(draftFor().routeId, request, context, target))
+      .resolves.toMatchObject({ changed: true, changeReason: 'Ajuste operacional', expectedVersion: 3 });
+    expect(target.changeComposition).toHaveBeenCalledWith(
+      draftFor().routeId,
+      { ...request, reason: 'Ajuste operacional', stops: [command.stops[1], command.stops[0]] },
+      context,
+    );
   });
 
   it('maps invalid commands to a stable validation failure before repository access', async () => {

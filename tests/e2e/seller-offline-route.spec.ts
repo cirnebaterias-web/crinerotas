@@ -39,13 +39,43 @@ const route: CanonicalRoute = {
   }],
 };
 
-async function mockSeller(page: Page) {
+const revisedRoute: CanonicalRoute = {
+  ...route,
+  schemaVersion: 3,
+  routeVersionId: id(30),
+  versionNumber: 2,
+  executionVersion: 2,
+  compositionChange: {
+    reason: 'Redistribuicao comercial da carteira',
+    previousVersionNumber: 1,
+    added: [{ id: id(50), name: 'Cliente novo sintetico' }],
+    removed: [{ id: route.stops[0]!.client.id, name: route.stops[0]!.client.name }],
+  },
+  stops: [{
+    ...route.stops[0]!,
+    routeVersionStopId: id(40),
+    client: {
+      ...route.stops[0]!.client,
+      id: id(50),
+      externalReference: 'OFF-02',
+      name: 'Cliente novo sintetico',
+      address: 'Rua nova, 200 - Recife, PE',
+    },
+  }],
+};
+
+async function mockSeller(page: Page, currentRoute: () => CanonicalRoute = () => route) {
   await page.route('**/api/v1/**', async (request) => {
     const pathname = new URL(request.request().url()).pathname;
     if (pathname === '/api/v1/me') {
       await request.fulfill({ json: identity });
     } else if (pathname.endsWith('/today')) {
-      await request.fulfill({ json: { schemaVersion: 2, availability: 'available', route } });
+      const selected = currentRoute();
+      await request.fulfill({ json: {
+        schemaVersion: selected.schemaVersion,
+        availability: 'available',
+        route: selected,
+      } });
     } else if (pathname === '/api/v1/auth/session' && request.request().method() === 'DELETE') {
       await request.fulfill({ status: 204 });
     } else {
@@ -96,4 +126,52 @@ test('caches the canonical route, reopens it offline and revokes local access', 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Sem rota offline' })).toBeVisible();
   await expect(page.getByText('Cliente offline sintético')).toHaveCount(0);
+});
+
+test('keeps v1 offline and confirms the manager composition update only after the v2 cache commit', async ({ page, context }) => {
+  let currentRoute: CanonicalRoute = route;
+  await mockSeller(page, () => currentRoute);
+  await page.goto('/route');
+  await expect(page.getByRole('heading', { name: 'Cliente offline sintético' })).toBeVisible();
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+
+  await page.unrouteAll({ behavior: 'wait' });
+  currentRoute = revisedRoute;
+  await context.setOffline(true);
+  await page.goto('/route', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'Cliente offline sintético' })).toBeVisible();
+  await expect(page.getByText('Cliente novo sintetico')).toHaveCount(0);
+
+  await context.setOffline(false);
+  await page.evaluate(async () => {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  });
+  await mockSeller(page, () => currentRoute);
+  await page.goto('/route');
+  await expect(page.getByRole('heading', { name: 'Cliente novo sintetico' })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Rota atualizada pelo Gestor');
+  await expect(page.getByRole('status')).toContainText('1 incluído e 1 retirado');
+  await expect(page.getByRole('status')).toContainText('Redistribuicao comercial da carteira');
+
+  const persisted = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('cirne-rotas-offline');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const bundles = await new Promise<unknown[]>((resolve, reject) => {
+      const request = database.transaction('routeBundles').objectStore('routeBundles').getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return bundles;
+  });
+  expect(persisted).toMatchObject([{
+    schemaVersion: 3,
+    routeVersionId: revisedRoute.routeVersionId,
+    versionNumber: 2,
+    compositionChange: { reason: 'Redistribuicao comercial da carteira' },
+  }]);
 });

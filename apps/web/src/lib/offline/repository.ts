@@ -52,7 +52,7 @@ export class OfflineRepository {
     return this.db.transaction('rw', this.db.routeBundles, this.db.localSessions, async () => {
       const key: [string, string, string] = [bundle.userId, bundle.deviceId, bundle.routeId];
       const existing = await this.db.routeBundles.get(key);
-      if (existing?.schemaVersion === 2 && (
+      if ((existing?.schemaVersion === 2 || existing?.schemaVersion === 3) && (
         bundle.schemaVersion === 1 ||
         existing.versionNumber > bundle.versionNumber ||
         (existing.versionNumber === bundle.versionNumber && existing.executionVersion > bundle.executionVersion) ||

@@ -6,7 +6,7 @@ import type {
   OfflineOutboxEvent,
 } from '@cirne/contracts';
 
-export const offlineDatabaseVersion = 4;
+export const offlineDatabaseVersion = 5;
 
 export const offlineV1Stores = {
   routeBundles: '&[userId+deviceId+routeId], [userId+deviceId], userId, deviceId, cachedAt',
@@ -28,6 +28,10 @@ export const offlineV4Stores = {
   ...offlineV3Stores,
 } as const;
 
+export const offlineV5Stores = {
+  ...offlineV4Stores,
+} as const;
+
 export class OfflineDatabase extends Dexie {
   routeBundles!: Table<OfflineRouteBundle, [string, string, string]>;
   visitDrafts!: Table<LocalVisitDraft, [string, string, string]>;
@@ -39,6 +43,7 @@ export class OfflineDatabase extends Dexie {
     this.version(1).stores(offlineV1Stores);
     this.version(2).stores(offlineV2Stores);
     this.version(3).stores(offlineV3Stores);
-    this.version(offlineDatabaseVersion).stores(offlineV4Stores);
+    this.version(4).stores(offlineV4Stores);
+    this.version(offlineDatabaseVersion).stores(offlineV5Stores);
   }
 }

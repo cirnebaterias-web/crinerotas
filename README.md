@@ -1,6 +1,6 @@
 # Cirne Rotas
 
-Primeira experiência visual do vendedor (Stories 1.1–2.5): login, consulta da rota publicada, reordenação de pendências, navegação externa e consulta offline da rota já carregada, com Supabase Auth, permissões/RLS e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; visita completa ainda não está disponível. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
+Primeira experiência visual do vendedor (Stories 1.1–2.6): login, consulta da rota publicada, reordenação de pendências, navegação externa, consulta offline e recebimento explícito de uma nova composição publicada pelo Gestor, com Supabase Auth, permissões/RLS, versionamento e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; visita completa ainda não está disponível. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
 
 O checkpoint da preparação do host e o resultado da retomada estão em `Docs/RETOMADA_APOS_REINICIO.md`.
 
@@ -118,7 +118,7 @@ O comando envia somente IDs e conteúdo sintéticos e comprova três passos: pri
 
 ## Verificar a rota canônica sintética pela CLI
 
-Com Supabase e aplicação iniciados, carregue os tokens sintéticos do Gestor A e do Vendedor A no ambiente. O comando cria ou reutiliza a rota publicada do dia, reordena as paradas pendentes por ordem planejada decrescente e confirma a leitura canônica do Vendedor:
+Com Supabase e aplicação iniciados, carregue os tokens sintéticos do Gestor A e do Vendedor A no ambiente. O comando cria/publica a rota do dia quando necessário, prepara e publica uma composição sucessora com motivo, reordena as paradas pendentes e confirma a leitura canônica do Vendedor:
 
 ```powershell
 $actors = Get-Content .local/identity-actors.json | ConvertFrom-Json
@@ -129,9 +129,9 @@ Remove-Item Env:CIRNE_MANAGER_ACCESS_TOKEN
 Remove-Item Env:CIRNE_SELLER_ACCESS_TOKEN
 ```
 
-A saída contém o ID e a versão publicada da rota, `executionVersion`, status, quantidade de paradas e os checks do round-trip. `checks.reordered` informa `applied` quando houve mudança ou `already_canonical` na repetição, sem novo incremento nem auditoria. `created` e `published` confirmam que o agregado existe e está publicado, inclusive quando reutilizado. Tokens e snapshots de cliente não são exibidos. O diagnóstico usa exclusivamente os dois clientes sintéticos provisionados pelo reset local; não use dados reais. Como alternativa, forneça os dois tokens em um único JSON por stdin, sem combiná-los com as variáveis de ambiente.
+A saída contém o ID e a versão publicada da rota, `executionVersion`, status, quantidade de paradas e os checks do round-trip. `checks.composition` informa `applied` ou `already_current`; `reasonConfirmed` comprova o motivo canônico; `checks.reordered` informa `applied` ou `already_canonical`. Repetições não criam outra versão nem auditoria falsa. Tokens e snapshots de cliente não são exibidos. O diagnóstico usa exclusivamente os três clientes sintéticos provisionados pelo reset local; não use dados reais. Como alternativa, forneça os dois tokens em um único JSON por stdin, sem combiná-los com as variáveis de ambiente.
 
-As leituras canônicas usam `schemaVersion: 2`. A reordenação usa `PUT /api/v1/routes/{routeId}/execution-order`, com `schemaVersion: 1`, `expectedVersion` do agregado e `pendingStopIds` contendo exatamente todas as paradas pendentes na ordem desejada. A composição publicada e `plannedOrder` permanecem imutáveis; conflito de versão retorna `409`. Para verificar rollback/reaplicação sem persistir mudanças no banco local, execute `node --import tsx scripts/verify-route-execution-rollback.ts` após `db:reset` e novamente após a integração.
+As leituras canônicas novas usam `schemaVersion: 3`, com compatibilidade de leitura para v2. A alteração usa `PATCH /api/v1/routes/{routeId}`, `Idempotency-Key`, motivo, versão esperada e composição completa; somente o Gestor no escopo pode executá-la. A publicação sucessora preserva a versão anterior como histórico. A reordenação continua em `PUT /api/v1/routes/{routeId}/execution-order` e atua somente nas pendências; conflito de versão retorna `409`. Para verificar rollback/reaplicação sem persistir mudanças no banco local, execute `npx tsx scripts/verify-route-composition-rollback.ts` após `db:reset` e novamente após a integração.
 
 Para a prova no navegador, gere o build de produção e execute o Playwright:
 
@@ -148,7 +148,7 @@ O teste instala o Service Worker, confirma sua revisão, carrega uma rota sinté
 3. Execute o diagnóstico `ops:routes` acima para publicar/reutilizar a rota sintética do dia.
 4. Abra `http://127.0.0.1:3000/login`. Use o e-mail e a senha de `actors.seller_a` no arquivo local ignorado `.local/identity-actors.json`; não copie credenciais para documentação, Git ou capturas.
 5. Em `/route`, escolha **Reordenar**, use as setas e **Salvar ordem**. **Cancelar** descarta o rascunho visual. Um conflito exige **Recarregar rota**. **Sair** encerra a sessão deste navegador.
-6. Aguarde a indicação **Disponível offline neste aparelho**. Depois, desligue a conexão e recarregue `/route`: a última versão confirmada continua exibindo vendedor, data, progresso, clientes, estados e endereços. Atualização e reordenação permanecem online; **Bloquear acesso local** exige nova validação online sem apagar silenciosamente a cópia durável.
+6. Aguarde a indicação **Disponível offline neste aparelho**. Depois, desligue a conexão e recarregue `/route`: a última versão confirmada continua exibindo vendedor, data, progresso, clientes, estados e endereços. Se o Gestor publicar outra composição enquanto o aparelho estiver offline, a cópia anterior permanece; ao reconectar e confirmar o novo cache, a tela informa inclusões, retiradas e motivo. Atualização e reordenação permanecem online; **Bloquear acesso local** exige nova validação online sem apagar silenciosamente a cópia durável.
 7. Em cada cliente, **Navegar** abre o Google Maps em outra aba/aplicativo com o destino preenchido; abrir ou retornar não inicia/conclui visita nem salva a reordenação. **Copiar endereço** funciona também sem rede. Se o navegador negar a cópia, um campo selecionável permite copiar manualmente.
 
 Login, atualização, reordenação e Maps exigem conexão; a consulta da rota já carregada não. A sessão usa cookies SameSite, sem tokens em localStorage ou IndexedDB. A autorização local fica particionada por vendedor/dispositivo e expira após 24 horas; logout ou troca de vendedor revoga seu acesso sem expor a partição anterior. Origem e cabeçalho CSRF são obrigatórios em login, logout e mutações por cookie. `APP_BASE_URL` precisa corresponder exatamente à origem usada no navegador (prefira `127.0.0.1`, não alterne com `localhost`). HTTPS habilita `Secure` nos cookies. A recuperação de senha orienta contato com administrador: não há SMTP implementado nesta etapa.

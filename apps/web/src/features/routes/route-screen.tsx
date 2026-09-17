@@ -20,6 +20,7 @@ export function RouteScreen() {
   const [needsReload, setNeedsReload] = useState(false);
   const [offline, setOffline] = useState(false);
   const [offlineCache, setOfflineCache] = useState<'saving' | 'ready' | 'unavailable' | null>(null);
+  const [compositionMessage, setCompositionMessage] = useState('');
   const generation = useRef(0);
   const cacheGeneration = useRef(0);
   const controller = useRef<AbortController | null>(null);
@@ -27,7 +28,7 @@ export function RouteScreen() {
 
   const clearPrivate = useCallback(() => {
     ++cacheGeneration.current;
-    setIdentity(null); setToday(null); setDraft(null); setOfflineCache(null);
+    setIdentity(null); setToday(null); setDraft(null); setOfflineCache(null); setCompositionMessage('');
   }, []);
   const cacheRoute = useCallback((userId: string, route: CanonicalRoute, current: number) => {
     const service = offlineService.current;
@@ -35,9 +36,16 @@ export function RouteScreen() {
     const currentCache = ++cacheGeneration.current;
     setOfflineCache('saving');
     void service.cacheCanonicalRoute(userId, route)
-      .then(({ availableOffline }) => {
+      .then(({ availableOffline, bundle, compositionUpdated }) => {
         if (current === generation.current && currentCache === cacheGeneration.current) {
           setOfflineCache(availableOffline ? 'ready' : 'unavailable');
+          if (compositionUpdated && bundle.schemaVersion === 3 && bundle.compositionChange) {
+            const { reason, added, removed } = bundle.compositionChange;
+            setCompositionMessage(
+              `Rota atualizada pelo Gestor: ${added.length} incluído${added.length === 1 ? '' : 's'} e ` +
+              `${removed.length} retirado${removed.length === 1 ? '' : 's'}. Motivo: ${reason}`,
+            );
+          }
         }
       })
       .catch(() => {
@@ -144,6 +152,7 @@ export function RouteScreen() {
       </div>
       {offline && <p className="seller-notice" role="status">Sem conexão. A rota já aberta continua consultável; atualização, reordenação, salvamento e Google Maps precisam de internet.</p>}
       {offlineCache === 'unavailable' && !offline && <p className="seller-notice">A rota está disponível nesta tela, mas a cópia offline não pôde ser confirmada. Mantenha a conexão e tente atualizar novamente.</p>}
+      {compositionMessage && <p className="seller-notice" role="status">{compositionMessage}</p>}
       {message && <div className="seller-notice" role="status">{message}</div>}
       {busy && !today && <div className="seller-state" role="status"><span className="seller-loading" aria-hidden="true" /><h2>Preparando seu dia…</h2><p>Validando seu acesso e buscando a rota publicada.</p></div>}
       {!busy && loginRequired && <section className="seller-state"><span className="seller-state-icon" aria-hidden="true">↗</span><h2>Entre para ver sua rota</h2><p>Use sua conta de vendedor para acessar o roteiro do dia.</p><a className="seller-button seller-primary" href="/login">Ir para o login</a></section>}

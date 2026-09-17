@@ -45,6 +45,23 @@ function canonicalRoute(userId = partition.userId): CanonicalRoute {
   };
 }
 
+function revisedCanonicalRoute(userId = partition.userId): CanonicalRoute {
+  const previous = canonicalRoute(userId);
+  return {
+    ...previous,
+    schemaVersion: 3,
+    routeVersionId: '44444444-4444-4444-8444-444444444445',
+    versionNumber: 3,
+    executionVersion: 4,
+    compositionChange: {
+      reason: 'Cliente redistribuido entre carteiras',
+      previousVersionNumber: 2,
+      added: [{ id: '77777777-7777-4777-8777-777777777777', name: 'Cliente novo' }],
+      removed: [{ id: previous.stops[0]!.client.id, name: previous.stops[0]!.client.name }],
+    },
+  };
+}
+
 function createLocalStorage(entries: Record<string, string>) {
   const values = new Map(Object.entries(entries));
   return {
@@ -201,10 +218,29 @@ describe('canonical route cache', () => {
       bundle: { schemaVersion: 2, routeVersionId: '44444444-4444-4444-8444-444444444444' },
       workerReady: false,
       availableOffline: false,
+      compositionUpdated: false,
     });
     expect(await repository.listRouteBundles(partition)).toMatchObject([{
       schemaVersion: 2,
       routeId: '33333333-3333-4333-8333-333333333333',
+    }]);
+  });
+
+  it('reports a composition update only after a newer version replaces the local cache', async () => {
+    const { repository, service } = await setup();
+    await service.cacheCanonicalRoute(partition.userId, canonicalRoute());
+
+    await expect(service.cacheCanonicalRoute(partition.userId, revisedCanonicalRoute()))
+      .resolves.toMatchObject({
+        bundle: { schemaVersion: 3, versionNumber: 3 },
+        compositionUpdated: true,
+      });
+    await expect(service.cacheCanonicalRoute(partition.userId, revisedCanonicalRoute()))
+      .resolves.toMatchObject({ compositionUpdated: false });
+    expect(await repository.listRouteBundles(partition)).toMatchObject([{
+      schemaVersion: 3,
+      versionNumber: 3,
+      compositionChange: { reason: 'Cliente redistribuido entre carteiras' },
     }]);
   });
 

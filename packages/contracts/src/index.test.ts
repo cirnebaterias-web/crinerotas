@@ -3,6 +3,8 @@ import {
   apiErrorResponseSchema,
   canonicalLocalRouteBundleSchema,
   canonicalRouteSchema,
+  canonicalLocalRouteBundleV3Schema,
+  changeRouteCompositionRequestSchema,
   createRouteDraftRequestSchema,
   liveResponseSchema,
   localPersistenceStateSchema,
@@ -18,6 +20,7 @@ import {
   reorderRouteExecutionResultSchema,
   routeDraftSchema,
   routePublicationSchema,
+  routeCompositionDraftSchema,
   routeTodayResponseSchema,
   syncBatchRequestSchema,
   syncBatchExchangeSchema,
@@ -149,6 +152,75 @@ it('validates a strict aggregate execution order command and result', () => {
     pendingStopIds: [second, first],
   };
   expect(reorderRouteExecutionResultSchema.parse(result)).toEqual(result);
+});
+
+it('validates composition changes and the discriminated canonical v3 contract', () => {
+  const command = changeRouteCompositionRequestSchema.parse({
+    schemaVersion: 1,
+    expectedVersion: 2,
+    reason: '  Inclusão urgente  ',
+    stops: routeRequest.stops,
+  });
+  expect(command.reason).toBe('Inclusão urgente');
+  expect(changeRouteCompositionRequestSchema.safeParse({ ...command, sellerId: routeRequest.sellerId }).success)
+    .toBe(false);
+  expect(routeCompositionDraftSchema.safeParse({
+    schemaVersion: 1,
+    routeId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    routeVersionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    versionNumber: 2,
+    expectedVersion: command.expectedVersion + 1,
+    serviceDate: routeRequest.serviceDate,
+    sellerId: routeRequest.sellerId,
+    status: 'draft',
+    changed: true,
+    changeReason: command.reason,
+    changeSummary: { addedClientIds: [], removedClientIds: [], retainedClientIds: [] },
+    stops: routeRequest.stops.map((stop, index) => ({
+      ...stop,
+      routeVersionStopId: `dddddddd-dddd-4ddd-8ddd-${String(index + 1).padStart(12, '0')}`,
+    })),
+  }).success).toBe(true);
+
+  const v2 = canonicalRouteSchema.parse({
+    schemaVersion: 2,
+    routeId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    routeVersionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    versionNumber: 1,
+    serviceDate: routeRequest.serviceDate,
+    status: 'published',
+    publishedAt: '2026-09-15T12:00:00.000Z',
+    executionVersion: 2,
+    seller: { id: routeRequest.sellerId, displayName: 'Vendedor Sintético' },
+    stops: [{
+      routeVersionStopId: 'dddddddd-dddd-4ddd-8ddd-000000000001',
+      plannedOrder: 1, executionOrder: 1, priority: 0, status: 'pending', executionVersion: 1,
+      client: { id: routeRequest.stops[0]!.clientId, externalReference: null,
+        name: 'Cliente Sintético', address: 'Endereço sintético', latitude: null,
+        longitude: null, portfolioReference: null },
+    }],
+  });
+  const v3 = canonicalRouteSchema.parse({
+    ...v2,
+    schemaVersion: 3,
+    versionNumber: 2,
+    compositionChange: {
+      reason: command.reason,
+      previousVersionNumber: 1,
+      added: [{ id: routeRequest.stops[1]!.clientId, name: 'Cliente 2' }],
+      removed: [],
+    },
+  });
+  expect(routeTodayResponseSchema.parse({ schemaVersion: 3, availability: 'available', route: v3 }))
+    .toMatchObject({ schemaVersion: 3, route: { schemaVersion: 3 } });
+  expect(routeTodayResponseSchema.safeParse({ schemaVersion: 2, availability: 'available', route: v3 }).success)
+    .toBe(false);
+  expect(canonicalLocalRouteBundleV3Schema.parse({
+    ...v3,
+    userId: routeRequest.sellerId,
+    deviceId: '22222222-2222-4222-8222-222222222222',
+    cachedAt: '2026-09-15T12:05:00.000Z',
+  })).toMatchObject({ schemaVersion: 3, compositionChange: { reason: command.reason } });
 });
 
 it('rejects extra fields and incompatible health responses', () => {

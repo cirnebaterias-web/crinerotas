@@ -79,6 +79,77 @@ describe('SupabaseRouteRepository', () => {
     });
   });
 
+  it('validates the complete composition result and forwards idempotency metadata', async () => {
+    const routeId = '20000000-0000-4000-8000-000000000001';
+    const request = {
+      schemaVersion: 1 as const,
+      expectedVersion: 2,
+      reason: 'Ajuste operacional',
+      stops: command.stops,
+    };
+    const { repository, rpc } = clientReturning({
+      schemaVersion: 1,
+      routeId,
+      routeVersionId: '30000000-0000-4000-8000-000000000002',
+      versionNumber: 2,
+      expectedVersion: 3,
+      serviceDate: command.serviceDate,
+      sellerId: command.sellerId,
+      status: 'draft',
+      changed: true,
+      changeReason: request.reason,
+      changeSummary: { addedClientIds: [], removedClientIds: [], retainedClientIds: [command.stops[0]!.clientId] },
+      stops: [{ ...command.stops[0], routeVersionStopId: '40000000-0000-4000-8000-000000000003' }],
+    });
+    await expect(repository.changeComposition(routeId, request, {
+      idempotencyKey: '60000000-0000-4000-8000-000000000001',
+      origin: 'cli',
+    })).resolves.toMatchObject({ changed: true, expectedVersion: 3 });
+    expect(rpc).toHaveBeenCalledWith('change_route_composition', {
+      p_route_id: routeId,
+      p_command: request,
+      p_idempotency_key: '60000000-0000-4000-8000-000000000001',
+      p_origin: 'cli',
+    });
+  });
+
+  it('rejects a composition result that duplicates one client and omits another', async () => {
+    const routeId = '20000000-0000-4000-8000-000000000001';
+    const secondStop = {
+      clientId: '10000000-0000-4000-8000-000000000002',
+      plannedOrder: 2,
+      priority: 1,
+    };
+    const request = {
+      schemaVersion: 1 as const,
+      expectedVersion: 2,
+      reason: 'Ajuste operacional',
+      stops: [command.stops[0]!, secondStop],
+    };
+    const { repository } = clientReturning({
+      schemaVersion: 1,
+      routeId,
+      routeVersionId: '30000000-0000-4000-8000-000000000002',
+      versionNumber: 2,
+      expectedVersion: 3,
+      serviceDate: command.serviceDate,
+      sellerId: command.sellerId,
+      status: 'draft',
+      changed: true,
+      changeReason: request.reason,
+      changeSummary: { addedClientIds: [], removedClientIds: [], retainedClientIds: [] },
+      stops: [
+        { ...command.stops[0], routeVersionStopId: '40000000-0000-4000-8000-000000000003' },
+        { ...command.stops[0], plannedOrder: 2,
+          routeVersionStopId: '40000000-0000-4000-8000-000000000004' },
+      ],
+    });
+    await expect(repository.changeComposition(routeId, request, {
+      idempotencyKey: '60000000-0000-4000-8000-000000000001',
+      origin: 'cli',
+    })).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+  });
+
   it('maps rejected RPC transport promises to a recoverable dependency failure', async () => {
     const repository = clientRejecting(new Error('private transport detail'));
     await expect(repository.getForDate('2026-09-15')).rejects.toMatchObject({

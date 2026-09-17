@@ -3,7 +3,7 @@
 import {
   mePath,
   meResponseSchema,
-  type CanonicalLocalRouteBundle,
+  type AnyCanonicalLocalRouteBundle,
   type CanonicalRoute,
   type LocalRouteBundle,
   type OfflinePartition,
@@ -44,10 +44,11 @@ export type OfflineShellResult =
   | { kind: 'blocked'; reason: 'authentication_required' | 'session_expired' | 'clock_rollback'; message: string };
 
 export interface CanonicalRouteCacheResult {
-  bundle: CanonicalLocalRouteBundle;
+  bundle: AnyCanonicalLocalRouteBundle;
   workerReady: boolean;
   storagePersisted: boolean;
   availableOffline: boolean;
+  compositionUpdated: boolean;
 }
 
 function isLoopback() {
@@ -208,15 +209,22 @@ export class OfflineFoundationService {
     const timestamp = this.now();
     const bundle = createCanonicalLocalRouteBundle(partition, route, timestamp);
     const session = createValidatedLocalSession(partition, timestamp);
+    const previous = await this.repository.getRouteBundle(partition, route.routeId);
     const [workerReady, storagePersisted] = await Promise.all([
       workerIsReady(true),
       requestStoragePersistence(),
     ]);
     if (this.accessRevoked) throw new Error('O acesso local foi revogado.');
     const stored = await this.repository.saveValidatedRoute(bundle, session);
-    if (stored.schemaVersion !== 2) throw new Error('O snapshot canônico não foi persistido.');
+    if (stored.schemaVersion !== 2 && stored.schemaVersion !== 3) {
+      throw new Error('O snapshot canônico não foi persistido.');
+    }
     window.localStorage.setItem(userStorageKey, userId);
-    return { bundle: stored, workerReady, storagePersisted, availableOffline: workerReady };
+    const compositionUpdated = stored.schemaVersion === 3 && stored.compositionChange !== null &&
+      stored.routeVersionId === bundle.routeVersionId &&
+      (!(previous?.schemaVersion === 2 || previous?.schemaVersion === 3) ||
+        previous.versionNumber < stored.versionNumber);
+    return { bundle: stored, workerReady, storagePersisted, availableOffline: workerReady, compositionUpdated };
   }
 
   revokeLocalAccess(userId?: string) {

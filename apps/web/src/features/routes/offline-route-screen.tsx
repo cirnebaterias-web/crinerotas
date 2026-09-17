@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { CanonicalLocalRouteBundle } from '@cirne/contracts';
+import type { AnyCanonicalLocalRouteBundle } from '@cirne/contracts';
 import { restoreCanonicalRoute } from '@cirne/domain';
 import { Brand } from '@/features/auth/brand';
 import { OfflineFoundationService, type OfflineShellResult } from '@/lib/offline/service';
@@ -18,7 +18,8 @@ const statusLabels = {
 function newestCanonicalRoute(result: OfflineShellResult | null) {
   if (result?.kind !== 'ready') return null;
   return result.routes
-    .filter((bundle): bundle is CanonicalLocalRouteBundle => bundle.schemaVersion === 2)
+    .filter((bundle): bundle is AnyCanonicalLocalRouteBundle =>
+      bundle.schemaVersion === 2 || bundle.schemaVersion === 3)
     .sort((left, right) => Date.parse(right.cachedAt) - Date.parse(left.cachedAt))[0] ?? null;
 }
 

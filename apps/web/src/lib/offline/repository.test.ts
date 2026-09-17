@@ -57,7 +57,7 @@ async function seed(repository: OfflineRepository, partition = partitionA) {
 }
 
 describe('OfflineRepository', () => {
-  it('preserves route, session, draft and outbox during the schema v2 to v4 upgrade', async () => {
+  it('preserves route, session, draft and outbox during the schema v2 to v5 upgrade', async () => {
     const name = `offline-migration-${crypto.randomUUID()}`;
     names.push(name);
     const legacy = new Dexie(name, { indexedDB, IDBKeyRange });

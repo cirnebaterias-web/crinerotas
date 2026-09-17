@@ -145,7 +145,7 @@ select is((
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
-select is(api.get_route(:'route_id'::uuid) ->> 'schemaVersion', '2', 'canonical route contract is version two');
+select is(api.get_route(:'route_id'::uuid) ->> 'schemaVersion', '3', 'canonical route contract is version three');
 select is(api.get_route(:'route_id'::uuid) ->> 'executionVersion', '3', 'canonical route exposes the aggregate execution version');
 select is((
   select jsonb_agg(stop ->> 'routeVersionStopId')

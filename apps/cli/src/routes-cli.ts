@@ -30,8 +30,9 @@ try {
     tokens.sellerAccessToken,
   );
   console.log(json ? JSON.stringify(result) :
-    `OK: rota ${result.routeId} v${result.routeVersion}/execução ${result.executionVersion} publicada, carregada e ` +
-    `${result.checks.reordered === 'applied' ? 'reordenada' : 'já canônica'} com ${result.stopCount} paradas.`);
+    `OK: rota ${result.routeId} v${result.routeVersion}/execucao ${result.executionVersion} publicada, ` +
+    `${result.checks.composition === 'applied' ? 'composicao revisada' : 'composicao confirmada'}, carregada e ` +
+    `${result.checks.reordered === 'applied' ? 'reordenada' : 'ja canonica'} com ${result.stopCount} paradas.`);
 } catch (error) {
   const message = error instanceof Error && !('code' in error)
     ? error.message

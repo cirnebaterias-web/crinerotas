@@ -1,0 +1,40 @@
+schema: 1
+story: '2.6'
+story_title: 'Alteração versionada da composição da rota publicada'
+gate: PASS
+status_reason: 'AC 1–8 atendidos com composição sucessora imutável, concorrência 200/409, auditoria atômica e reconexão explícita. Bateria completa soma 428 testes PASS; correção textual final foi revalidada por lint, typecheck e 164 unitários.'
+reviewer: 'Quinn (@qa, Codex)'
+reviewed_revision: 'working-tree-sha256:9054fc51e9aa422b81ebb9dd1652a889a3ccb4fc3bfec06534e11dbb9c13205e'
+updated: '2026-09-17T04:49:31Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 428
+  tests_rerun_after_review_fix: 164
+  review: 'Docs/qa/evidence/2.6/qa-review.md'
+  implementation: 'Docs/qa/evidence/2.6/validation.md'
+  architecture: 'Docs/qa/evidence/2.6/architecture-review.md'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Identidade/capacidade/escopo derivados, CSRF, grants mínimos, RLS e auditoria síncrona fail-closed.'
+  performance:
+    status: PASS
+    notes: 'Limite de 50 paradas, acesso indexado e nenhuma dependência externa nova; escala produtiva fica fora deste gate.'
+  reliability:
+    status: PASS
+    notes: 'Lock agregado, transação atômica, versão anterior imutável, rollback/reapply e cache monotônico cobertos.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos v2/v3 discriminados, domínio puro, adaptadores isolados e evidência reproduzível.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Homologar reconexão, atualização PWA e persistência em Android/Chrome físico antes do piloto.'
+      refs: ['AB-14', 'Docs/qa/evidence/2.6/qa-review.md']
+    - action: 'Aprovar privacidade, retenção e limpeza antes de usar dados pessoais.'
+      refs: ['AB-15', 'Docs/qa/evidence/2.6/qa-review.md']

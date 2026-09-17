@@ -5,8 +5,8 @@
 | Campo | Valor |
 | --- | --- |
 | Produto | Cirne Rotas - Piloto Simplificado |
-| Versão | 0.3 |
-| Data | 03/09/2026 |
+| Versão | 0.4 |
+| Data | 17/09/2026 |
 | Status | Rascunho completo para revisão e aprovação de negócio |
 | Autoria | Morgan (Product Manager) |
 | Fonte principal | `BRIEFING_MESTRE_Cirne_Rotas_v0.1.docx` |
@@ -27,6 +27,7 @@
 | 03/09/2026 | 0.1 | Estruturação inicial a partir do Briefing Mestre v0.1, apresentação executiva v0.3 e pacote visual v0.1. | Morgan (PM) |
 | 03/09/2026 | 0.2 | Infraestrutura do piloto alterada para GitHub, Supabase e Vercel em planos gratuitos, por decisão do negócio. | Morgan (PM) |
 | 03/09/2026 | 0.3 | PRD consolidado com requisitos, UX, premissas técnicas, epics, jornadas, dados, critérios de aceite, métricas, riscos, decisões, rastreabilidade e checklist. | Morgan (PM) |
+| 17/09/2026 | 0.4 | `AB-12` encerrada: somente o Gestor altera a composição publicada, com motivo, nova versão e histórico; o Vendedor apenas reordena pendências e não possui fluxo de solicitação no MVP. | Morgan (PM) |
 
 ## 1. Goals and Background Context
 
@@ -111,7 +112,7 @@ Cada requisito contém ID único, prioridade e maturidade. Regras dependentes de
 - **FR-006 [P0 | CONFIRMADO] - Ver rota:** o Vendedor deve ver data, progresso, clientes, ordem, prioridade, estado da parada e estado de sincronização da rota do dia. **Racional/regra:** “Ver rota” é a única entrada funcional principal do menu do vendedor.
 - **FR-007 [P0 | CONFIRMADO] - Autonomia de execução:** o Vendedor deve poder escolher qualquer cliente pendente e alterar apenas a ordem de execução sem aprovação, com registro de auditoria. **Racional/regra:** a rota orienta, mas não impõe sequência rígida.
 - **FR-008 [P0 | CONFIRMADO] - Navegação externa:** o sistema deve abrir o Google Maps por URL com o destino do cliente preenchido quando houver conectividade. **Racional/regra:** navegação interna não integra o MVP.
-- **FR-009 [P0 | RECOMENDADO | AB-12] - Alteração de composição:** inclusão ou retirada de cliente após publicação deve ser ação exclusiva do Gestor ou solicitação simples sujeita à decisão dele, sempre com motivo e histórico. **Racional/regra:** a autoridade operacional precisa ser definida antes do backlog.
+- **FR-009 [P0 | CONFIRMADO | AB-12] - Alteração de composição:** somente o Gestor pode incluir ou retirar cliente após a publicação, sempre informando motivo e gerando nova versão com histórico auditável. O Vendedor pode apenas reordenar clientes pendentes; não haverá solicitação de alteração pelo Vendedor no MVP. Visitas iniciadas permanecem vinculadas à versão anterior. Ao reconectar, o Vendedor recebe a versão vigente sem remoção silenciosa da cópia offline já carregada. **Racional/regra:** separar autoridade de planejamento e autonomia de execução, preservando contexto histórico e trabalho offline.
 - **FR-010 [P1 | RECOMENDADO] - Sugestão por proximidade:** o sistema poderá sugerir o cliente pendente mais próximo usando a localização atual, sem trânsito em tempo real. **Racional/regra:** apoio opcional à decisão do vendedor, sem otimização avançada.
 
 #### Visita e evidências
@@ -514,7 +515,7 @@ Os epics abaixo representam incrementos sequenciais de produto. Cada um deve ter
 - escolha livre de cliente pendente e reordenação auditada;
 - abertura do Google Maps por URL;
 - cache offline da rota já carregada;
-- tratamento de mudança de composição conforme decisão `AB-12`.
+- alteração da composição publicada exclusivamente pelo Gestor, com motivo, nova versão, histórico e atualização segura da cópia do Vendedor conforme `AB-12`.
 
 ### 5.3 Epic 3 - Visita completa e sincronização confiável
 
@@ -593,7 +594,7 @@ Legenda: **P** = permitido no MVP; **C** = permitido condicionalmente após gate
 | Consultar rota de outro Vendedor | - | P | C | - | Escopo gerencial e suporte autorizado. |
 | Criar, salvar e publicar rota | - | P | - | - | Responsabilidade do Gestor. |
 | Reordenar clientes pendentes da própria rota | P | P | - | - | Não exige aprovação, mas gera auditoria. |
-| Incluir ou retirar cliente após publicação | C | P | - | - | Fluxo do Vendedor depende de `AB-12`; decisão final permanece com o Gestor. |
+| Incluir ou retirar cliente após publicação | - | P | - | - | Ação exclusiva do Gestor, com motivo, nova versão e histórico; sem fluxo de solicitação pelo Vendedor no MVP. |
 | Abrir navegação para cliente | P | P | - | - | URL externa do Google Maps; depende de internet. |
 | Iniciar e concluir visita | P | - | - | - | Apenas o Vendedor responsável, salvo política futura de substituição não definida. |
 | Registrar Estoque, Concorrência, Sucata e Resultado | P | - | - | - | Dentro da visita vinculada ao Vendedor autenticado. |
@@ -1321,7 +1322,7 @@ Ausência de baseline não bloqueia a medição de adoção e confiabilidade, ma
 | GATE-P07 | Cotas gratuitas verificadas contra a carga estimada, com alertas e resposta a limite. |
 | GATE-P08 | Região, participantes, suporte, janela operacional e ritual semanal definidos. |
 
-`AB-12` e `AB-16` podem ser fechados antes do backlog/painel correspondente e não precisam bloquear o primeiro teste controlado se os fluxos afetados permanecerem desativados.
+`AB-16` pode ser fechado antes do painel correspondente e não precisa bloquear o primeiro teste controlado se o fluxo afetado permanecer desativado. `AB-12` foi encerrado em 17/09/2026.
 
 ### 9.8 Final Decision Framework
 
@@ -1408,6 +1409,7 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | DEC-010 | Google Maps será aberto externamente; navegação dentro do app está fora do MVP. | Briefing v0.1 | CONFIRMADO |
 | DEC-011 | n8n não será compartilhado nem afetado pelo Cirne Rotas. | Briefing v0.1 | CONFIRMADO |
 | DEC-012 | Piloto usará GitHub, Supabase e Vercel em planos gratuitos. | Decisão do negócio em 03/09/2026 | CONFIRMADO; substitui Hostinger/EasyPanel no piloto |
+| DEC-013 | Somente o Gestor altera a composição de rota publicada; a operação exige motivo, cria nova versão e histórico, preserva visitas iniciadas e atualiza o Vendedor com segurança na reconexão. O Vendedor apenas reordena pendências e não solicita alteração no MVP. | Decisão do negócio em 17/09/2026 (`AB-12`) | CONFIRMADO |
 
 ### 10.4 Prioritized Open Business Decisions
 
@@ -1429,7 +1431,6 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | Alta | AB-03 | Ações | Taxonomia final e obrigatoriedade de evidência. | Antes do campo | Gestão comercial |
 | Alta | AB-09 | Resultado | Resultados, motivos e campos de pedido/não visita. | Antes do campo | Gestão comercial |
 | Alta | AB-18 | Mídia | Supabase Storage ou alternativa e política de backup/recuperação. | Antes do deploy | Arquitetura + Privacidade |
-| Média | AB-12 | Rota | Solicitação pelo Vendedor ou composição exclusiva do Gestor. | Antes do backlog | Gestão comercial |
 | Média | AB-16 | Relatórios | Filtros, colunas, exportações e periodicidade exata. | Antes do dashboard final | Gestão comercial |
 
 ### 10.5 Consolidated Technical and Data Gates
@@ -1587,7 +1588,7 @@ O PRD está forte em definição do problema, limites do MVP, jornadas, offline,
 | 1. Problem Definition & Context | 85% | PARTIAL | Baselines ainda não coletados; não há pesquisa formal de usuários ou análise de produtos concorrentes. |
 | 2. MVP Scope Definition | 96% | PASS | Apenas confirmar se sugestão por proximidade permanece P1/recomendada. |
 | 3. User Experience Requirements | 92% | PASS | WCAG AA, dispositivos, GPS e política de fotos aguardam decisão. |
-| 4. Functional Requirements | 88% | PARTIAL | Taxonomias e validações AB-01 a AB-12 ainda abertas; stories detalhadas foram corretamente adiadas. |
+| 4. Functional Requirements | 89% | PARTIAL | Taxonomias e validações de campo permanecem abertas; `AB-12` foi encerrada e pode seguir para story detalhada. |
 | 5. Non-Functional Requirements | 82% | PARTIAL | Metas de desempenho, retenção, compatibilidade e capacidade das cotas ainda precisam de valores aprovados. |
 | 6. Epic & Story Structure | 68% | PARTIAL | Epics estão definidos; stories e critérios por story aguardam aprovação do PRD e autoridade do SM/PO. |
 | 7. Technical Guidance | 84% | PARTIAL | `TA-01` precisa resolver a divergência NestJS versus Supabase/Vercel. |
@@ -1616,7 +1617,6 @@ O PRD está forte em definição do problema, limites do MVP, jornadas, offline,
 
 #### Medium
 
-- Decidir se o Vendedor pode solicitar alteração de composição da rota (`AB-12`).
 - Fechar filtros, colunas e periodicidade dos relatórios (`AB-16`).
 - Confirmar WCAG 2.2 AA e os padrões UX-A01 a UX-A04.
 - Coletar baselines antes do início oficial.
