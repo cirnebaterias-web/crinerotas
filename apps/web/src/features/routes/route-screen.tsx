@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { CanonicalRoute, MeResponse, RouteTodayResponse } from '@cirne/contracts';
 import { Brand } from '@/features/auth/brand';
+import { OfflineFoundationService } from '@/lib/offline/service';
 import { isSessionFailure, sellerClient, SellerHttpError } from '@/lib/seller-client';
 import { formatServiceDate, movePending, orderedStops, pendingIds, routeProgress } from './route-model';
 import { NavigationActions } from './navigation-actions';
@@ -18,10 +19,33 @@ export function RouteScreen() {
   const [message, setMessage] = useState('');
   const [needsReload, setNeedsReload] = useState(false);
   const [offline, setOffline] = useState(false);
+  const [offlineCache, setOfflineCache] = useState<'saving' | 'ready' | 'unavailable' | null>(null);
   const generation = useRef(0);
+  const cacheGeneration = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const offlineService = useRef<OfflineFoundationService | null>(null);
 
-  const clearPrivate = useCallback(() => { setIdentity(null); setToday(null); setDraft(null); }, []);
+  const clearPrivate = useCallback(() => {
+    ++cacheGeneration.current;
+    setIdentity(null); setToday(null); setDraft(null); setOfflineCache(null);
+  }, []);
+  const cacheRoute = useCallback((userId: string, route: CanonicalRoute, current: number) => {
+    const service = offlineService.current;
+    if (!service) return;
+    const currentCache = ++cacheGeneration.current;
+    setOfflineCache('saving');
+    void service.cacheCanonicalRoute(userId, route)
+      .then(({ availableOffline }) => {
+        if (current === generation.current && currentCache === cacheGeneration.current) {
+          setOfflineCache(availableOffline ? 'ready' : 'unavailable');
+        }
+      })
+      .catch(() => {
+        if (current === generation.current && currentCache === cacheGeneration.current) {
+          setOfflineCache('unavailable');
+        }
+      });
+  }, []);
   const load = useCallback(async () => {
     const current = ++generation.current;
     controller.current?.abort();
@@ -35,14 +59,17 @@ export function RouteScreen() {
       if (result.availability === 'available' && result.route.seller.id !== user.id) throw new SellerHttpError(403);
       if (current !== generation.current) return;
       setIdentity(user); setToday(result);
+      if (result.availability === 'available') cacheRoute(user.id, result.route, current);
     } catch (error) {
       if (current !== generation.current) return;
       if (isSessionFailure(error)) setLoginRequired(true);
       else setMessage('Não foi possível carregar sua rota. Confira a conexão e tente novamente.');
     } finally { if (current === generation.current) setBusy(false); }
-  }, [clearPrivate]);
+  }, [cacheRoute, clearPrivate]);
 
   useEffect(() => {
+    const localService = new OfflineFoundationService();
+    offlineService.current = localService;
     void load();
     const connectivity = () => setOffline(!navigator.onLine);
     connectivity();
@@ -54,6 +81,8 @@ export function RouteScreen() {
     window.addEventListener('pageshow', restored);
     return () => {
       ++generation.current; controller.current?.abort(); channel.close();
+      localService.close();
+      if (offlineService.current === localService) offlineService.current = null;
       window.removeEventListener('online', connectivity); window.removeEventListener('offline', connectivity);
       window.removeEventListener('pageshow', restored);
     };
@@ -61,7 +90,11 @@ export function RouteScreen() {
 
   async function logout() {
     ++generation.current; controller.current?.abort(); clearPrivate(); setBusy(true); setMessage('');
-    try { await sellerClient.logout(); window.location.replace('/login'); }
+    try {
+      try { await offlineService.current?.revokeLocalAccess(identity?.id); } catch { /* Private UI is already hidden; remote logout must still run. */ }
+      await sellerClient.logout();
+      window.location.replace('/login');
+    }
     catch { setLoginRequired(true); setMessage('Os dados foram ocultados. Reconecte-se e tente sair novamente para confirmar o encerramento da sessão.'); setBusy(false); }
   }
 
@@ -77,6 +110,7 @@ export function RouteScreen() {
       if (current !== generation.current) return;
       if (refreshed.availability === 'available' && refreshed.route.seller.id !== identity?.id) throw new SellerHttpError(403);
       setToday(refreshed); setDraft(null); setMessage('Ordem salva e confirmada no servidor.');
+      if (refreshed.availability === 'available' && identity) cacheRoute(identity.id, refreshed.route, current);
     } catch (error) {
       if (current !== generation.current) return;
       if (isSessionFailure(error)) { clearPrivate(); setLoginRequired(true); setMessage('Seu acesso precisa ser validado novamente.'); }
@@ -108,7 +142,8 @@ export function RouteScreen() {
         {identity && <p className="seller-owner">{identity.displayName}</p>}</div>
         <span className={`seller-connection${offline ? ' is-offline' : ''}`}><span aria-hidden="true">●</span> {offline ? 'Sem conexão' : 'Consulta online'}</span>
       </div>
-      {offline && <p className="seller-notice" role="status">Sem conexão. É necessário estar online para carregar e salvar. Alterações nesta tela ainda não estão salvas.</p>}
+      {offline && <p className="seller-notice" role="status">Sem conexão. A rota já aberta continua consultável; atualização, reordenação, salvamento e Google Maps precisam de internet.</p>}
+      {offlineCache === 'unavailable' && !offline && <p className="seller-notice">A rota está disponível nesta tela, mas a cópia offline não pôde ser confirmada. Mantenha a conexão e tente atualizar novamente.</p>}
       {message && <div className="seller-notice" role="status">{message}</div>}
       {busy && !today && <div className="seller-state" role="status"><span className="seller-loading" aria-hidden="true" /><h2>Preparando seu dia…</h2><p>Validando seu acesso e buscando a rota publicada.</p></div>}
       {!busy && loginRequired && <section className="seller-state"><span className="seller-state-icon" aria-hidden="true">↗</span><h2>Entre para ver sua rota</h2><p>Use sua conta de vendedor para acessar o roteiro do dia.</p><a className="seller-button seller-primary" href="/login">Ir para o login</a></section>}
@@ -121,7 +156,11 @@ export function RouteScreen() {
             <div className="seller-ring" style={{ '--progress': `${progress.percent}%` } as CSSProperties} aria-label={`${progress.percent}% das visitas concluídas`}><span>{progress.percent}<small>%</small></span></div>
           </div><div className="seller-progress-bottom"><span>{pending.length} parada{pending.length !== 1 ? 's' : ''} pendente{pending.length !== 1 ? 's' : ''}</span><span>Rota publicada <span aria-hidden="true">✓</span></span></div></section>
           <div className="seller-route-tip"><span className="seller-tip-icon" aria-hidden="true">↕</span><div><h2>Seu roteiro, na melhor ordem</h2><p>Reorganize as paradas pendentes e salve antes de seguir. Visitas já iniciadas ou encerradas mantêm sua posição.</p></div></div>
-          <p className="seller-version">Versão da execução {route.executionVersion} · Consulta online<br />O uso offline desta rota será habilitado em uma próxima etapa.</p>
+          <p className="seller-version">Versão da execução {route.executionVersion} · Consulta online<br />{
+            offlineCache === 'ready' ? 'Disponível offline neste aparelho.'
+              : offlineCache === 'saving' ? 'Preparando a cópia offline…'
+                : 'Cópia offline ainda não confirmada.'
+          }</p>
         </aside>
         <section className="seller-stops" aria-labelledby="stops-title">
           <div className="seller-section-heading"><div><h2 id="stops-title">Paradas do dia <span>{stops.length}</span></h2><p>{draft ? 'Ajuste a sequência usando as setas.' : 'Seu roteiro na ordem de execução.'}</p></div>

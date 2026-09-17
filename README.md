@@ -1,6 +1,6 @@
 # Cirne Rotas
 
-Primeira experiência visual do vendedor (Stories 1.1–2.3): login, consulta da rota publicada e reordenação de pendências, com Supabase Auth, permissões/RLS e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; visita completa e uso offline da rota canônica ainda não estão disponíveis. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
+Primeira experiência visual do vendedor (Stories 1.1–2.5): login, consulta da rota publicada, reordenação de pendências, navegação externa e consulta offline da rota já carregada, com Supabase Auth, permissões/RLS e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; visita completa ainda não está disponível. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
 
 O checkpoint da preparação do host e o resultado da retomada estão em `Docs/RETOMADA_APOS_REINICIO.md`.
 
@@ -93,7 +93,7 @@ O resultado contém somente `id`, nome, papéis, capacidades, escopos e status. 
 
 ## Verificar o núcleo offline
 
-A interface técnica anterior está em `/demo/offline`. Ela não representa a rota autenticada do vendedor. O fallback de `/route` pede reconexão; não reutiliza os dados fictícios desse laboratório.
+A interface técnica anterior está em `/demo/offline`. Ela não representa a rota autenticada do vendedor e seus dados nunca substituem a rota real. Depois que uma rota publicada é aberta online, `/route` pode reabri-la por hard refresh sem rede dentro da janela local autorizada de 24 horas.
 
 O diagnóstico CLI valida contratos, conteúdo sintético e os estados locais permitidos, sem abrir navegador nem afirmar sincronização com servidor:
 
@@ -101,7 +101,7 @@ O diagnóstico CLI valida contratos, conteúdo sintético e os estados locais pe
 npm run --silent ops:offline -- --json
 ```
 
-Resultado esperado: `status: "ok"` e `syntheticOnly: true`. Esse diagnóstico inspeciona a fundação local; a prova de sincronização servidor é o comando abaixo.
+Resultado esperado: `status: "ok"`, `schemaVersion: 2`, `legacySchemaVersion: 1`, `canonicalSnapshot: true` e `syntheticOnly: true`. O comando prova a conversão canônica com fixture sintética sem remover o contrato legado; a prova de sincronização servidor é o comando abaixo.
 
 ## Verificar a sincronização pela CLI
 
@@ -148,15 +148,16 @@ O teste instala o Service Worker, confirma sua revisão, carrega uma rota sinté
 3. Execute o diagnóstico `ops:routes` acima para publicar/reutilizar a rota sintética do dia.
 4. Abra `http://127.0.0.1:3000/login`. Use o e-mail e a senha de `actors.seller_a` no arquivo local ignorado `.local/identity-actors.json`; não copie credenciais para documentação, Git ou capturas.
 5. Em `/route`, escolha **Reordenar**, use as setas e **Salvar ordem**. **Cancelar** descarta o rascunho visual. Um conflito exige **Recarregar rota**. **Sair** encerra a sessão deste navegador.
-6. Em cada cliente, **Navegar** abre o Google Maps em outra aba/aplicativo com o destino preenchido; abrir ou retornar não inicia/conclui visita nem salva a reordenação. **Copiar endereço** funciona também sem rede, desde que a rota já esteja na tela. Se o navegador negar a cópia, um campo selecionável permite copiar manualmente.
+6. Aguarde a indicação **Disponível offline neste aparelho**. Depois, desligue a conexão e recarregue `/route`: a última versão confirmada continua exibindo vendedor, data, progresso, clientes, estados e endereços. Atualização e reordenação permanecem online; **Bloquear acesso local** exige nova validação online sem apagar silenciosamente a cópia durável.
+7. Em cada cliente, **Navegar** abre o Google Maps em outra aba/aplicativo com o destino preenchido; abrir ou retornar não inicia/conclui visita nem salva a reordenação. **Copiar endereço** funciona também sem rede. Se o navegador negar a cópia, um campo selecionável permite copiar manualmente.
 
-Login e operações exigem conexão. A sessão usa cookies HttpOnly/SameSite, sem tokens em localStorage. Origem e cabeçalho CSRF são obrigatórios em login, logout e mutações por cookie. `APP_BASE_URL` precisa corresponder exatamente à origem usada no navegador (prefira `127.0.0.1`, não alterne com `localhost`). HTTPS habilita `Secure` nos cookies. A recuperação de senha orienta contato com administrador: não há SMTP implementado nesta etapa.
+Login, atualização, reordenação e Maps exigem conexão; a consulta da rota já carregada não. A sessão usa cookies SameSite, sem tokens em localStorage ou IndexedDB. A autorização local fica particionada por vendedor/dispositivo e expira após 24 horas; logout ou troca de vendedor revoga seu acesso sem expor a partição anterior. Origem e cabeçalho CSRF são obrigatórios em login, logout e mutações por cookie. `APP_BASE_URL` precisa corresponder exatamente à origem usada no navegador (prefira `127.0.0.1`, não alterne com `localhost`). HTTPS habilita `Secure` nos cookies. A recuperação de senha orienta contato com administrador: não há SMTP implementado nesta etapa.
 
 A rota exibida vem do servidor, inclusive data operacional, estado das paradas e progresso. Esta entrega não inclui registrar visitas ou painel gerencial. No celular, a mesma tela é responsiva; o servidor local continua restrito ao próprio computador, sem exposição na rede.
 
 A navegação usa [Google Maps URLs](https://developers.google.com/maps/documentation/urls/get-started), sem API key, SDK, origem fixa ou solicitação de geolocalização pelo Cirne Rotas. Coordenadas válidas completas têm preferência; caso contrário, usa o endereço. Não há consulta ao Google antes de clicar. O link exige conexão detectada e o app não verifica se o Maps está disponível: endereço copiável é a alternativa. O diagnóstico `npm run ops:navigation -- --json` testa essa regra com dados sintéticos, sem rede nem abertura de navegador.
 
-`npm run test:e2e` valida os estados de interface com respostas controladas e a regressão offline, sem exigir banco. Depois de `npm run test:integration` (que provisiona/publica a rota sintética), execute `npm run test:e2e:real` para provar login → rota → reordenação → reload → logout no navegador contra Supabase local. Esse ensaio usa apenas `seller_a`, altera sua ordem sintética e desativa traces para não guardar credenciais.
+`npm run test:e2e` valida os estados de interface com respostas controladas, cache canônico, hard refresh sem rede, revogação local e a regressão do laboratório offline, sem exigir banco. Depois de `npm run test:integration` (que provisiona/publica a rota sintética), execute `npm run test:e2e:real` para provar login → rota → cache → hard refresh offline → reordenação → reload → logout no navegador contra Supabase local. Esse ensaio usa apenas `seller_a`, altera sua ordem sintética e desativa traces para não guardar credenciais.
 
 ## Quality gates
 

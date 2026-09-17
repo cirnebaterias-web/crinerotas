@@ -184,7 +184,7 @@ test.describe('seller visual MVP', () => {
   });
 
   for (const unavailable of ['denied', 'missing'] as const) {
-    test(`clipboard ${unavailable} offers selectable manual fallback without false success`, async ({ page }) => {
+    test(`clipboard ${unavailable} offers selectable manual fallback without false success`, async ({ page }, testInfo) => {
       await page.addInitScript((mode) => {
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: mode === 'missing' ? undefined : {
           writeText: async () => { throw new DOMException('denied', 'NotAllowedError'); },
@@ -205,7 +205,7 @@ test.describe('seller visual MVP', () => {
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         const sizes = await card.locator('button, a').evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
         expect(sizes.every((height) => height >= 44)).toBe(true);
-        if (unavailable === 'denied') await page.screenshot({ path: `Docs/qa/evidence/2.4/navigation-fallback-${width}.png`, fullPage: true });
+        if (unavailable === 'denied') await page.screenshot({ path: testInfo.outputPath(`navigation-fallback-${width}.png`), fullPage: true });
       }
     });
   }
@@ -259,6 +259,6 @@ test('real route offline fallback never shows the synthetic offline bundle', asy
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await context.setOffline(true);
   await page.goto('/route', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'Vamos reconectar?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Rota real ainda não salva' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Carregar rota sintética local' })).toHaveCount(0);
 });

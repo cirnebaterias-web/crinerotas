@@ -1,7 +1,15 @@
 'use client';
 
-import { mePath, meResponseSchema, type LocalRouteBundle, type OfflinePartition } from '@cirne/contracts';
 import {
+  mePath,
+  meResponseSchema,
+  type CanonicalLocalRouteBundle,
+  type CanonicalRoute,
+  type LocalRouteBundle,
+  type OfflinePartition,
+} from '@cirne/contracts';
+import {
+  createCanonicalLocalRouteBundle,
   createSyntheticRouteBundle,
   createValidatedLocalSession,
   evaluateLocalAccess,
@@ -34,6 +42,13 @@ export type OfflineShellResult =
   | OfflineSnapshot
   | { kind: 'empty'; demoAvailable: boolean; message: string }
   | { kind: 'blocked'; reason: 'authentication_required' | 'session_expired' | 'clock_rollback'; message: string };
+
+export interface CanonicalRouteCacheResult {
+  bundle: CanonicalLocalRouteBundle;
+  workerReady: boolean;
+  storagePersisted: boolean;
+  availableOffline: boolean;
+}
 
 function isLoopback() {
   return ['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname);
@@ -95,6 +110,9 @@ export async function refreshBrowserSession(): Promise<boolean> {
 export class OfflineFoundationService {
   private readonly repository: OfflineRepository;
   private readonly syncEngine: SyncEngine;
+  private currentDeviceId: string | null = null;
+  private revocationBarrier: Promise<void> | null = null;
+  private accessRevoked = false;
 
   constructor(
     database = new OfflineDatabase(),
@@ -108,7 +126,7 @@ export class OfflineFoundationService {
 
   async initialize(): Promise<OfflineShellResult> {
     await this.repository.open();
-    const deviceId = getOrCreateDeviceId();
+    const deviceId = this.getDeviceId();
     const previousUserId = window.localStorage.getItem(userStorageKey);
 
     if (navigator.onLine) {
@@ -121,6 +139,9 @@ export class OfflineFoundationService {
             return { kind: 'blocked', reason: 'authentication_required', message: 'Acesso de vendedor ativo necessário.' };
           }
           const partition = { userId: identity.id, deviceId };
+          if (previousUserId && previousUserId !== identity.id) {
+            await this.invalidateLocalAccess(deviceId, previousUserId);
+          }
           await this.repository.saveLocalSession(createValidatedLocalSession(partition, this.now()));
           window.localStorage.setItem(userStorageKey, identity.id);
           return this.loadAuthorizedPartition(partition, true);
@@ -162,7 +183,7 @@ export class OfflineFoundationService {
     await this.repository.open();
     const workerReady = await workerIsReady(true);
     if (!workerReady) throw new Error('O shell offline ainda não terminou de instalar. Tente novamente.');
-    const partition = { userId: syntheticSellerId, deviceId: getOrCreateDeviceId() };
+    const partition = { userId: syntheticSellerId, deviceId: this.getDeviceId() };
     const timestamp = this.now();
     const bundle = createSyntheticRouteBundle(partition, timestamp);
     const session = createValidatedLocalSession(partition, timestamp);
@@ -172,6 +193,48 @@ export class OfflineFoundationService {
     const loaded = await this.loadAuthorizedPartition(partition, false, { workerReady, storagePersisted });
     if (loaded.kind !== 'ready') throw new Error('A sessão sintética local não pôde ser validada.');
     return loaded;
+  }
+
+  async cacheCanonicalRoute(userId: string, route: CanonicalRoute): Promise<CanonicalRouteCacheResult> {
+    if (this.accessRevoked || this.revocationBarrier) {
+      throw new Error('O acesso local está sendo revogado.');
+    }
+    return this.persistCanonicalRoute(userId, route);
+  }
+
+  private async persistCanonicalRoute(userId: string, route: CanonicalRoute): Promise<CanonicalRouteCacheResult> {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const timestamp = this.now();
+    const bundle = createCanonicalLocalRouteBundle(partition, route, timestamp);
+    const session = createValidatedLocalSession(partition, timestamp);
+    const [workerReady, storagePersisted] = await Promise.all([
+      workerIsReady(true),
+      requestStoragePersistence(),
+    ]);
+    if (this.accessRevoked) throw new Error('O acesso local foi revogado.');
+    const stored = await this.repository.saveValidatedRoute(bundle, session);
+    if (stored.schemaVersion !== 2) throw new Error('O snapshot canônico não foi persistido.');
+    window.localStorage.setItem(userStorageKey, userId);
+    return { bundle: stored, workerReady, storagePersisted, availableOffline: workerReady };
+  }
+
+  revokeLocalAccess(userId?: string) {
+    if (this.revocationBarrier) return this.revocationBarrier;
+    this.accessRevoked = true;
+    const operation = this.performLocalRevocation(userId).finally(() => {
+      if (this.revocationBarrier === operation) this.revocationBarrier = null;
+    });
+    this.revocationBarrier = operation;
+    return operation;
+  }
+
+  private async performLocalRevocation(userId?: string) {
+    await this.repository.open();
+    const deviceId = this.getDeviceId();
+    let previousUserId: string | null = null;
+    try { previousUserId = window.localStorage.getItem(userStorageKey); } catch { /* The explicit user still allows fail-closed session deletion. */ }
+    await this.invalidateLocalAccess(deviceId, previousUserId, userId ?? null);
   }
 
   createDraftCommand(bundle: LocalRouteBundle, currentDraftOfflineId?: string): SaveDraftCommand {
@@ -217,11 +280,18 @@ export class OfflineFoundationService {
   }
 
   private async invalidateLocalAccess(deviceId: string, ...userIds: Array<string | null>) {
-    window.localStorage.removeItem(userStorageKey);
+    let storageFailure: unknown;
+    try { window.localStorage.removeItem(userStorageKey); } catch (error) { storageFailure = error; }
     const uniqueUserIds = [...new Set(userIds.filter((userId): userId is string => Boolean(userId)))];
     await Promise.all(uniqueUserIds.map((userId) => (
       this.repository.deleteLocalSession({ userId, deviceId })
     )));
+    if (storageFailure) throw storageFailure;
+  }
+
+  private getDeviceId() {
+    this.currentDeviceId ??= getOrCreateDeviceId();
+    return this.currentDeviceId;
   }
 
   private async requireLocalAccess(partition: OfflinePartition) {

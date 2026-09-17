@@ -371,6 +371,20 @@ export const localRouteBundleSchema = z.object({
 }).strict();
 export type LocalRouteBundle = z.infer<typeof localRouteBundleSchema>;
 
+export const canonicalLocalRouteBundleSchema = canonicalRouteSchema.omit({ schemaVersion: true }).extend({
+  schemaVersion: z.literal(2),
+  userId: z.uuid(),
+  deviceId: z.uuid(),
+  cachedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type CanonicalLocalRouteBundle = z.infer<typeof canonicalLocalRouteBundleSchema>;
+
+export const offlineRouteBundleSchema = z.discriminatedUnion('schemaVersion', [
+  localRouteBundleSchema,
+  canonicalLocalRouteBundleSchema,
+]);
+export type OfflineRouteBundle = z.infer<typeof offlineRouteBundleSchema>;
+
 export const localSessionSchema = z.object({
   schemaVersion: offlineSchemaVersionSchema,
   userId: z.uuid(),

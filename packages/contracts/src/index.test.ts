@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import {
   apiErrorResponseSchema,
+  canonicalLocalRouteBundleSchema,
   canonicalRouteSchema,
   createRouteDraftRequestSchema,
   liveResponseSchema,
@@ -11,6 +12,7 @@ import {
   meResponseSchema,
   offlineOutboxEventSchema,
   offlineOutboxStatusSchema,
+  offlineRouteBundleSchema,
   publishRouteRequestSchema,
   reorderRouteExecutionRequestSchema,
   reorderRouteExecutionResultSchema,
@@ -112,6 +114,18 @@ it('keeps draft, publication and canonical route responses strict', () => {
     serviceDate: routeRequest.serviceDate,
   })).toEqual({ schemaVersion: 2, availability: 'empty', serviceDate: routeRequest.serviceDate });
   expect(canonicalRouteSchema.safeParse({ ...route, token: 'private' }).success).toBe(false);
+
+  const localRoute = {
+    ...route,
+    schemaVersion: 2 as const,
+    userId: route.seller.id,
+    deviceId: '22222222-2222-4222-8222-222222222222',
+    cachedAt: '2026-09-15T12:05:00.000Z',
+  };
+  expect(canonicalLocalRouteBundleSchema.parse(localRoute)).toEqual(localRoute);
+  expect(offlineRouteBundleSchema.parse(localRoute)).toEqual(localRoute);
+  expect(canonicalLocalRouteBundleSchema.safeParse({ ...localRoute, parameterSetVersion: 1 }).success)
+    .toBe(false);
 });
 
 it('validates a strict aggregate execution order command and result', () => {

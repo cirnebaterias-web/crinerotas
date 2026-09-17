@@ -1,6 +1,7 @@
 export { buildGoogleMapsUrl, type NavigationDestination } from './navigation';
 
 import {
+  canonicalLocalRouteBundleSchema,
   canonicalRouteSchema,
   createRouteDraftRequestSchema,
   maxSyncBatchEvents,
@@ -9,6 +10,7 @@ import {
   localVisitDraftSchema,
   offlineOutboxEventSchema,
   type LocalRouteBundle,
+  type CanonicalLocalRouteBundle,
   type LocalSession,
   type LocalVisitDraft,
   type OfflineOutboxEvent,
@@ -190,6 +192,38 @@ export function createSyntheticRouteBundle(
       { routeVersionStopId: syntheticRouteIds.secondStopId, displayLabel: 'Parada sintética 02', executionOrder: 2, priority: 0 },
     ],
     cachedAt,
+  });
+}
+
+export function createCanonicalLocalRouteBundle(
+  partition: OfflinePartition,
+  routeInput: CanonicalRoute,
+  cachedAt: string,
+): CanonicalLocalRouteBundle {
+  const route = canonicalRouteSchema.parse(routeInput);
+  if (route.seller.id !== partition.userId) {
+    throw new RouteDomainError('VALIDATION_FAILED', 'A rota não pertence à partição offline informada.');
+  }
+  return canonicalLocalRouteBundleSchema.parse({
+    ...partition,
+    ...route,
+    cachedAt,
+  });
+}
+
+export function restoreCanonicalRoute(bundleInput: CanonicalLocalRouteBundle): CanonicalRoute {
+  const bundle = canonicalLocalRouteBundleSchema.parse(bundleInput);
+  return canonicalRouteSchema.parse({
+    schemaVersion: 2,
+    routeId: bundle.routeId,
+    routeVersionId: bundle.routeVersionId,
+    versionNumber: bundle.versionNumber,
+    serviceDate: bundle.serviceDate,
+    status: bundle.status,
+    publishedAt: bundle.publishedAt,
+    executionVersion: bundle.executionVersion,
+    seller: bundle.seller,
+    stops: bundle.stops,
   });
 }
 

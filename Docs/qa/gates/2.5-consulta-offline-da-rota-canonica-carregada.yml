@@ -1,0 +1,39 @@
+schema: 1
+story: '2.5'
+story_title: 'Consulta offline da rota canônica carregada'
+gate: PASS
+status_reason: 'AC 1–7 atendidos com snapshot/ sessão monotônicos, revogação fail-closed e hard refresh canônico. Regressão final soma 372 testes PASS e CodeRabbit concluiu com zero findings.'
+reviewer: 'Quinn (@qa, Codex)'
+reviewed_revision: 'working-tree-sha256:a92a9f8ec9d5b5a49a0a382470791848d7748a61463b7e0311df32823213a05d'
+updated: '2026-09-17T02:53:24Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 372
+  tests_rerun: 372
+  review: 'Docs/qa/evidence/2.5/qa-review.md'
+  implementation: 'Docs/qa/evidence/2.5/validation.md'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Partição explícita, fail-closed, revogação concorrente, sem credencial local ou cache privado.'
+  performance:
+    status: PASS
+    notes: 'Cache assíncrono, limite de 50 paradas, IndexedDB indexado e nenhuma dependência externa nova.'
+  reliability:
+    status: PASS
+    notes: 'Upgrade v1→v4, atomicidade, quota, concorrência fora de ordem e hard refresh offline cobertos.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos/domínio/repositório/serviço/UI separados, schemas runtime e documentação atualizada.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Homologar offline, quota e atualização PWA em Android/Chrome físico antes do piloto.'
+      refs: ['AB-14', 'Docs/qa/evidence/2.5/qa-review.md']
+    - action: 'Aprovar política de privacidade, retenção e limpeza antes de usar dados reais.'
+      refs: ['AB-15', 'Docs/qa/evidence/2.5/qa-review.md']

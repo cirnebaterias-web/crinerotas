@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertExpectedRouteVersion,
+  createCanonicalLocalRouteBundle,
   createDraftMutation,
   createSyntheticRouteBundle,
   createValidatedLocalSession,
@@ -14,6 +15,7 @@ import {
   orderOutboxEvents,
   normalizeRouteDraft,
   normalizePendingStopOrder,
+  restoreCanonicalRoute,
   toRouteTodayResponse,
   toSyncCommand,
 } from './index';
@@ -145,6 +147,50 @@ it('creates only deterministic synthetic route content', () => {
   expect(second).toEqual(first);
   expect(JSON.stringify(first)).toContain('sintética');
   expect(JSON.stringify(first)).not.toMatch(/@|rua|avenida|telefone/i);
+});
+
+it('creates an exact canonical local snapshot without synthetic parameters', () => {
+  const route = {
+    schemaVersion: 2 as const,
+    routeId: '33333333-3333-4333-8333-333333333333',
+    routeVersionId: '44444444-4444-4444-8444-444444444444',
+    versionNumber: 2,
+    serviceDate: '2026-09-16',
+    status: 'published' as const,
+    publishedAt: '2026-09-16T10:00:00.000Z',
+    executionVersion: 3,
+    seller: { id: partition.userId, displayName: 'Vendedor A Sintético' },
+    stops: [{
+      routeVersionStopId: '55555555-5555-4555-8555-555555555555',
+      plannedOrder: 1,
+      executionOrder: 1,
+      priority: 2,
+      status: 'pending' as const,
+      executionVersion: 3,
+      client: {
+        id: '66666666-6666-4666-8666-666666666666',
+        externalReference: 'SYN-01',
+        name: 'Cliente Sintético',
+        address: 'Endereço sintético',
+        latitude: null,
+        longitude: null,
+        portfolioReference: null,
+      },
+    }],
+  };
+  const snapshot = createCanonicalLocalRouteBundle(
+    partition,
+    route,
+    '2026-09-16T10:05:00.000Z',
+  );
+  expect(snapshot).toMatchObject({ ...partition, ...route });
+  expect(snapshot).not.toHaveProperty('parameterSetVersion');
+  expect(restoreCanonicalRoute(snapshot)).toEqual(route);
+  expect(() => createCanonicalLocalRouteBundle(
+    { ...partition, userId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+    route,
+    snapshot.cachedAt,
+  )).toThrow('A rota não pertence à partição offline informada.');
 });
 
 function createEvent(aggregateId: string, sequence: number) {
