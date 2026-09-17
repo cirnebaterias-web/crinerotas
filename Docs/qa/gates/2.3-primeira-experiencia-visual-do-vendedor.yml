@@ -1,0 +1,41 @@
+schema: 1
+story: '2.3'
+story_title: 'Primeira experiência visual do vendedor'
+gate: PASS
+status_reason: 'Os sete critérios do recorte visual estão cobertos. Login, sessão, rota canônica, reordenação e isolamento do laboratório offline passaram pelos gates e pelo navegador com Supabase local.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:75292aefc7d6a48069b9a345ce50f2e01ae7dc5b'
+updated: '2026-09-17T00:33:00Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  unit_tests: 124
+  database_tests: 182
+  integration_tests: 14
+  e2e_tests: 12
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7]
+    ac_gaps: []
+  reports:
+    - 'Docs/qa/evidence/2.3/visual-mvp.md'
+    - 'Docs/qa/evidence/2.3/qa-review.md'
+  coderabbit: 'Duas revisões concluídas; duas observações de cookies corrigidas, segunda revisão sem apontamentos. Extração final de serviço e ajustes cosméticos inspecionados manualmente e revalidados.'
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'HttpOnly/SameSite, Secure por padrão fora de HTTP loopback, Origin/CSRF, perfil/escopo atual, deleção da sessão anterior em troca negada e redaction.'
+  performance:
+    status: PASS
+    notes: 'Limite contratual de 50 paradas, nenhuma dependência nova e timeout HTTP de 15s; sem alegação de benchmark de produção.'
+  reliability:
+    status: PASS
+    notes: 'Cancelamento sem mutação, recarga canônica, 409 explícito, draft preservado em erro e regressão offline isolada.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos compartilhados, cliente HTTP separado, autorização em serviço, funções puras de apresentação e testes reais/controlados.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Prosseguir com visitas, navegação e offline canônico conforme as próximas stories; validar aparelho físico e gates de piloto antes de dados reais.'
+      refs: ['Docs/prd.md', 'Docs/architecture.md']

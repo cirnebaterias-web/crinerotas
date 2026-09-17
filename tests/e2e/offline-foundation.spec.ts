@@ -6,7 +6,7 @@ const routeId = '33333333-3333-4333-8333-333333333333';
 const stopId = '44444444-4444-4444-8444-444444444441';
 
 test('installs the generic shell and reopens route, draft, and outbox offline', async ({ page, context }) => {
-  await page.goto('/route');
+  await page.goto('/demo/offline');
   await expect(page.getByRole('heading', { name: 'Rota de campo' })).toBeVisible();
   await page.getByRole('button', { name: 'Carregar rota sintética local' }).click();
   await expect(page.getByText('Disponível offline', { exact: true })).toBeVisible();
@@ -86,12 +86,12 @@ test('installs the generic shell and reopens route, draft, and outbox offline', 
   await expect(page.getByText('Rascunho salvo no aparelho.')).toBeVisible();
   await expect(page.getByText('1 evento(s)')).toBeVisible();
 
-  await page.goto('/visit/55555555-5555-4555-8555-555555555555?step=start', { waitUntil: 'domcontentloaded' });
+  await page.goto('/demo/offline/visit/55555555-5555-4555-8555-555555555555?step=start', { waitUntil: 'domcontentloaded' });
   await expect(page.getByText('Disponível offline', { exact: true })).toBeVisible();
 });
 
 test('does not claim a saved draft after quota failure and safely retries the same command', async ({ page }) => {
-  await page.goto('/route');
+  await page.goto('/demo/offline');
   await page.getByRole('button', { name: 'Carregar rota sintética local' }).click();
   await expect(page.getByText('Disponível offline', { exact: true })).toBeVisible();
 
@@ -118,7 +118,7 @@ test('does not claim a saved draft after quota failure and safely retries the sa
   await expect(page.getByText('1 evento(s)')).toBeVisible();
 });
 
-test('upgrades an existing browser database from v1 to v3 without deleting durable records', async ({ page }) => {
+test('upgrades an existing browser database from v1 to v5 without deleting durable records', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(async ({ syntheticSellerId, deviceId, routeId, stopId }) => {
     await new Promise<void>((resolve, reject) => {
@@ -178,7 +178,7 @@ test('upgrades an existing browser database from v1 to v3 without deleting durab
     localStorage.setItem('cirne-rotas.last-user-id', syntheticSellerId);
   }, { syntheticSellerId, deviceId, routeId, stopId });
 
-  await page.goto('/route');
+  await page.goto('/demo/offline');
   await expect(page.getByText('Acesso local bloqueado')).toBeVisible();
   const migrated = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -196,5 +196,5 @@ test('upgrades an existing browser database from v1 to v3 without deleting durab
     database.close();
     return { logicalVersion, hasSessions, counts };
   });
-  expect(migrated).toEqual({ logicalVersion: 3, hasSessions: true, counts: [1, 1, 1] });
+  expect(migrated).toEqual({ logicalVersion: 5, hasSessions: true, counts: [1, 1, 1] });
 });

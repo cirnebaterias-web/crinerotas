@@ -12,7 +12,7 @@ let origin: string;
 let output = '';
 let identityEnvironment: { SUPABASE_PUBLIC_URL: string; SUPABASE_PUBLISHABLE_KEY: string };
 let actorManifest: {
-  actors: Record<string, { id: string; accessToken: string }>;
+  actors: Record<string, { id: string; accessToken: string; email: string; password: string }>;
 };
 let publishedRouteId = '';
 
@@ -139,6 +139,85 @@ afterAll(async () => {
   if (server) await stopProcess(server);
 });
 
+it('signs in through HttpOnly cookies, reads the seller route and signs out without exposing tokens', async () => {
+  const seller = actorManifest.actors.seller_a!;
+  const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
+  const response = await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers, body: JSON.stringify({ email: seller.email, password: seller.password }),
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  const result = await response.text();
+  expect(JSON.parse(result)).toMatchObject({ id: seller.id, roles: ['seller'] });
+  expect(result).not.toMatch(/access_token|refresh_token|password|email/i);
+  const setCookies = response.headers.getSetCookie();
+  expect(setCookies.length).toBeGreaterThan(0);
+  for (const cookie of setCookies) {
+    expect(cookie).toMatch(/httponly/i);
+    expect(cookie).toMatch(/samesite=lax/i);
+  }
+  const cookie = setCookies.map((item) => item.split(';')[0]).join('; ');
+  const me = await fetch(`${origin}/api/v1/me`, { headers: { cookie } });
+  expect(me.status).toBe(200);
+  expect(await me.json()).toMatchObject({ id: seller.id });
+  const route = await fetch(`${origin}/api/v1/me/routes/today`, { headers: { cookie } });
+  expect(route.status).toBe(200);
+  expect(await route.json()).toMatchObject({ schemaVersion: 3 });
+  const logout = await fetch(`${origin}/api/v1/auth/session`, { method: 'DELETE', headers: { ...headers, cookie } });
+  expect(logout.status).toBe(204);
+  expect(logout.headers.getSetCookie().every((value) => /max-age=0/i.test(value))).toBe(true);
+  expect((await fetch(`${origin}/api/v1/me`)).status).toBe(401);
+  expect(output.includes(seller.password)).toBe(false);
+  expect(output.includes(seller.accessToken)).toBe(false);
+});
+
+it('clears a previous browser session when an account switch is rejected', async () => {
+  const seller = actorManifest.actors.seller_a!;
+  const blocked = actorManifest.actors.blocked!;
+  const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
+  const signedIn = await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers, body: JSON.stringify({ email: seller.email, password: seller.password }),
+  });
+  expect(signedIn.status).toBe(200);
+  const cookie = signedIn.headers.getSetCookie().map((item) => item.split(';')[0]).join('; ');
+  const rejected = await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers: { ...headers, cookie }, body: JSON.stringify({ email: blocked.email, password: blocked.password }),
+  });
+  expect(rejected.status).toBe(403);
+  expect(rejected.headers.getSetCookie().length).toBeGreaterThan(0);
+  expect(rejected.headers.getSetCookie().every((value) => /max-age=0/i.test(value))).toBe(true);
+});
+
+it('rejects login failures, blocked/non-seller identities, CSRF, bearer and malformed bodies', async () => {
+  const seller = actorManifest.actors.seller_a!;
+  const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
+  for (const [key, expected] of [['blocked', 403], ['manager_a', 403], ['invalid', 401]] as const) {
+    const actor = actorManifest.actors[key] ?? { email: seller.email, password: 'incorrect-synthetic-password' };
+    const response = await fetch(`${origin}/api/v1/auth/session`, {
+      method: 'POST', headers, body: JSON.stringify({ email: actor.email, password: actor.password }),
+    });
+    expect(response.status).toBe(expected);
+    expect(response.headers.getSetCookie()).toHaveLength(0);
+    const body = await response.text();
+    expect(body).not.toContain(actor.password);
+    expect(body).not.toContain(actor.email);
+  }
+  for (const method of ['POST', 'DELETE']) {
+    for (const badHeaders of [
+      { ...headers, origin: 'https://other.example' },
+      { ...headers, 'x-csrf-token': '' },
+      { ...headers, authorization: 'Bearer synthetic' },
+    ]) {
+      const response = await fetch(`${origin}/api/v1/auth/session`, { method, headers: badHeaders });
+      expect([400, 403]).toContain(response.status);
+    }
+  }
+  expect((await fetch(`${origin}/api/v1/auth/session`, { method: 'POST', headers, body: '{}' })).status).toBe(400);
+  expect((await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers, body: JSON.stringify({ password: 'a'.repeat(65536) }),
+  })).status).toBe(413);
+});
+
 it('serves a minimal no-store canary without database credentials', async () => {
   const response = await fetch(`${origin}/api/v1/health/live?token=not-for-logs`, { headers: { authorization: 'Bearer synthetic-private' } });
   expect(response.status).toBe(200);
@@ -176,7 +255,7 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   expect(await sellerResponse.json()).toMatchObject({
     id: seller.id,
     roles: ['seller'],
-    capabilities: ['identity.read_self', 'route.read_self', 'sync.write_self'],
+    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'sync.write_self'],
     scopeIds: [seller.id],
     status: 'active',
   });
@@ -268,22 +347,66 @@ it('runs the synthetic route round-trip CLI without exposing tokens or client sn
       CIRNE_SELLER_ACCESS_TOKEN: seller.accessToken,
     },
   };
+  const beforeResponse = await fetch(`${origin}/api/v1/me/routes/today`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(beforeResponse.status).toBe(200);
+  const before = await beforeResponse.json() as {
+    availability: string;
+    route?: {
+      executionVersion: number;
+      versionNumber: number;
+      compositionChange?: { reason: string } | null;
+      stops: Array<{ client: { id: string } }>;
+    };
+  };
+  const expectedClientIds = [
+    '10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000003',
+  ];
+  const alreadyCurrent = before.route?.compositionChange?.reason ===
+    'Ajuste sintetico de composicao para validacao local' &&
+    JSON.stringify(before.route.stops.map(({ client }) => client.id).sort()) ===
+      JSON.stringify(expectedClientIds);
+  const expectedRouteVersion = before.route
+    ? before.route.versionNumber + (alreadyCurrent ? 0 : 1)
+    : 2;
+  const expectedCreated = !before.route;
+  const expectedPublished = !before.route || !alreadyCurrent;
   const result = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
-  const body = JSON.parse(result.stdout) as { routeId: string; stopCount: number; checks: object };
+  const body = JSON.parse(result.stdout) as {
+    routeId: string;
+    stopCount: number;
+    executionVersion: number;
+    checks: { composition: string; reasonConfirmed: boolean; reordered: string };
+  };
   publishedRouteId = body.routeId;
   expect(body).toMatchObject({
     status: 'ok',
-    routeVersion: 1,
+    routeVersion: expectedRouteVersion,
+    executionVersion: expect.any(Number),
     routeStatus: 'published',
     stopCount: 2,
-    checks: { created: true, published: true, loadedBySeller: true },
+    checks: { created: expectedCreated, published: expectedPublished, loadedBySeller: true,
+      composition: alreadyCurrent ? 'already_current' : 'applied',
+      reasonConfirmed: true,
+      reordered: expect.stringMatching(/^(applied|already_canonical)$/) },
   });
   expect(result.stdout + result.stderr).not.toContain(manager.accessToken);
   expect(result.stdout + result.stderr).not.toContain(seller.accessToken);
   expect(result.stdout + result.stderr).not.toMatch(/Cliente Sintético|Endereço sintético|snapshot/i);
 
   const repeated = await runWithClosedInput(process.execPath, cliArguments, cliOptions);
-  expect(JSON.parse(repeated.stdout)).toEqual(body);
+  expect(JSON.parse(repeated.stdout)).toEqual({
+    ...body,
+    checks: {
+      ...body.checks,
+      created: false,
+      published: false,
+      composition: 'already_current',
+      reordered: 'already_canonical',
+    },
+  });
   expect(repeated.stdout + repeated.stderr).not.toContain(manager.accessToken);
   expect(repeated.stdout + repeated.stderr).not.toContain(seller.accessToken);
 });
@@ -298,9 +421,21 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
     headers: { Authorization: `Bearer ${seller.accessToken}` },
   });
   expect(ownRoute.status).toBe(200);
-  expect(await ownRoute.json()).toMatchObject({
+  const ownRouteBody = await ownRoute.json() as {
+    route: {
+      routeId: string;
+      executionVersion: number;
+      stops: Array<{ routeVersionStopId: string; status: string }>;
+    };
+  };
+  expect(ownRouteBody).toMatchObject({
     availability: 'available',
-    route: { routeId: publishedRouteId, seller: { id: seller.id }, status: 'published' },
+    route: {
+      routeId: publishedRouteId,
+      executionVersion: expect.any(Number),
+      seller: { id: seller.id },
+      status: 'published',
+    },
   });
   expect(ownRoute.headers.get('cache-control')).toContain('no-store');
 
@@ -321,6 +456,151 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
   });
   expect(managerRoute.status).toBe(200);
   expect(await managerRoute.json()).toMatchObject({ routeId: publishedRouteId, status: 'published' });
+
+  const forbiddenComposition = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  expect(forbiddenComposition.status).toBe(403);
+  const missingIdempotency = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${manager.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      expectedVersion: ownRouteBody.route.executionVersion,
+      reason: 'Teste sem chave idempotente',
+      stops: [
+        { clientId: '10000000-0000-4000-8000-000000000002', plannedOrder: 1, priority: 0 },
+        { clientId: '10000000-0000-4000-8000-000000000003', plannedOrder: 2, priority: 1 },
+      ],
+    }),
+  });
+  expect(missingIdempotency.status).toBe(422);
+  const staleComposition = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${manager.accessToken}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': crypto.randomUUID(),
+    },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      expectedVersion: 1,
+      reason: 'Teste de versao obsoleta',
+      stops: [
+        { clientId: '10000000-0000-4000-8000-000000000002', plannedOrder: 1, priority: 0 },
+        { clientId: '10000000-0000-4000-8000-000000000003', plannedOrder: 2, priority: 1 },
+      ],
+    }),
+  });
+  expect(staleComposition.status).toBe(409);
+  expect(staleComposition.headers.get('cache-control')).toContain('no-store');
+
+  const compositionHeaders = {
+    Authorization: `Bearer ${manager.accessToken}`,
+    'Content-Type': 'application/json',
+  };
+  const compositionCommands = [
+    [
+      { clientId: '10000000-0000-4000-8000-000000000001', plannedOrder: 1, priority: 1 },
+      { clientId: '10000000-0000-4000-8000-000000000003', plannedOrder: 2, priority: 0 },
+    ],
+    [
+      { clientId: '10000000-0000-4000-8000-000000000001', plannedOrder: 1, priority: 0 },
+      { clientId: '10000000-0000-4000-8000-000000000002', plannedOrder: 2, priority: 1 },
+    ],
+  ];
+  const competingCompositions = await Promise.all(compositionCommands.map((stops, index) => (
+    fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+      method: 'PATCH',
+      headers: { ...compositionHeaders, 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        expectedVersion: ownRouteBody.route.executionVersion,
+        reason: `Ajuste concorrente sintetico ${index + 1}`,
+        stops,
+      }),
+    })
+  )));
+  expect(competingCompositions.map(({ status }) => status).sort()).toEqual([200, 409]);
+  const acceptedComposition = competingCompositions.find(({ status }) => status === 200)!;
+  const rejectedComposition = competingCompositions.find(({ status }) => status === 409)!;
+  expect(await rejectedComposition.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+  const acceptedCompositionBody = await acceptedComposition.json() as { expectedVersion: number };
+  const successorPublication = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/publish`, {
+    method: 'POST',
+    headers: compositionHeaders,
+    body: JSON.stringify({ schemaVersion: 1, expectedVersion: acceptedCompositionBody.expectedVersion }),
+  });
+  expect(successorPublication.status).toBe(200);
+  const operationalRoute = await fetch(`${origin}/api/v1/me/routes/today`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(operationalRoute.status).toBe(200);
+  const operationalRouteBody = await operationalRoute.json() as typeof ownRouteBody;
+  expect(operationalRouteBody.route.executionVersion).toBe(acceptedCompositionBody.expectedVersion + 1);
+
+  const competingOrder = [...operationalRouteBody.route.stops]
+    .filter(({ status }) => status === 'pending')
+    .reverse()
+    .map(({ routeVersionStopId }) => routeVersionStopId);
+  const reorderBody = JSON.stringify({
+    schemaVersion: 1,
+    expectedVersion: operationalRouteBody.route.executionVersion,
+    pendingStopIds: competingOrder,
+  });
+  for (const [accessToken, body, expectedStatus] of [
+    [sellerB.accessToken, reorderBody, 404],
+    [seller.accessToken, '{}', 422],
+    [seller.accessToken, JSON.stringify({ schemaVersion: 1,
+      expectedVersion: operationalRouteBody.route.executionVersion,
+      pendingStopIds: [competingOrder[0], competingOrder[0]] }), 422],
+  ] as const) {
+    const rejected = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+      method: 'PUT', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body,
+    });
+    expect(rejected.status).toBe(expectedStatus);
+    expect(rejected.headers.get('cache-control')).toContain('no-store');
+  }
+  const [sellerReorder, managerReorder] = await Promise.all([
+    fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
+      body: reorderBody,
+    }),
+    fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${manager.accessToken}`, 'Content-Type': 'application/json' },
+      body: reorderBody,
+    }),
+  ]);
+  expect([sellerReorder.status, managerReorder.status].sort()).toEqual([200, 409]);
+  const successfulReorder = sellerReorder.ok ? sellerReorder : managerReorder;
+  const conflictedReorder = sellerReorder.ok ? managerReorder : sellerReorder;
+  expect(await successfulReorder.json()).toMatchObject({
+    changed: true, executionVersion: operationalRouteBody.route.executionVersion + 1,
+  });
+  expect(await conflictedReorder.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
+  const confirmed = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(confirmed.status).toBe(200);
+  const confirmedBody = await confirmed.json() as {
+    executionVersion: number; stops: Array<{ routeVersionStopId: string }>;
+  };
+  expect(confirmedBody.executionVersion).toBe(operationalRouteBody.route.executionVersion + 1);
+  expect(confirmedBody.stops.map((stop) => stop.routeVersionStopId)).toEqual(competingOrder);
+  const uppercaseNoOp = await fetch(`${origin}/api/v1/routes/${publishedRouteId.toUpperCase()}/execution-order`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schemaVersion: 1, expectedVersion: confirmedBody.executionVersion,
+      pendingStopIds: competingOrder.map((id) => id.toUpperCase()) }),
+  });
+  expect(uppercaseNoOp.status).toBe(200);
+  expect(await uppercaseNoOp.json()).toMatchObject({
+    changed: false, executionVersion: confirmedBody.executionVersion, pendingStopIds: competingOrder,
+  });
 
   const stalePublication = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/publish`, {
     method: 'POST',
@@ -405,10 +685,11 @@ it('enforces sync BFF authorization and preserves independent partial progress',
 });
 
 it('refuses startup with an invalid required configuration without leaking its value', async () => {
+  const invalidPort = await freePort();
   try {
     await exec(process.execPath, [path.join(root, 'scripts/start-web.mjs')], {
       cwd: path.join(root, 'apps/web'), windowsHide: true, timeout: 15000,
-      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, PORT: '3000', NODE_ENV: 'production', APP_BASE_URL: 'synthetic-secret-invalid-url', NEXT_TELEMETRY_DISABLED: '1' },
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, PORT: String(invalidPort), NODE_ENV: 'production', APP_BASE_URL: 'synthetic-secret-invalid-url', NEXT_TELEMETRY_DISABLED: '1' },
     });
     throw new Error('Server incorrectly accepted invalid configuration');
   } catch (error) {

@@ -1,13 +1,13 @@
 import Dexie from 'dexie';
 import {
-  localRouteBundleSchema,
   localSessionSchema,
   localVisitDraftSchema,
+  offlineRouteBundleSchema,
   offlineOutboxEventSchema,
   offlinePartitionSchema,
-  type LocalRouteBundle,
   type LocalSession,
   type LocalVisitDraft,
+  type OfflineRouteBundle,
   type OfflineOutboxEvent,
   type OfflinePartition,
   type SyncErrorCode,
@@ -45,15 +45,39 @@ export class OfflineRepository {
     this.db.close();
   }
 
-  async saveValidatedRoute(bundleInput: LocalRouteBundle, sessionInput: LocalSession) {
-    const bundle = localRouteBundleSchema.parse(bundleInput);
+  async saveValidatedRoute(bundleInput: OfflineRouteBundle, sessionInput: LocalSession) {
+    const bundle = offlineRouteBundleSchema.parse(bundleInput);
     const session = localSessionSchema.parse(sessionInput);
     assertPartition(session, bundle);
     return this.db.transaction('rw', this.db.routeBundles, this.db.localSessions, async () => {
+      const key: [string, string, string] = [bundle.userId, bundle.deviceId, bundle.routeId];
+      const existing = await this.db.routeBundles.get(key);
+      if ((existing?.schemaVersion === 2 || existing?.schemaVersion === 3) && (
+        bundle.schemaVersion === 1 ||
+        existing.versionNumber > bundle.versionNumber ||
+        (existing.versionNumber === bundle.versionNumber && existing.executionVersion > bundle.executionVersion) ||
+        (existing.versionNumber === bundle.versionNumber &&
+          existing.executionVersion === bundle.executionVersion &&
+          Date.parse(existing.cachedAt) > Date.parse(bundle.cachedAt))
+      )) {
+        await this.saveNewestLocalSession(session);
+        return existing;
+      }
       await this.db.routeBundles.put(bundle);
-      await this.db.localSessions.put(session);
+      await this.saveNewestLocalSession(session);
       return bundle;
     });
+  }
+
+  private async saveNewestLocalSession(session: LocalSession) {
+    const key: [string, string] = [session.userId, session.deviceId];
+    const current = await this.db.localSessions.get(key);
+    if (!current || Date.parse(session.validatedAt) > Date.parse(current.validatedAt) || (
+      session.validatedAt === current.validatedAt &&
+      Date.parse(session.lastObservedAt) >= Date.parse(current.lastObservedAt)
+    )) {
+      await this.db.localSessions.put(session);
+    }
   }
 
   async getRouteBundle(partitionInput: OfflinePartition, routeId: string) {

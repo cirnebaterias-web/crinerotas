@@ -1,5 +1,5 @@
-import { productName } from '@cirne/config/public';
+import { LoginScreen } from '@/features/auth/login-screen';
 
 export default function Home() {
-  return <main><h1>{productName}</h1><p>Base local de desenvolvimento e testes.</p></main>;
+  return <LoginScreen />;
 }

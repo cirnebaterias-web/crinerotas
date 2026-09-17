@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertExpectedRouteVersion,
+  createCanonicalLocalRouteBundle,
   createDraftMutation,
   createSyntheticRouteBundle,
   createValidatedLocalSession,
@@ -11,8 +12,12 @@ import {
   hashSyncCommand,
   localAccessWindowMs,
   nextRetryDelayMs,
+  normalizeRouteComposition,
+  diffRouteComposition,
   orderOutboxEvents,
   normalizeRouteDraft,
+  normalizePendingStopOrder,
+  restoreCanonicalRoute,
   toRouteTodayResponse,
   toSyncCommand,
 } from './index';
@@ -39,9 +44,47 @@ it('checks optimistic route versions and creates a stable empty route response',
   expect(() => assertExpectedRouteVersion(0, 0)).toThrow('Versão de rota inválida.');
   expect(assertExpectedRouteVersion(2, 2)).toBeUndefined();
   expect(toRouteTodayResponse(null, '2026-09-15')).toEqual({
-    schemaVersion: 1,
+    schemaVersion: 2,
     availability: 'empty',
     serviceDate: '2026-09-15',
+  });
+});
+
+it('validates aggregate execution order without sorting away the seller intent', () => {
+  const command = {
+    schemaVersion: 1 as const,
+    expectedVersion: 2,
+    pendingStopIds: [
+      '40000000-0000-4000-8000-000000000002',
+      '40000000-0000-4000-8000-000000000001',
+    ],
+  };
+  expect(normalizePendingStopOrder(command)).toEqual(command);
+  expect(() => normalizePendingStopOrder({
+    ...command,
+    pendingStopIds: [command.pendingStopIds[0]!, command.pendingStopIds[0]!],
+  })).toThrow('Ordem de execução inválida.');
+});
+
+it('normalizes a composition reason/order and computes a stable client diff', () => {
+  const normalized = normalizeRouteComposition({
+    schemaVersion: 1,
+    expectedVersion: 2,
+    reason: '  Ajuste   solicitado  ',
+    stops: [
+      { clientId: '10000000-0000-4000-8000-000000000003', plannedOrder: 2, priority: 1 },
+      { clientId: '10000000-0000-4000-8000-000000000002', plannedOrder: 1, priority: 0 },
+    ],
+  });
+  expect(normalized.reason).toBe('Ajuste solicitado');
+  expect(normalized.stops.map(({ plannedOrder }) => plannedOrder)).toEqual([1, 2]);
+  expect(diffRouteComposition(
+    ['10000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002'],
+    ['10000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000003'],
+  )).toEqual({
+    addedClientIds: ['10000000-0000-4000-8000-000000000003'],
+    removedClientIds: ['10000000-0000-4000-8000-000000000001'],
+    retainedClientIds: ['10000000-0000-4000-8000-000000000002'],
   });
 });
 
@@ -128,6 +171,55 @@ it('creates only deterministic synthetic route content', () => {
   expect(second).toEqual(first);
   expect(JSON.stringify(first)).toContain('sintética');
   expect(JSON.stringify(first)).not.toMatch(/@|rua|avenida|telefone/i);
+});
+
+it('creates an exact canonical local snapshot without synthetic parameters', () => {
+  const route = {
+    schemaVersion: 2 as const,
+    routeId: '33333333-3333-4333-8333-333333333333',
+    routeVersionId: '44444444-4444-4444-8444-444444444444',
+    versionNumber: 2,
+    serviceDate: '2026-09-16',
+    status: 'published' as const,
+    publishedAt: '2026-09-16T10:00:00.000Z',
+    executionVersion: 3,
+    seller: { id: partition.userId, displayName: 'Vendedor A Sintético' },
+    stops: [{
+      routeVersionStopId: '55555555-5555-4555-8555-555555555555',
+      plannedOrder: 1,
+      executionOrder: 1,
+      priority: 2,
+      status: 'pending' as const,
+      executionVersion: 3,
+      client: {
+        id: '66666666-6666-4666-8666-666666666666',
+        externalReference: 'SYN-01',
+        name: 'Cliente Sintético',
+        address: 'Endereço sintético',
+        latitude: null,
+        longitude: null,
+        portfolioReference: null,
+      },
+    }],
+  };
+  const snapshot = createCanonicalLocalRouteBundle(
+    partition,
+    route,
+    '2026-09-16T10:05:00.000Z',
+  );
+  expect(snapshot).toMatchObject({ ...partition, ...route });
+  expect(snapshot).not.toHaveProperty('parameterSetVersion');
+  expect(restoreCanonicalRoute(snapshot)).toEqual(route);
+  expect(toRouteTodayResponse(route, route.serviceDate, 3)).toMatchObject({
+    schemaVersion: 2,
+    availability: 'available',
+    route: { schemaVersion: 2 },
+  });
+  expect(() => createCanonicalLocalRouteBundle(
+    { ...partition, userId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+    route,
+    snapshot.cachedAt,
+  )).toThrow('A rota não pertence à partição offline informada.');
 });
 
 function createEvent(aggregateId: string, sequence: number) {

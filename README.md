@@ -1,6 +1,6 @@
 # Cirne Rotas
 
-Fundação local das Stories 1.1 a 1.4: Next.js, canário HTTP, Supabase Auth, perfis/papéis/escopos protegidos por RLS, núcleo offline com Dexie/IndexedDB e sincronização idempotente por evento. A rota e o rascunho disponíveis nesta etapa são exclusivamente sintéticos; ainda não há tela de login, visita completa ou dados reais. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
+Primeira experiência visual do vendedor (Stories 1.1–2.6): login, consulta da rota publicada, reordenação de pendências, navegação externa, consulta offline e recebimento explícito de uma nova composição publicada pelo Gestor, com Supabase Auth, permissões/RLS, versionamento e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; visita completa ainda não está disponível. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
 
 O checkpoint da preparação do host e o resultado da retomada estão em `Docs/RETOMADA_APOS_REINICIO.md`.
 
@@ -93,13 +93,15 @@ O resultado contém somente `id`, nome, papéis, capacidades, escopos e status. 
 
 ## Verificar o núcleo offline
 
+A interface técnica anterior está em `/demo/offline`. Ela não representa a rota autenticada do vendedor e seus dados nunca substituem a rota real. Depois que uma rota publicada é aberta online, `/route` pode reabri-la por hard refresh sem rede dentro da janela local autorizada de 24 horas.
+
 O diagnóstico CLI valida contratos, conteúdo sintético e os estados locais permitidos, sem abrir navegador nem afirmar sincronização com servidor:
 
 ```powershell
 npm run --silent ops:offline -- --json
 ```
 
-Resultado esperado: `status: "ok"` e `syntheticOnly: true`. Esse diagnóstico inspeciona a fundação local; a prova de sincronização servidor é o comando abaixo.
+Resultado esperado: `status: "ok"`, `schemaVersion: 2`, `legacySchemaVersion: 1`, `canonicalSnapshot: true` e `syntheticOnly: true`. O comando prova a conversão canônica com fixture sintética sem remover o contrato legado; a prova de sincronização servidor é o comando abaixo.
 
 ## Verificar a sincronização pela CLI
 
@@ -116,7 +118,7 @@ O comando envia somente IDs e conteúdo sintéticos e comprova três passos: pri
 
 ## Verificar a rota canônica sintética pela CLI
 
-Com Supabase e aplicação iniciados, carregue os tokens sintéticos do Gestor A e do Vendedor A no ambiente. O comando cria o rascunho, publica a versão 1 e confirma que o vendedor consegue carregar a rota do dia:
+Com Supabase e aplicação iniciados, carregue os tokens sintéticos do Gestor A e do Vendedor A no ambiente. O comando cria/publica a rota do dia quando necessário, prepara e publica uma composição sucessora com motivo, reordena as paradas pendentes e confirma a leitura canônica do Vendedor:
 
 ```powershell
 $actors = Get-Content .local/identity-actors.json | ConvertFrom-Json
@@ -127,7 +129,9 @@ Remove-Item Env:CIRNE_MANAGER_ACCESS_TOKEN
 Remove-Item Env:CIRNE_SELLER_ACCESS_TOKEN
 ```
 
-A saída contém somente o ID e a versão da rota, status, quantidade de paradas e os três checks do round-trip. Tokens e snapshots de cliente não são exibidos. O diagnóstico usa exclusivamente os dois clientes sintéticos provisionados pelo reset local; não use dados reais. Como alternativa, forneça os dois tokens em um único JSON por stdin, sem combiná-los com as variáveis de ambiente.
+A saída contém o ID e a versão publicada da rota, `executionVersion`, status, quantidade de paradas e os checks do round-trip. `checks.composition` informa `applied` ou `already_current`; `reasonConfirmed` comprova o motivo canônico; `checks.reordered` informa `applied` ou `already_canonical`. Repetições não criam outra versão nem auditoria falsa. Tokens e snapshots de cliente não são exibidos. O diagnóstico usa exclusivamente os três clientes sintéticos provisionados pelo reset local; não use dados reais. Como alternativa, forneça os dois tokens em um único JSON por stdin, sem combiná-los com as variáveis de ambiente.
+
+As leituras canônicas novas usam `schemaVersion: 3`, com compatibilidade de leitura para v2. A alteração usa `PATCH /api/v1/routes/{routeId}`, `Idempotency-Key`, motivo, versão esperada e composição completa; somente o Gestor no escopo pode executá-la. A publicação sucessora preserva a versão anterior como histórico. A reordenação continua em `PUT /api/v1/routes/{routeId}/execution-order` e atua somente nas pendências; conflito de versão retorna `409`. Para verificar rollback/reaplicação sem persistir mudanças no banco local, execute `npx tsx scripts/verify-route-composition-rollback.ts` após `db:reset` e novamente após a integração.
 
 Para a prova no navegador, gere o build de produção e execute o Playwright:
 
@@ -136,6 +140,24 @@ npm run test:e2e:build
 ```
 
 O teste instala o Service Worker, confirma sua revisão, carrega uma rota sintética, grava rascunho e outbox atomicamente e reabre o shell por hard refresh sem rede. Também valida migração do IndexedDB, isolamento dos dados em cache e recuperação após falha de quota. O navegador pode recusar persistência reforçada; isso é exibido como “não garantida” e não transforma o commit local em sincronização.
+
+## Primeira visualização do MVP
+
+1. Com Supabase local ativo, execute `npm run identity:provision -- --json`.
+2. Inicie o aplicativo (`npm run build` e depois `npm run start`, ou `npm run dev`).
+3. Execute o diagnóstico `ops:routes` acima para publicar/reutilizar a rota sintética do dia.
+4. Abra `http://127.0.0.1:3000/login`. Use o e-mail e a senha de `actors.seller_a` no arquivo local ignorado `.local/identity-actors.json`; não copie credenciais para documentação, Git ou capturas.
+5. Em `/route`, escolha **Reordenar**, use as setas e **Salvar ordem**. **Cancelar** descarta o rascunho visual. Um conflito exige **Recarregar rota**. **Sair** encerra a sessão deste navegador.
+6. Aguarde a indicação **Disponível offline neste aparelho**. Depois, desligue a conexão e recarregue `/route`: a última versão confirmada continua exibindo vendedor, data, progresso, clientes, estados e endereços. Se o Gestor publicar outra composição enquanto o aparelho estiver offline, a cópia anterior permanece; ao reconectar e confirmar o novo cache, a tela informa inclusões, retiradas e motivo. Atualização e reordenação permanecem online; **Bloquear acesso local** exige nova validação online sem apagar silenciosamente a cópia durável.
+7. Em cada cliente, **Navegar** abre o Google Maps em outra aba/aplicativo com o destino preenchido; abrir ou retornar não inicia/conclui visita nem salva a reordenação. **Copiar endereço** funciona também sem rede. Se o navegador negar a cópia, um campo selecionável permite copiar manualmente.
+
+Login, atualização, reordenação e Maps exigem conexão; a consulta da rota já carregada não. A sessão usa cookies SameSite, sem tokens em localStorage ou IndexedDB. A autorização local fica particionada por vendedor/dispositivo e expira após 24 horas; logout ou troca de vendedor revoga seu acesso sem expor a partição anterior. Origem e cabeçalho CSRF são obrigatórios em login, logout e mutações por cookie. `APP_BASE_URL` precisa corresponder exatamente à origem usada no navegador (prefira `127.0.0.1`, não alterne com `localhost`). HTTPS habilita `Secure` nos cookies. A recuperação de senha orienta contato com administrador: não há SMTP implementado nesta etapa.
+
+A rota exibida vem do servidor, inclusive data operacional, estado das paradas e progresso. Esta entrega não inclui registrar visitas ou painel gerencial. No celular, a mesma tela é responsiva; o servidor local continua restrito ao próprio computador, sem exposição na rede.
+
+A navegação usa [Google Maps URLs](https://developers.google.com/maps/documentation/urls/get-started), sem API key, SDK, origem fixa ou solicitação de geolocalização pelo Cirne Rotas. Coordenadas válidas completas têm preferência; caso contrário, usa o endereço. Não há consulta ao Google antes de clicar. O link exige conexão detectada e o app não verifica se o Maps está disponível: endereço copiável é a alternativa. O diagnóstico `npm run ops:navigation -- --json` testa essa regra com dados sintéticos, sem rede nem abertura de navegador.
+
+`npm run test:e2e` valida os estados de interface com respostas controladas, cache canônico, hard refresh sem rede, revogação local e a regressão do laboratório offline, sem exigir banco. Depois de `npm run test:integration` (que provisiona/publica a rota sintética), execute `npm run test:e2e:real` para provar login → rota → cache → hard refresh offline → reordenação → reload → logout no navegador contra Supabase local. Esse ensaio usa apenas `seller_a`, altera sua ordem sintética e desativa traces para não guardar credenciais.
 
 ## Quality gates
 
@@ -148,7 +170,7 @@ npm run test:e2e
 npm run test:integration
 ```
 
-`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, IndexedDB, motor de sincronização, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa 122 verificações pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio e CLIs como processos reais. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
+`typecheck` gera os tipos de rotas antes do TypeScript, inclusive em checkout limpo. Unitários cobrem contratos, autenticação, configuração/redaction, CLIs, IndexedDB, motor de sincronização, manifesto sintético, versões/portas e proteção dos comandos de infraestrutura. A integração provisiona atores, executa a suíte pgTAP e inicia/encerra seu próprio servidor de produção em porta livre; valida HTTP, RLS, isolamento, bloqueio, concorrência e CLIs como processos reais. Depende do Supabase local, mas não de internet. Rode `build` antes da integração.
 
 CI em `.github/workflows/ci.yaml`: gates, navegador offline, integração e smoke da imagem com Actions por SHA, permissão de leitura, sem deploy. O remoto existe, mas nenhuma publicação desta story é automática. Evidências concluídas ficam em `Docs/qa/`.
 

@@ -1,0 +1,37 @@
+schema: 1
+story: '2.4'
+story_title: 'Navegação externa para o cliente'
+gate: PASS
+status_reason: 'AC 1–5 atendidos; arquitetura compatível e duas revisões CodeRabbit sem apontamentos. Timeout dos testes CLI corrigido e suíte final aprovada, sem alteração de código de produto.'
+reviewer: 'Quinn (@qa, Codex)'
+reviewed_revision: 'commit:51f84424b149d0bd3deea1e7f4498bb6d987cc83+navigation-cli.test.ts@sha256:507fe6361cff5195e8392444f487b824753de0678e3625cc1857597358273542'
+updated: '2026-09-17T01:50:47Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 361
+  tests_rerun: 164
+  review: 'Docs/qa/evidence/2.4/qa-review.md'
+  architecture: 'Docs/qa/evidence/2.4/architecture-review.md'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Host fixo, query codificada, sem segredo, opener, Referer ou mutação implícita.'
+  performance:
+    status: PASS
+    notes: 'Sem SDK/request de Maps no render ou novas dependências; recorte local.'
+  reliability:
+    status: PASS
+    notes: 'Fallback manual/offline e timeout de clipboard; processo filho dos testes limitado.'
+  maintainability:
+    status: PASS
+    notes: 'Domínio puro compartilhado, adaptador isolado e rastreabilidade AC/testes.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Homologar abertura real do Maps em aparelho físico antes do piloto.'
+      refs: ['Docs/qa/evidence/2.4/qa-review.md']

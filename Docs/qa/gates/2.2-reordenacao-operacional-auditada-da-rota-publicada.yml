@@ -1,0 +1,41 @@
+schema: 1
+story: '2.2'
+story_title: 'Reordenação operacional auditada da rota publicada'
+gate: PASS
+status_reason: 'Os oito critérios estão cobertos e os gates locais passaram. Concorrência, autorização, atomicidade da auditoria e reversibilidade foram verificadas com serviços reais e dados sintéticos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:51475c5a84a7d0edea0905c3789a200d0b85a8aa+code-diff:29d7332bb6186b40bc5d58699bee329b301ed8b6'
+updated: '2026-09-16T23:44:00Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  unit_tests: 116
+  database_tests: 182
+  integration_tests: 11
+  e2e_tests: 3
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8]
+    ac_gaps: []
+  reports:
+    - 'Docs/qa/evidence/2.2/route-execution-order.md'
+    - 'Docs/qa/evidence/2.2/qa-review.md'
+  coderabbit: 'Duas revisões concluídas, sem críticos/altos; correção posterior de UUIDs inspecionada manualmente e validada por testes.'
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Capacidade antes da busca, escopo atual, grants estreitos, RLS forçada, CSRF e redaction.'
+  performance:
+    status: PASS
+    notes: 'Escopo local: até 50 paradas, índices existentes, lock agregado e timeouts; sem alegação de benchmark de produção.'
+  reliability:
+    status: PASS
+    notes: 'Disputa real retorna 200/409; auditoria falha sem mutação parcial; no-op e rollback/reaplicação verificados.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos compartilhados, domínio puro, portas existentes estendidas e nenhuma nova dependência.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Conectar a rota canônica à experiência offline/UI em story própria, conforme PRD e backlog.'
+      refs: ['Docs/prd.md', 'Docs/architecture.md']

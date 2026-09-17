@@ -6,6 +6,7 @@ describe('synthetic actor manifest', () => {
     expect(syntheticClientIds).toEqual([
       '10000000-0000-4000-8000-000000000001',
       '10000000-0000-4000-8000-000000000002',
+      '10000000-0000-4000-8000-000000000003',
     ]);
   });
   it('creates all isolated actors without real domains or fixed credentials', () => {

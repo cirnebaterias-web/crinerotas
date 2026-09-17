@@ -1,5 +1,10 @@
+export { buildGoogleMapsUrl, type NavigationDestination } from './navigation';
+
 import {
+  canonicalLocalRouteBundleSchema,
+  canonicalLocalRouteBundleV3Schema,
   canonicalRouteSchema,
+  changeRouteCompositionRequestSchema,
   createRouteDraftRequestSchema,
   maxSyncBatchEvents,
   localRouteBundleSchema,
@@ -7,13 +12,18 @@ import {
   localVisitDraftSchema,
   offlineOutboxEventSchema,
   type LocalRouteBundle,
+  type AnyCanonicalLocalRouteBundle,
   type LocalSession,
   type LocalVisitDraft,
   type OfflineOutboxEvent,
   type OfflinePartition,
   type CanonicalRoute,
   type CreateRouteDraftRequest,
+  type ChangeRouteCompositionRequest,
+  type RouteCompositionDiff,
   routeTodayResponseSchema,
+  reorderRouteExecutionRequestSchema,
+  type ReorderRouteExecutionRequest,
   syncCommandSchema,
   type SyncCommand,
   type SyncErrorCode,
@@ -34,6 +44,31 @@ export function normalizeRouteDraft(input: CreateRouteDraftRequest): CreateRoute
   };
 }
 
+export function normalizeRouteComposition(
+  input: ChangeRouteCompositionRequest,
+): ChangeRouteCompositionRequest {
+  const parsed = changeRouteCompositionRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RouteDomainError('VALIDATION_FAILED', 'Composição de rota inválida.');
+  return {
+    ...parsed.data,
+    reason: parsed.data.reason.replace(/\s+/g, ' ').trim(),
+    stops: [...parsed.data.stops].sort((left, right) => left.plannedOrder - right.plannedOrder),
+  };
+}
+
+export function diffRouteComposition(
+  currentClientIds: readonly string[],
+  nextClientIds: readonly string[],
+): RouteCompositionDiff {
+  const current = new Set(currentClientIds.map((id) => id.toLowerCase()));
+  const next = new Set(nextClientIds.map((id) => id.toLowerCase()));
+  return {
+    addedClientIds: [...next].filter((id) => !current.has(id)).sort(),
+    removedClientIds: [...current].filter((id) => !next.has(id)).sort(),
+    retainedClientIds: [...next].filter((id) => current.has(id)).sort(),
+  };
+}
+
 export function assertExpectedRouteVersion(currentVersion: number, expectedVersion: number) {
   if (!Number.isInteger(currentVersion) || currentVersion < 1 ||
       !Number.isInteger(expectedVersion) || expectedVersion < 1) {
@@ -44,15 +79,36 @@ export function assertExpectedRouteVersion(currentVersion: number, expectedVersi
   }
 }
 
-export function toRouteTodayResponse(route: CanonicalRoute | null, serviceDate: string) {
+export function normalizePendingStopOrder(
+  input: ReorderRouteExecutionRequest,
+): ReorderRouteExecutionRequest {
+  const parsed = reorderRouteExecutionRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new RouteDomainError('VALIDATION_FAILED', 'Ordem de execução inválida.');
+  }
+  return {
+    ...parsed.data,
+    pendingStopIds: [...parsed.data.pendingStopIds],
+  };
+}
+
+export function toRouteTodayResponse(
+  route: CanonicalRoute | null,
+  serviceDate: string,
+  schemaVersion: 2 | 3 = route?.schemaVersion ?? 2,
+) {
   if (route === null) {
-    return routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'empty', serviceDate });
+    return routeTodayResponseSchema.parse({ schemaVersion, availability: 'empty', serviceDate });
   }
   const parsedRoute = canonicalRouteSchema.parse(route);
   if (parsedRoute.serviceDate !== serviceDate) {
     throw new RouteDomainError('VALIDATION_FAILED', 'A rota não corresponde à data solicitada.');
   }
-  return routeTodayResponseSchema.parse({ schemaVersion: 1, availability: 'available', route: parsedRoute });
+  return routeTodayResponseSchema.parse({
+    schemaVersion: parsedRoute.schemaVersion,
+    availability: 'available',
+    route: parsedRoute,
+  });
 }
 
 export const localAccessWindowMs = 24 * 60 * 60 * 1_000;
@@ -155,6 +211,7 @@ export const syntheticRouteIds = {
 export const syntheticClientIds = [
   '10000000-0000-4000-8000-000000000001',
   '10000000-0000-4000-8000-000000000002',
+  '10000000-0000-4000-8000-000000000003',
 ] as const;
 
 export function createSyntheticRouteBundle(
@@ -173,6 +230,44 @@ export function createSyntheticRouteBundle(
       { routeVersionStopId: syntheticRouteIds.secondStopId, displayLabel: 'Parada sintética 02', executionOrder: 2, priority: 0 },
     ],
     cachedAt,
+  });
+}
+
+export function createCanonicalLocalRouteBundle(
+  partition: OfflinePartition,
+  routeInput: CanonicalRoute,
+  cachedAt: string,
+): AnyCanonicalLocalRouteBundle {
+  const route = canonicalRouteSchema.parse(routeInput);
+  if (route.seller.id !== partition.userId) {
+    throw new RouteDomainError('VALIDATION_FAILED', 'A rota não pertence à partição offline informada.');
+  }
+  const bundle = {
+    ...partition,
+    ...route,
+    cachedAt,
+  };
+  return route.schemaVersion === 3
+    ? canonicalLocalRouteBundleV3Schema.parse(bundle)
+    : canonicalLocalRouteBundleSchema.parse(bundle);
+}
+
+export function restoreCanonicalRoute(bundleInput: AnyCanonicalLocalRouteBundle): CanonicalRoute {
+  const bundle = bundleInput.schemaVersion === 3
+    ? canonicalLocalRouteBundleV3Schema.parse(bundleInput)
+    : canonicalLocalRouteBundleSchema.parse(bundleInput);
+  return canonicalRouteSchema.parse({
+    schemaVersion: bundle.schemaVersion,
+    routeId: bundle.routeId,
+    routeVersionId: bundle.routeVersionId,
+    versionNumber: bundle.versionNumber,
+    serviceDate: bundle.serviceDate,
+    status: bundle.status,
+    publishedAt: bundle.publishedAt,
+    executionVersion: bundle.executionVersion,
+    seller: bundle.seller,
+    stops: bundle.stops,
+    ...(bundle.schemaVersion === 3 ? { compositionChange: bundle.compositionChange } : {}),
   });
 }
 

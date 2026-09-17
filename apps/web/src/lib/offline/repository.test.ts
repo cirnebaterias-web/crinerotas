@@ -1,7 +1,11 @@
 import Dexie from 'dexie';
 import { IDBKeyRange, indexedDB } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSyntheticRouteBundle, createValidatedLocalSession } from '@cirne/domain';
+import {
+  createCanonicalLocalRouteBundle,
+  createSyntheticRouteBundle,
+  createValidatedLocalSession,
+} from '@cirne/domain';
 import { OfflineDatabase, offlineV2Stores } from './database';
 import { OfflineRepository, type SaveDraftCommand } from './repository';
 import { SyncEventPersistenceError } from './sync-persistence-error';
@@ -53,7 +57,7 @@ async function seed(repository: OfflineRepository, partition = partitionA) {
 }
 
 describe('OfflineRepository', () => {
-  it('preserves route, session, draft and outbox during the schema v2 to v3 upgrade', async () => {
+  it('preserves route, session, draft and outbox during the schema v2 to v5 upgrade', async () => {
     const name = `offline-migration-${crypto.randomUUID()}`;
     names.push(name);
     const legacy = new Dexie(name, { indexedDB, IDBKeyRange });
@@ -95,6 +99,57 @@ describe('OfflineRepository', () => {
     expect(await repository.listOutbox(partitionA)).toHaveLength(1);
     expect(await repository.getLocalSession(partitionA)).toBeDefined();
     repository.close();
+  });
+
+  it('atomically replaces a route with its canonical snapshot without clearing durable work', async () => {
+    const { repository } = makeRepository();
+    await seed(repository);
+    await repository.saveDraftAndEnqueue(command());
+    const at = '2026-09-11T12:05:00.000Z';
+    const canonical = createCanonicalLocalRouteBundle(partitionA, {
+      schemaVersion: 2,
+      routeId: '33333333-3333-4333-8333-333333333333',
+      routeVersionId: '99999999-9999-4999-8999-999999999999',
+      versionNumber: 2,
+      serviceDate: '2026-09-11',
+      status: 'published',
+      publishedAt: at,
+      executionVersion: 2,
+      seller: { id: partitionA.userId, displayName: 'Vendedor A Sintético' },
+      stops: [{
+        routeVersionStopId: stopId,
+        plannedOrder: 1,
+        executionOrder: 1,
+        priority: 1,
+        status: 'pending',
+        executionVersion: 2,
+        client: {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+          externalReference: 'SYN-01',
+          name: 'Cliente Sintético',
+          address: 'Endereço sintético',
+          latitude: null,
+          longitude: null,
+          portfolioReference: null,
+        },
+      }],
+    }, at);
+    await repository.saveValidatedRoute(canonical, createValidatedLocalSession(partitionA, at));
+
+    const newerAt = '2026-09-11T12:10:00.000Z';
+    const newer = { ...canonical, executionVersion: 3, cachedAt: newerAt };
+    await repository.saveValidatedRoute(newer, createValidatedLocalSession(partitionA, newerAt));
+    const revalidatedAt = '2026-09-11T12:15:00.000Z';
+    await repository.saveValidatedRoute(
+      { ...canonical, cachedAt: revalidatedAt },
+      createValidatedLocalSession(partitionA, revalidatedAt),
+    );
+    await repository.saveValidatedRoute(canonical, createValidatedLocalSession(partitionA, at));
+
+    expect(await repository.listRouteBundles(partitionA)).toEqual([newer]);
+    expect(await repository.getLocalSession(partitionA)).toMatchObject({ validatedAt: revalidatedAt });
+    expect(await repository.listDrafts(partitionA)).toHaveLength(1);
+    expect(await repository.listOutbox(partitionA)).toHaveLength(1);
   });
 
   it('isolates every read by user and device', async () => {

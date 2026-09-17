@@ -33,7 +33,7 @@ function ReadyRoute({
   onSave: (bundle: LocalRouteBundle) => void;
   onSync: () => void;
 }) {
-  const bundle = snapshot.routes[0];
+  const bundle = snapshot.routes.find((route): route is LocalRouteBundle => route.schemaVersion === 1);
   if (!bundle) {
     return <div className="status" data-kind="warning" role="status"><span aria-hidden>○</span><span>Nenhum pacote de rota foi salvo nesta partição.</span></div>;
   }

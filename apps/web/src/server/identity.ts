@@ -1,4 +1,4 @@
-import { createServerClient, type CookieMethodsServer } from '@supabase/ssr';
+import { createServerClient, type CookieMethodsServer, type CookieOptions } from '@supabase/ssr';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { meResponseSchema, type MeResponse } from '@cirne/contracts';
 import { readIdentityConfig } from '@cirne/config/server';
@@ -33,6 +33,16 @@ export function authCookiePrefix(supabaseUrl: string) {
   return `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
 }
 
+// All browser authentication is mediated by the BFF, including refresh.
+export function sessionCookieOptions(): CookieOptions {
+  let localHttp = false;
+  try {
+    const origin = new URL(process.env.APP_BASE_URL ?? '');
+    localHttp = origin.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname);
+  } catch { /* Unknown origin defaults to Secure. */ }
+  return { httpOnly: true, sameSite: 'lax', secure: !localHttp, path: '/' };
+}
+
 export function createCallerScopedClient(
   authorization: string | null,
   cookieMethods: CookieMethodsServer,
@@ -52,6 +62,7 @@ export function createCallerScopedClient(
     });
   }
   return createServerClient(config.SUPABASE_PUBLIC_URL, config.SUPABASE_PUBLISHABLE_KEY, {
+    cookieOptions: sessionCookieOptions(),
     cookies: cookieMethods,
   });
 }
@@ -97,6 +108,7 @@ function defaultResolvers(): IdentityResolvers {
     },
     cookie: async (cookieMethods) => {
       const client = createServerClient(config.SUPABASE_PUBLIC_URL, config.SUPABASE_PUBLISHABLE_KEY, {
+        cookieOptions: sessionCookieOptions(),
         cookies: cookieMethods,
       });
       return loadCallerIdentity(client);

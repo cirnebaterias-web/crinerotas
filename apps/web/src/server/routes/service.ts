@@ -5,21 +5,54 @@ import {
   routePublicationSchema,
   routeTodayResponseSchema,
   canonicalRouteSchema,
+  changeRouteCompositionRequestSchema,
+  routeCompositionDraftSchema,
+  reorderRouteExecutionRequestSchema,
+  reorderRouteExecutionResultSchema,
   type CanonicalRoute,
+  type ChangeRouteCompositionRequest,
   type CreateRouteDraftRequest,
   type PublishRouteRequest,
   type RouteDraft,
   type RouteErrorCode,
   type RoutePublication,
+  type RouteCompositionDraft,
   type RouteTodayResponse,
+  type ReorderRouteExecutionRequest,
+  type ReorderRouteExecutionResult,
 } from '@cirne/contracts';
-import { normalizeRouteDraft, toRouteTodayResponse } from '@cirne/domain';
+import {
+  normalizePendingStopOrder,
+  normalizeRouteComposition,
+  normalizeRouteDraft,
+  toRouteTodayResponse,
+} from '@cirne/domain';
+
+export interface RouteMutationContext {
+  requestId: string;
+  origin: 'web' | 'pwa' | 'cli';
+}
+
+export interface RouteCompositionMutationContext {
+  idempotencyKey: string;
+  origin: 'web' | 'cli';
+}
 
 export interface RouteRepository {
   createDraft(command: CreateRouteDraftRequest): Promise<RouteDraft>;
+  changeComposition(
+    routeId: string,
+    request: ChangeRouteCompositionRequest,
+    context: RouteCompositionMutationContext,
+  ): Promise<RouteCompositionDraft>;
   publish(routeId: string, request: PublishRouteRequest): Promise<RoutePublication>;
   getById(routeId: string): Promise<CanonicalRoute>;
   getForDate(serviceDate: string): Promise<RouteTodayResponse>;
+  reorder(
+    routeId: string,
+    request: ReorderRouteExecutionRequest,
+    context: RouteMutationContext,
+  ): Promise<ReorderRouteExecutionResult>;
 }
 
 export class RouteServiceFailure extends Error {
@@ -71,11 +104,48 @@ export async function publishRoute(
   return routePublicationSchema.parse(await repository.publish(routeId, request));
 }
 
+export async function changeRouteComposition(
+  routeId: string,
+  input: ChangeRouteCompositionRequest,
+  context: RouteCompositionMutationContext,
+  repository: RouteRepository,
+) {
+  const parsedRouteId = routeDraftSchema.shape.routeId.safeParse(routeId);
+  const parsedKey = routeDraftSchema.shape.routeId.safeParse(context.idempotencyKey);
+  const parsed = changeRouteCompositionRequestSchema.safeParse(input);
+  if (!parsedRouteId.success || !parsedKey.success || !parsed.success) {
+    throw new RouteServiceFailure('VALIDATION_FAILED', publicRouteMessage('VALIDATION_FAILED'), false);
+  }
+  const command = normalizeRouteComposition(parsed.data);
+  return routeCompositionDraftSchema.parse(await repository.changeComposition(
+    parsedRouteId.data.toLowerCase(),
+    command,
+    { ...context, idempotencyKey: parsedKey.data },
+  ));
+}
+
 export async function getRoute(routeId: string, repository: RouteRepository) {
   if (!routeDraftSchema.shape.routeId.safeParse(routeId).success) {
     throw new RouteServiceFailure('VALIDATION_FAILED', publicRouteMessage('VALIDATION_FAILED'), false);
   }
   return canonicalRouteSchema.parse(await repository.getById(routeId));
+}
+
+export async function reorderRouteExecution(
+  routeId: string,
+  input: ReorderRouteExecutionRequest,
+  context: RouteMutationContext,
+  repository: RouteRepository,
+) {
+  if (!routeDraftSchema.shape.routeId.safeParse(routeId).success) {
+    throw new RouteServiceFailure('VALIDATION_FAILED', publicRouteMessage('VALIDATION_FAILED'), false);
+  }
+  const parsed = reorderRouteExecutionRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new RouteServiceFailure('VALIDATION_FAILED', publicRouteMessage('VALIDATION_FAILED'), false);
+  }
+  const command = normalizePendingStopOrder(parsed.data);
+  return reorderRouteExecutionResultSchema.parse(await repository.reorder(routeId.toLowerCase(), command, context));
 }
 
 export async function getMyRouteForDate(serviceDate: string, repository: RouteRepository) {
@@ -87,5 +157,6 @@ export async function getMyRouteForDate(serviceDate: string, repository: RouteRe
   return toRouteTodayResponse(
     response.availability === 'available' ? response.route : null,
     parsedDate.data,
+    response.schemaVersion,
   );
 }

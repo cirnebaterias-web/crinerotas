@@ -27,6 +27,7 @@ const withSerwist = withSerwistInit({
   cacheOnNavigation: false,
   additionalPrecacheEntries: [
     { url: '/~offline', revision: appRevision },
+    { url: '/~offline-demo', revision: appRevision },
     { url: '/icons/app-icon.svg', revision: appRevision },
     { url: '/icons/app-icon-maskable.svg', revision: appRevision },
   ],
