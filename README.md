@@ -148,10 +148,13 @@ O teste instala o Service Worker, confirma sua revisão, carrega uma rota sinté
 3. Execute o diagnóstico `ops:routes` acima para publicar/reutilizar a rota sintética do dia.
 4. Abra `http://127.0.0.1:3000/login`. Use o e-mail e a senha de `actors.seller_a` no arquivo local ignorado `.local/identity-actors.json`; não copie credenciais para documentação, Git ou capturas.
 5. Em `/route`, escolha **Reordenar**, use as setas e **Salvar ordem**. **Cancelar** descarta o rascunho visual. Um conflito exige **Recarregar rota**. **Sair** encerra a sessão deste navegador.
+6. Em cada cliente, **Navegar** abre o Google Maps em outra aba/aplicativo com o destino preenchido; abrir ou retornar não inicia/conclui visita nem salva a reordenação. **Copiar endereço** funciona também sem rede, desde que a rota já esteja na tela. Se o navegador negar a cópia, um campo selecionável permite copiar manualmente.
 
 Login e operações exigem conexão. A sessão usa cookies HttpOnly/SameSite, sem tokens em localStorage. Origem e cabeçalho CSRF são obrigatórios em login, logout e mutações por cookie. `APP_BASE_URL` precisa corresponder exatamente à origem usada no navegador (prefira `127.0.0.1`, não alterne com `localhost`). HTTPS habilita `Secure` nos cookies. A recuperação de senha orienta contato com administrador: não há SMTP implementado nesta etapa.
 
-A rota exibida vem do servidor, inclusive data operacional, estado das paradas e progresso. Esta entrega não inclui registrar visitas, abrir mapas ou painel gerencial. No celular, a mesma tela é responsiva; o servidor local continua restrito ao próprio computador, sem exposição na rede.
+A rota exibida vem do servidor, inclusive data operacional, estado das paradas e progresso. Esta entrega não inclui registrar visitas ou painel gerencial. No celular, a mesma tela é responsiva; o servidor local continua restrito ao próprio computador, sem exposição na rede.
+
+A navegação usa [Google Maps URLs](https://developers.google.com/maps/documentation/urls/get-started), sem API key, SDK, origem fixa ou solicitação de geolocalização pelo Cirne Rotas. Coordenadas válidas completas têm preferência; caso contrário, usa o endereço. Não há consulta ao Google antes de clicar. O link exige conexão detectada e o app não verifica se o Maps está disponível: endereço copiável é a alternativa. O diagnóstico `npm run ops:navigation -- --json` testa essa regra com dados sintéticos, sem rede nem abertura de navegador.
 
 `npm run test:e2e` valida os estados de interface com respostas controladas e a regressão offline, sem exigir banco. Depois de `npm run test:integration` (que provisiona/publica a rota sintética), execute `npm run test:e2e:real` para provar login → rota → reordenação → reload → logout no navegador contra Supabase local. Esse ensaio usa apenas `seller_a`, altera sua ordem sintética e desativa traces para não guardar credenciais.
 

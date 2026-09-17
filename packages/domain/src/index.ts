@@ -1,3 +1,5 @@
+export { buildGoogleMapsUrl, type NavigationDestination } from './navigation';
+
 import {
   canonicalRouteSchema,
   createRouteDraftRequestSchema,

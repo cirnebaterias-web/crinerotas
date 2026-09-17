@@ -5,6 +5,7 @@ import type { CanonicalRoute, MeResponse, RouteTodayResponse } from '@cirne/cont
 import { Brand } from '@/features/auth/brand';
 import { isSessionFailure, sellerClient, SellerHttpError } from '@/lib/seller-client';
 import { formatServiceDate, movePending, orderedStops, pendingIds, routeProgress } from './route-model';
+import { NavigationActions } from './navigation-actions';
 
 const statusLabels = { pending: 'Pendente', in_visit: 'Em visita', completed: 'Visitado', not_visited: 'Não visitado' };
 
@@ -137,7 +138,9 @@ export function RouteScreen() {
             return <li key={stop.routeVersionStopId} className="seller-stop-card" data-status={stop.status}>
               <div className="seller-stop-number" aria-label={`Parada ${stop.executionOrder}`}>{String(stop.executionOrder).padStart(2, '0')}</div>
               <div className="seller-stop-info"><div className="seller-stop-meta"><span className={`seller-stop-status status-${stop.status}`}>{statusLabels[stop.status]}</span><span>Prioridade {stop.priority}</span></div><h3>{stop.client.name}</h3><p>{stop.client.address}</p>
-                <span className="seller-planned-order">Ordem planejada {stop.plannedOrder}</span></div>
+                <span className="seller-planned-order">Ordem planejada {stop.plannedOrder}</span>
+                <NavigationActions client={stop.client} offline={offline} busy={busy || needsReload} />
+              </div>
               {draft && stop.status === 'pending' && <div className="seller-move-controls">
                 <button className="seller-button seller-secondary" aria-label={`Subir ${stop.client.name}`} disabled={busy || needsReload || pendingIndex === 0} onClick={() => setDraft(movePending(stops, stop.routeVersionStopId, -1))}>↑</button>
                 <button className="seller-button seller-secondary" aria-label={`Descer ${stop.client.name}`} disabled={busy || needsReload || pendingIndex === pending.length - 1} onClick={() => setDraft(movePending(stops, stop.routeVersionStopId, 1))}>↓</button>
@@ -147,7 +150,7 @@ export function RouteScreen() {
           {!draft && <button className="seller-button seller-refresh" onClick={() => void load()} disabled={busy || offline}>↻ Atualizar rota</button>}
         </section>
       </div>}
-      <footer className="seller-footer"><span>CIRNE ROTAS</span><p>Primeira experiência do MVP · Visitas e navegação ainda não disponíveis.</p></footer>
+      <footer className="seller-footer"><span>CIRNE ROTAS</span><p>Primeira experiência do MVP · Registro de visitas ainda não disponível.</p></footer>
     </main>
   </div>;
 }

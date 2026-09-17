@@ -72,7 +72,7 @@ test.describe('seller visual MVP', () => {
   });
 
   for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000 }]) {
-    test(`reorders, cancels and confirms canonical state at ${viewport.width}px`, async ({ page }) => {
+    test(`reorders, cancels and confirms canonical state at ${viewport.width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
       const commands = await setup(page);
       await page.goto('/route');
@@ -94,7 +94,7 @@ test.describe('seller visual MVP', () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const targets = await page.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
       expect(targets.every((height) => height >= 44)).toBe(true);
-      await page.screenshot({ path: `Docs/qa/evidence/2.3/route-${viewport.width}.png`, fullPage: true });
+      await page.screenshot({ path: testInfo.outputPath(`route-${viewport.width}.png`), fullPage: true });
     });
   }
 
@@ -111,6 +111,104 @@ test.describe('seller visual MVP', () => {
     await expect(page.locator('.seller-stop-card').nth(0)).toContainText('Autopeças Central');
     expect(commands).toHaveLength(1);
   });
+
+  test('Maps opens the exact destination without mutating the route or unsaved order', async ({ page, context }) => {
+    const commands = await setup(page);
+    const mutations: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(request.method());
+    });
+    const external: string[] = [];
+    await context.route('https://www.google.com/**', async (route) => {
+      external.push(route.request().url());
+      expect(route.request().headers()['referer']).toBeUndefined();
+      await route.fulfill({ contentType: 'text/html', body: '<h1>Maps interceptado localmente</h1>' });
+    });
+    await page.goto('/route');
+    const navigation = page.getByRole('link', { name: 'Navegar para Autopeças Central no Google Maps (abre fora do aplicativo)', exact: true });
+    await expect(navigation).toBeVisible();
+    expect(external).toHaveLength(0);
+    const href = new URL((await navigation.getAttribute('href'))!);
+    expect([...href.searchParams]).toEqual([['api', '1'], ['destination', initialRoute.stops[0]!.client.address]]);
+    await expect(navigation).toHaveAttribute('target', '_blank');
+    await expect(navigation).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(navigation).toHaveAttribute('referrerpolicy', 'no-referrer');
+    await page.getByRole('button', { name: 'Reordenar' }).click();
+    await page.getByRole('button', { name: 'Descer Autopeças Central' }).click();
+    const before = await page.locator('.seller-stop-list').innerText();
+    const popupPromise = context.waitForEvent('page');
+    await navigation.click();
+    const popup = await popupPromise;
+    await expect(popup.getByRole('heading', { name: 'Maps interceptado localmente' })).toBeVisible();
+    expect(await popup.evaluate(() => window.opener === null)).toBe(true);
+    expect(external).toEqual([href.toString()]);
+    await popup.close();
+    await page.bringToFront();
+    await expect(page).toHaveURL(/\/route$/);
+    expect(await page.locator('.seller-stop-list').innerText()).toBe(before);
+    await expect(page.getByLabel('33% das visitas concluídas')).toBeVisible();
+    await expect(page.getByText('Versão da execução 1', { exact: false })).toBeVisible();
+    await expect(page.getByText('Editando · alterações não salvas')).toBeVisible();
+    expect(commands).toHaveLength(0);
+    expect(mutations).toHaveLength(0);
+  });
+
+  test('copy remains available offline and navigation comes back only after reconnecting', async ({ page, context }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+        writeText: async (text: string) => { document.documentElement.dataset.copiedAddress = text; },
+      } });
+    });
+    await setup(page);
+    await page.goto('/route');
+    const card = page.locator('.seller-stop-card').first();
+    await expect(card.getByRole('link', { name: /Navegar/ })).toBeVisible();
+    await context.setOffline(true);
+    await expect(card.getByRole('button', { name: 'Navegar', exact: true })).toBeDisabled();
+    await expect(page.getByRole('link', { name: /Navegar/ })).toHaveCount(0);
+    await card.getByRole('button', { name: /Copiar endereço/ }).click();
+    await expect(card.getByRole('status')).toHaveText('Endereço copiado.');
+    expect(await page.evaluate(() => document.documentElement.dataset.copiedAddress)).toBe(initialRoute.stops[0]!.client.address);
+    await context.setOffline(false);
+    await expect(card.getByRole('link', { name: /Navegar/ })).toBeVisible();
+  });
+
+  test('copies the exact address through the real browser clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await setup(page);
+    await page.goto('/route');
+    const card = page.locator('.seller-stop-card').first();
+    await card.getByRole('button', { name: /Copiar endereço/ }).click();
+    await expect(card.getByRole('status')).toHaveText('Endereço copiado.');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(initialRoute.stops[0]!.client.address);
+  });
+
+  for (const unavailable of ['denied', 'missing'] as const) {
+    test(`clipboard ${unavailable} offers selectable manual fallback without false success`, async ({ page }) => {
+      await page.addInitScript((mode) => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: mode === 'missing' ? undefined : {
+          writeText: async () => { throw new DOMException('denied', 'NotAllowedError'); },
+        } });
+      }, unavailable);
+      await setup(page);
+      await page.goto('/route');
+      const card = page.locator('.seller-stop-card').first();
+      await card.getByRole('button', { name: /Copiar endereço/ }).click();
+      await expect(card.getByRole('status')).toContainText('Não foi possível copiar automaticamente');
+      await expect(page.getByText('Endereço copiado.', { exact: true })).toHaveCount(0);
+      const address = card.getByRole('textbox', { name: /Endereço para cópia manual/ });
+      await expect(address).toHaveValue(initialRoute.stops[0]!.client.address);
+      await address.focus();
+      expect(await address.evaluate((node: HTMLTextAreaElement) => node.selectionEnd - node.selectionStart)).toBe(initialRoute.stops[0]!.client.address.length);
+      for (const width of [390, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        const sizes = await card.locator('button, a').evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
+        expect(sizes.every((height) => height >= 44)).toBe(true);
+        if (unavailable === 'denied') await page.screenshot({ path: `Docs/qa/evidence/2.4/navigation-fallback-${width}.png`, fullPage: true });
+      }
+    });
+  }
 
   test('network save failure keeps the draft without claiming success', async ({ page }) => {
     await setup(page, { networkSave: true });
