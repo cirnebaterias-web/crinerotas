@@ -1,6 +1,6 @@
 # Cirne Rotas
 
-Fundação local das Stories 1.1 a 1.4: Next.js, canário HTTP, Supabase Auth, perfis/papéis/escopos protegidos por RLS, núcleo offline com Dexie/IndexedDB e sincronização idempotente por evento. A rota e o rascunho disponíveis nesta etapa são exclusivamente sintéticos; ainda não há tela de login, visita completa ou dados reais. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
+Primeira experiência visual do vendedor (Stories 1.1–2.3): login, consulta da rota publicada e reordenação de pendências, com Supabase Auth, permissões/RLS e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; visita completa e uso offline da rota canônica ainda não estão disponíveis. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
 
 O checkpoint da preparação do host e o resultado da retomada estão em `Docs/RETOMADA_APOS_REINICIO.md`.
 
@@ -93,6 +93,8 @@ O resultado contém somente `id`, nome, papéis, capacidades, escopos e status. 
 
 ## Verificar o núcleo offline
 
+A interface técnica anterior está em `/demo/offline`. Ela não representa a rota autenticada do vendedor. O fallback de `/route` pede reconexão; não reutiliza os dados fictícios desse laboratório.
+
 O diagnóstico CLI valida contratos, conteúdo sintético e os estados locais permitidos, sem abrir navegador nem afirmar sincronização com servidor:
 
 ```powershell
@@ -138,6 +140,20 @@ npm run test:e2e:build
 ```
 
 O teste instala o Service Worker, confirma sua revisão, carrega uma rota sintética, grava rascunho e outbox atomicamente e reabre o shell por hard refresh sem rede. Também valida migração do IndexedDB, isolamento dos dados em cache e recuperação após falha de quota. O navegador pode recusar persistência reforçada; isso é exibido como “não garantida” e não transforma o commit local em sincronização.
+
+## Primeira visualização do MVP
+
+1. Com Supabase local ativo, execute `npm run identity:provision -- --json`.
+2. Inicie o aplicativo (`npm run build` e depois `npm run start`, ou `npm run dev`).
+3. Execute o diagnóstico `ops:routes` acima para publicar/reutilizar a rota sintética do dia.
+4. Abra `http://127.0.0.1:3000/login`. Use o e-mail e a senha de `actors.seller_a` no arquivo local ignorado `.local/identity-actors.json`; não copie credenciais para documentação, Git ou capturas.
+5. Em `/route`, escolha **Reordenar**, use as setas e **Salvar ordem**. **Cancelar** descarta o rascunho visual. Um conflito exige **Recarregar rota**. **Sair** encerra a sessão deste navegador.
+
+Login e operações exigem conexão. A sessão usa cookies HttpOnly/SameSite, sem tokens em localStorage. Origem e cabeçalho CSRF são obrigatórios em login, logout e mutações por cookie. `APP_BASE_URL` precisa corresponder exatamente à origem usada no navegador (prefira `127.0.0.1`, não alterne com `localhost`). HTTPS habilita `Secure` nos cookies. A recuperação de senha orienta contato com administrador: não há SMTP implementado nesta etapa.
+
+A rota exibida vem do servidor, inclusive data operacional, estado das paradas e progresso. Esta entrega não inclui registrar visitas, abrir mapas ou painel gerencial. No celular, a mesma tela é responsiva; o servidor local continua restrito ao próprio computador, sem exposição na rede.
+
+`npm run test:e2e` valida os estados de interface com respostas controladas e a regressão offline, sem exigir banco. Depois de `npm run test:integration` (que provisiona/publica a rota sintética), execute `npm run test:e2e:real` para provar login → rota → reordenação → reload → logout no navegador contra Supabase local. Esse ensaio usa apenas `seller_a`, altera sua ordem sintética e desativa traces para não guardar credenciais.
 
 ## Quality gates
 

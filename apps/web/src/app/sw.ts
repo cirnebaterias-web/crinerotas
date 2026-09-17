@@ -3,6 +3,7 @@
 import { CacheFirst, NetworkOnly, Serwist, type PrecacheEntry, type RuntimeCaching } from 'serwist';
 import {
   isFieldNavigationPath,
+  isOfflineDemoPath,
   isSensitiveNetworkOnlyPath,
   isShellAssetPath,
   offlineRevisionRequestType,
@@ -56,8 +57,11 @@ const serwist = new Serwist({
   runtimeCaching,
   fallbacks: {
     entries: [{
+      url: '/~offline-demo',
+      matcher: ({ request }) => request.mode === 'navigate' && isOfflineDemoPath(new URL(request.url).pathname),
+    }, {
       url: '/~offline',
-      matcher: ({ request }) => request.mode === 'navigate' && isFieldNavigationPath(new URL(request.url).pathname),
+      matcher: ({ request }) => request.mode === 'navigate' && isFieldNavigationPath(new URL(request.url).pathname) && !isOfflineDemoPath(new URL(request.url).pathname),
     }],
   },
 });

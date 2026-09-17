@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import {
   isCurrentOfflineRevisionResponse,
   isFieldNavigationPath,
+  isOfflineDemoPath,
   isSensitiveNetworkOnlyPath,
   isShellAssetPath,
   offlineRevisionResponseType,
@@ -15,6 +16,11 @@ it('limits offline navigation fallback to seller field routes', () => {
 it('keeps API, authentication, and management network-only', () => {
   expect(['/api/v1/me', '/auth/callback', '/login', '/management/day'].every(isSensitiveNetworkOnlyPath)).toBe(true);
   expect(isSensitiveNetworkOnlyPath('/api/v10/public')).toBe(false);
+});
+
+it('separates the technical demo fallback from authenticated seller paths', () => {
+  expect(['/demo/offline', '/demo/offline/visit/id', '/~offline-demo'].every(isOfflineDemoPath)).toBe(true);
+  expect(['/route', '/visit/id', '/~offline', '/demo/offline-other'].some(isOfflineDemoPath)).toBe(false);
 });
 
 it('allows only versioned shell assets into the runtime asset cache', () => {

@@ -1,5 +1,5 @@
-import { OfflineShell } from '@/features/offline/offline-shell';
+import { RouteScreen } from '@/features/routes/route-screen';
 
 export default function RoutePage() {
-  return <OfflineShell />;
+  return <RouteScreen />;
 }

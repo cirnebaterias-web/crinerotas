@@ -12,7 +12,7 @@ let origin: string;
 let output = '';
 let identityEnvironment: { SUPABASE_PUBLIC_URL: string; SUPABASE_PUBLISHABLE_KEY: string };
 let actorManifest: {
-  actors: Record<string, { id: string; accessToken: string }>;
+  actors: Record<string, { id: string; accessToken: string; email: string; password: string }>;
 };
 let publishedRouteId = '';
 
@@ -137,6 +137,85 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (server) await stopProcess(server);
+});
+
+it('signs in through HttpOnly cookies, reads the seller route and signs out without exposing tokens', async () => {
+  const seller = actorManifest.actors.seller_a!;
+  const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
+  const response = await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers, body: JSON.stringify({ email: seller.email, password: seller.password }),
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  const result = await response.text();
+  expect(JSON.parse(result)).toMatchObject({ id: seller.id, roles: ['seller'] });
+  expect(result).not.toMatch(/access_token|refresh_token|password|email/i);
+  const setCookies = response.headers.getSetCookie();
+  expect(setCookies.length).toBeGreaterThan(0);
+  for (const cookie of setCookies) {
+    expect(cookie).toMatch(/httponly/i);
+    expect(cookie).toMatch(/samesite=lax/i);
+  }
+  const cookie = setCookies.map((item) => item.split(';')[0]).join('; ');
+  const me = await fetch(`${origin}/api/v1/me`, { headers: { cookie } });
+  expect(me.status).toBe(200);
+  expect(await me.json()).toMatchObject({ id: seller.id });
+  const route = await fetch(`${origin}/api/v1/me/routes/today`, { headers: { cookie } });
+  expect(route.status).toBe(200);
+  expect(await route.json()).toMatchObject({ schemaVersion: 2 });
+  const logout = await fetch(`${origin}/api/v1/auth/session`, { method: 'DELETE', headers: { ...headers, cookie } });
+  expect(logout.status).toBe(204);
+  expect(logout.headers.getSetCookie().every((value) => /max-age=0/i.test(value))).toBe(true);
+  expect((await fetch(`${origin}/api/v1/me`)).status).toBe(401);
+  expect(output.includes(seller.password)).toBe(false);
+  expect(output.includes(seller.accessToken)).toBe(false);
+});
+
+it('clears a previous browser session when an account switch is rejected', async () => {
+  const seller = actorManifest.actors.seller_a!;
+  const blocked = actorManifest.actors.blocked!;
+  const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
+  const signedIn = await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers, body: JSON.stringify({ email: seller.email, password: seller.password }),
+  });
+  expect(signedIn.status).toBe(200);
+  const cookie = signedIn.headers.getSetCookie().map((item) => item.split(';')[0]).join('; ');
+  const rejected = await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers: { ...headers, cookie }, body: JSON.stringify({ email: blocked.email, password: blocked.password }),
+  });
+  expect(rejected.status).toBe(403);
+  expect(rejected.headers.getSetCookie().length).toBeGreaterThan(0);
+  expect(rejected.headers.getSetCookie().every((value) => /max-age=0/i.test(value))).toBe(true);
+});
+
+it('rejects login failures, blocked/non-seller identities, CSRF, bearer and malformed bodies', async () => {
+  const seller = actorManifest.actors.seller_a!;
+  const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
+  for (const [key, expected] of [['blocked', 403], ['manager_a', 403], ['invalid', 401]] as const) {
+    const actor = actorManifest.actors[key] ?? { email: seller.email, password: 'incorrect-synthetic-password' };
+    const response = await fetch(`${origin}/api/v1/auth/session`, {
+      method: 'POST', headers, body: JSON.stringify({ email: actor.email, password: actor.password }),
+    });
+    expect(response.status).toBe(expected);
+    expect(response.headers.getSetCookie()).toHaveLength(0);
+    const body = await response.text();
+    expect(body).not.toContain(actor.password);
+    expect(body).not.toContain(actor.email);
+  }
+  for (const method of ['POST', 'DELETE']) {
+    for (const badHeaders of [
+      { ...headers, origin: 'https://other.example' },
+      { ...headers, 'x-csrf-token': '' },
+      { ...headers, authorization: 'Bearer synthetic' },
+    ]) {
+      const response = await fetch(`${origin}/api/v1/auth/session`, { method, headers: badHeaders });
+      expect([400, 403]).toContain(response.status);
+    }
+  }
+  expect((await fetch(`${origin}/api/v1/auth/session`, { method: 'POST', headers, body: '{}' })).status).toBe(400);
+  expect((await fetch(`${origin}/api/v1/auth/session`, {
+    method: 'POST', headers, body: JSON.stringify({ password: 'a'.repeat(65536) }),
+  })).status).toBe(413);
 });
 
 it('serves a minimal no-store canary without database credentials', async () => {

@@ -16,6 +16,12 @@ export const meResponseSchema = z.object({
 }).strict();
 export type MeResponse = z.infer<typeof meResponseSchema>;
 export const mePath = '/api/v1/me';
+export const authSessionPath = '/api/v1/auth/session';
+export const loginRequestSchema = z.object({
+  email: z.string().trim().email().max(254),
+  password: z.string().min(1).max(256),
+}).strict();
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
 export const routesPath = '/api/v1/routes';
 export const myTodayRoutePath = '/api/v1/me/routes/today';
