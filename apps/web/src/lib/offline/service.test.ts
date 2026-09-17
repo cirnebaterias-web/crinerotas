@@ -297,9 +297,11 @@ describe('canonical route cache', () => {
 
     const cache = service.cacheCanonicalRoute(partition.userId, canonicalRoute());
     await vi.waitFor(() => expect(readyRequested).toBe(true));
+    const cacheFailure = expect(cache).rejects.toThrow('O acesso local foi revogado.');
     const revoke = service.revokeLocalAccess(partition.userId);
     await expect(service.cacheCanonicalRoute(partition.userId, canonicalRoute()))
       .rejects.toThrow('O acesso local está sendo revogado.');
+    await revoke;
     releaseWorker?.({
       active: {
         postMessage: (_message, ports) => ports[0]?.postMessage({
@@ -308,8 +310,7 @@ describe('canonical route cache', () => {
         }),
       },
     });
-    await expect(cache).rejects.toThrow('O acesso local foi revogado.');
-    await revoke;
+    await cacheFailure;
 
     expect(localStorage.getItem('cirne-rotas.last-user-id')).toBeNull();
     expect(await repository.getLocalSession(partition)).toBeUndefined();

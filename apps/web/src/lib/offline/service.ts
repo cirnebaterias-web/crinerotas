@@ -63,28 +63,57 @@ function getOrCreateDeviceId() {
   return created;
 }
 
-async function workerIsReady(waitForInstall: boolean) {
+async function waitForWorkerRegistration(signal?: AbortSignal) {
+  return new Promise<ServiceWorkerRegistration | undefined>((resolve) => {
+    let settled = false;
+    const aborted = () => finish(undefined);
+    const timeout = window.setTimeout(() => finish(undefined), 10_000);
+    const finish = (registration: ServiceWorkerRegistration | undefined) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      signal?.removeEventListener('abort', aborted);
+      resolve(registration);
+    };
+    signal?.addEventListener('abort', aborted, { once: true });
+    void navigator.serviceWorker.ready.then(
+      (registration) => finish(registration),
+      () => finish(undefined),
+    );
+    if (signal?.aborted) finish(undefined);
+  });
+}
+
+async function workerIsReady(waitForInstall: boolean, signal?: AbortSignal) {
   if (!('serviceWorker' in navigator)) return false;
   const expectedRevision = process.env.NEXT_PUBLIC_OFFLINE_REVISION;
   if (!expectedRevision) return false;
 
   const registration = waitForInstall
-    ? await Promise.race([
-        navigator.serviceWorker.ready,
-        new Promise<undefined>((resolve) => window.setTimeout(() => resolve(undefined), 10_000)),
-      ])
+    ? await waitForWorkerRegistration(signal)
     : await navigator.serviceWorker.getRegistration();
+  if (signal?.aborted) return false;
   const worker = registration?.active;
   if (!worker) return false;
 
   return new Promise<boolean>((resolve) => {
+    let settled = false;
     const channel = new MessageChannel();
-    const timeout = window.setTimeout(() => resolve(false), 2_000);
-    channel.port1.onmessage = (event) => {
+    const aborted = () => finish(false);
+    const timeout = window.setTimeout(() => finish(false), 2_000);
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
       window.clearTimeout(timeout);
-      resolve(isCurrentOfflineRevisionResponse(event.data, expectedRevision));
+      signal?.removeEventListener('abort', aborted);
+      resolve(ready);
     };
+    channel.port1.onmessage = (event) => {
+      finish(isCurrentOfflineRevisionResponse(event.data, expectedRevision));
+    };
+    signal?.addEventListener('abort', aborted, { once: true });
     worker.postMessage({ type: offlineRevisionRequestType }, [channel.port2]);
+    if (signal?.aborted) finish(false);
   });
 }
 
@@ -114,6 +143,7 @@ export class OfflineFoundationService {
   private currentDeviceId: string | null = null;
   private revocationBarrier: Promise<void> | null = null;
   private readonly persistenceOperations = new Set<Promise<CanonicalRouteCacheResult>>();
+  private readonly revocationController = new AbortController();
   private accessRevoked = false;
 
   constructor(
@@ -218,7 +248,7 @@ export class OfflineFoundationService {
     const session = createValidatedLocalSession(partition, timestamp);
     const previous = await this.repository.getRouteBundle(partition, route.routeId);
     const [workerReady, storagePersisted] = await Promise.all([
-      workerIsReady(true),
+      workerIsReady(true, this.revocationController.signal),
       requestStoragePersistence(),
     ]);
     if (this.accessRevoked) throw new Error('O acesso local foi revogado.');
@@ -241,6 +271,7 @@ export class OfflineFoundationService {
   revokeLocalAccess(userId?: string) {
     if (this.revocationBarrier) return this.revocationBarrier;
     this.accessRevoked = true;
+    this.revocationController.abort();
     const operation = this.performLocalRevocation(userId).finally(() => {
       if (this.revocationBarrier === operation) this.revocationBarrier = null;
     });
