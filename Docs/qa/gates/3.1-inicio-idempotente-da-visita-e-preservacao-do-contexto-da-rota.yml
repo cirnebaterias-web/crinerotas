@@ -4,8 +4,8 @@ story_title: 'Início idempotente da visita e preservação do contexto da rota'
 gate: CONCERNS
 status_reason: 'SEC-001 resolvida: revogação oculta as três superfícies e impede restauração assíncrona do acesso, preservando o trabalho durável. Regressão completa aprovada; permanecem melhorias menores de manutenção/testes e os gates de preparação para piloto.'
 reviewer: 'Quinn (@qa, Codex)'
-reviewed_revision: 'product-files-sha256:0e2aa06935adad03befbae6dcee44a13ac8668223c38d59796f2711f6710af42'
-updated: '2026-09-19T01:34:55Z'
+reviewed_revision: 'product-files-sha256:25dc2ca5c768058fccf89e47e7b3b30599696534608db1e9c092a094c7faafa8'
+updated: '2026-09-19T01:46:01Z'
 top_issues:
   - id: TEST-001
     severity: low
@@ -31,7 +31,7 @@ evidence:
   specialized_review: 'Docs/qa/evidence/3.1-3.2-specialized-review.md'
   resolved_issues: ['SEC-001']
   current_run:
-    unit_passed: 207
+    unit_passed: 209
     pgtap_passed: 345
     integration_passed: 17
     controlled_e2e_passed: 42
