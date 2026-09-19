@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { AnyCanonicalLocalRouteBundle } from '@cirne/contracts';
 import { restoreCanonicalRoute } from '@cirne/domain';
 import { Brand } from '@/features/auth/brand';
+import { SavedVisits } from '@/features/visits/saved-visits';
 import { OfflineFoundationService, type OfflineShellResult } from '@/lib/offline/service';
+import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { formatServiceDate, orderedStops, pendingIds, routeProgress } from './route-model';
 import { NavigationActions } from './navigation-actions';
 
@@ -13,6 +15,11 @@ const statusLabels = {
   in_visit: 'Em visita',
   completed: 'Visitado',
   not_visited: 'Não visitado',
+};
+
+const blockedResult: OfflineShellResult = {
+  kind: 'blocked', reason: 'authentication_required',
+  message: 'O acesso local foi bloqueado. Conecte-se e entre novamente para liberar esta rota.',
 };
 
 function newestCanonicalRoute(result: OfflineShellResult | null) {
@@ -25,6 +32,7 @@ function newestCanonicalRoute(result: OfflineShellResult | null) {
 
 export function OfflineRouteScreen() {
   const serviceRef = useRef<OfflineFoundationService | null>(null);
+  const accessBlocked = useRef(false);
   const [result, setResult] = useState<OfflineShellResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [revocationError, setRevocationError] = useState<string | null>(null);
@@ -33,15 +41,24 @@ export function OfflineRouteScreen() {
   const stops = orderedStops(route?.stops ?? []);
   const pending = pendingIds(stops);
   const progress = routeProgress(stops);
+  const visitDrafts = useMemo(() => result?.kind === 'ready'
+    ? new Map(result.drafts.map((draft) => [draft.routeVersionStopId, draft]))
+    : new Map(), [result]);
 
   useEffect(() => {
     const service = new OfflineFoundationService();
     serviceRef.current = service;
+    accessBlocked.current = false;
     let active = true;
+    const stopObserving = observeLocalAccessRevocation(() => {
+      accessBlocked.current = true;
+      service.blockLocalAccess();
+      setResult(blockedResult); setBusy(false); setRevocationError(null);
+    });
     service.initialize()
-      .then((next) => { if (active) setResult(next); })
+      .then((next) => { if (active && !accessBlocked.current) setResult(next); })
       .catch(() => {
-        if (active) setResult({
+        if (active && !accessBlocked.current) setResult({
           kind: 'blocked',
           reason: 'authentication_required',
           message: 'Não foi possível abrir o armazenamento local deste aparelho.',
@@ -49,6 +66,7 @@ export function OfflineRouteScreen() {
       });
     return () => {
       active = false;
+      stopObserving();
       service.close();
       if (serviceRef.current === service) serviceRef.current = null;
     };
@@ -56,18 +74,40 @@ export function OfflineRouteScreen() {
 
   async function revokeLocalAccess() {
     if (!serviceRef.current || !bundle) return;
+    accessBlocked.current = true;
+    serviceRef.current.blockLocalAccess();
+    setResult(blockedResult);
     setBusy(true);
     setRevocationError(null);
     try {
       await serviceRef.current.revokeLocalAccess(bundle.userId);
-      setResult({
-        kind: 'blocked',
-        reason: 'authentication_required',
-        message: 'O acesso local foi bloqueado. Conecte-se e entre novamente para liberar esta rota.',
-      });
     } catch {
-      setRevocationError('Não foi possível bloquear o acesso local. A rota continua disponível neste aparelho; tente novamente.');
+      setRevocationError('Os dados foram ocultados, mas o bloqueio no armazenamento não pôde ser confirmado. Reconecte-se e saia da conta para concluir.');
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function beginVisit(routeVersionStopId: string) {
+    if (accessBlocked.current || !serviceRef.current || !bundle || busy) return;
+    const service = serviceRef.current;
+    const existing = visitDrafts.get(routeVersionStopId);
+    if (existing) {
+      window.location.assign(`/visit/${existing.offlineId}?step=${existing.currentStep}`);
+      return;
+    }
+    setBusy(true);
+    setRevocationError(null);
+    try {
+      const started = await serviceRef.current.startVisit({
+        userId: bundle.userId,
+        routeVersionStopId,
+      });
+      if (accessBlocked.current || serviceRef.current !== service) return;
+      window.location.assign(`/visit/${started.draft.offlineId}?step=${started.draft.currentStep}`);
+    } catch {
+      if (accessBlocked.current || serviceRef.current !== service) return;
+      setRevocationError('Não foi possível salvar o início da visita. A parada continua inalterada.');
       setBusy(false);
     }
   }
@@ -105,8 +145,14 @@ export function OfflineRouteScreen() {
             <div className="seller-stop-info"><div className="seller-stop-meta"><span className={`seller-stop-status status-${stop.status}`}>{statusLabels[stop.status]}</span><span>Prioridade {stop.priority}</span></div><h3>{stop.client.name}</h3><p>{stop.client.address}</p>
               <span className="seller-planned-order">Ordem planejada {stop.plannedOrder}</span>
               <NavigationActions client={stop.client} offline busy={busy} />
+              {(stop.status === 'pending' || visitDrafts.has(stop.routeVersionStopId)) && <button
+                className="seller-button seller-visit-action"
+                disabled={busy}
+                onClick={() => void beginVisit(stop.routeVersionStopId)}
+              >{visitDrafts.has(stop.routeVersionStopId) ? 'Continuar visita' : 'Iniciar visita'}</button>}
             </div>
           </li>)}</ol>
+          <SavedVisits route={route} drafts={result?.kind === 'ready' ? result.drafts : []} />
           <a className="seller-button seller-refresh" href="/route">↻ Tentar atualizar com conexão</a>
         </section>
       </div>}

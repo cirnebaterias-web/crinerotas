@@ -13,7 +13,7 @@ const partition: OfflinePartition = {
   deviceId: '22222222-2222-4222-8222-222222222222',
 };
 
-function event(sequence = 1): OfflineOutboxEvent {
+function event(sequence = 1): Extract<OfflineOutboxEvent, { operation: 'visit.draft.saved' }> {
   return {
     schemaVersion: 1,
     ...partition,

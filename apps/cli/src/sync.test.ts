@@ -8,6 +8,7 @@ describe('sync round-trip CLI contract', () => {
     const request = vi.fn<typeof fetch>(async (_url, init) => {
       const batch = JSON.parse(String(init?.body)) as SyncBatchRequest;
       const command = batch.events[0]!;
+      if (command.operation !== 'visit.draft.saved') throw new Error('Evento de rascunho esperado.');
       const headers = init?.headers as Record<string, string>;
       expect(headers.Authorization).toBe('Bearer synthetic-private-token');
       if (!canonical) {

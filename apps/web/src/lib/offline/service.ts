@@ -16,7 +16,12 @@ import {
   type DraftMutationIds,
 } from '@cirne/domain';
 import { OfflineDatabase } from './database';
-import { OfflineRepository, type SaveDraftCommand } from './repository';
+import {
+  OfflineRepository,
+  type SaveDraftCommand,
+  type SaveVisitStartCommand,
+  type SaveVisitStockCommand,
+} from './repository';
 import { SyncEngine, type RefreshSession, type SyncRunSummary } from './sync-engine';
 import { FetchSyncTransport } from './sync-transport';
 import {
@@ -42,6 +47,11 @@ export type OfflineShellResult =
   | OfflineSnapshot
   | { kind: 'empty'; demoAvailable: boolean; message: string }
   | { kind: 'blocked'; reason: 'authentication_required' | 'session_expired' | 'clock_rollback'; message: string };
+
+const revokedResult: OfflineShellResult = {
+  kind: 'blocked', reason: 'authentication_required',
+  message: 'O acesso local foi bloqueado. Entre novamente para continuar; os pendentes foram preservados.',
+};
 
 export interface CanonicalRouteCacheResult {
   bundle: AnyCanonicalLocalRouteBundle;
@@ -157,15 +167,19 @@ export class OfflineFoundationService {
   }
 
   async initialize(): Promise<OfflineShellResult> {
+    if (this.accessRevoked) return revokedResult;
     await this.repository.open();
+    if (this.accessRevoked) return revokedResult;
     const deviceId = this.getDeviceId();
     const previousUserId = window.localStorage.getItem(userStorageKey);
 
     if (navigator.onLine) {
       try {
         const response = await fetch(mePath, { credentials: 'same-origin', cache: 'no-store' });
+        if (this.accessRevoked) return revokedResult;
         if (response.ok) {
           const identity = meResponseSchema.parse(await response.json());
+          if (this.accessRevoked) return revokedResult;
           if (!identity.roles.includes('seller') || identity.status !== 'active') {
             await this.invalidateLocalAccess(deviceId, previousUserId, identity.id);
             return { kind: 'blocked', reason: 'authentication_required', message: 'Acesso de vendedor ativo necessário.' };
@@ -174,7 +188,12 @@ export class OfflineFoundationService {
           if (previousUserId && previousUserId !== identity.id) {
             await this.invalidateLocalAccess(deviceId, previousUserId);
           }
+          if (this.accessRevoked) return revokedResult;
           await this.repository.saveLocalSession(createValidatedLocalSession(partition, this.now()));
+          if (this.accessRevoked) {
+            await this.invalidateLocalAccess(deviceId, identity.id);
+            return revokedResult;
+          }
           window.localStorage.setItem(userStorageKey, identity.id);
           return this.loadAuthorizedPartition(partition, true);
         }
@@ -195,6 +214,7 @@ export class OfflineFoundationService {
       } catch {
         // A falha online não autoriza leitura. A exceção abaixo é exclusivamente a fixture local explícita.
       }
+      if (this.accessRevoked) return revokedResult;
       if (!(isLoopback() && previousUserId === syntheticSellerId)) {
         return {
           kind: 'empty',
@@ -268,11 +288,18 @@ export class OfflineFoundationService {
     return { bundle: stored, workerReady, storagePersisted, availableOffline: workerReady, compositionUpdated };
   }
 
-  revokeLocalAccess(userId?: string) {
-    if (this.revocationBarrier) return this.revocationBarrier;
+  /** Fence this instance without deleting a different user's newly established session. */
+  blockLocalAccess() {
     this.accessRevoked = true;
     this.revocationController.abort();
-    const operation = this.performLocalRevocation(userId).finally(() => {
+  }
+
+  revokeLocalAccess(userId?: string) {
+    if (this.revocationBarrier) return this.revocationBarrier;
+    this.blockLocalAccess();
+    let targetUserId = userId;
+    try { targetUserId ??= window.localStorage.getItem(userStorageKey) ?? undefined; } catch { /* Explicit identity remains usable when storage fails. */ }
+    const operation = this.performLocalRevocation(targetUserId).finally(() => {
       if (this.revocationBarrier === operation) this.revocationBarrier = null;
     });
     this.revocationBarrier = operation;
@@ -283,9 +310,7 @@ export class OfflineFoundationService {
     await Promise.allSettled([...this.persistenceOperations]);
     await this.repository.open();
     const deviceId = this.getDeviceId();
-    let previousUserId: string | null = null;
-    try { previousUserId = window.localStorage.getItem(userStorageKey); } catch { /* The explicit user still allows fail-closed session deletion. */ }
-    await this.invalidateLocalAccess(deviceId, previousUserId, userId ?? null);
+    await this.invalidateLocalAccess(deviceId, userId ?? null);
   }
 
   createDraftCommand(bundle: LocalRouteBundle, currentDraftOfflineId?: string): SaveDraftCommand {
@@ -307,6 +332,59 @@ export class OfflineFoundationService {
     const access = await this.requireLocalAccess(command.partition);
     if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de editar.');
     return this.repository.saveDraftAndEnqueue(command);
+  }
+
+  async startVisit(input: {
+    userId: string;
+    routeVersionStopId: string;
+    location?: SaveVisitStartCommand['location'];
+  }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de iniciar.');
+    return this.repository.saveVisitStartAndEnqueue({
+      partition,
+      routeVersionStopId: input.routeVersionStopId,
+      deviceStartedAt: this.now(),
+      ...(input.location ? { location: input.location } : {}),
+      ids: {
+        offlineId: this.createId(),
+        eventId: this.createId(),
+        idempotencyKey: this.createId(),
+      },
+    });
+  }
+
+  async findVisitForStop(userId: string, routeVersionStopId: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) return undefined;
+    return this.repository.findDraftForStop(partition, routeVersionStopId);
+  }
+
+  async saveVisitStock(input: {
+    userId: string;
+    offlineId: string;
+    heliarQuantity: number;
+    mouraQuantity: number;
+    observation?: string;
+  }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de editar.');
+    const command: SaveVisitStockCommand = {
+      partition,
+      offlineId: input.offlineId,
+      heliarQuantity: input.heliarQuantity,
+      mouraQuantity: input.mouraQuantity,
+      ...(input.observation === undefined ? {} : { observation: input.observation }),
+      deviceSavedAt: this.now(),
+      ids: { eventId: this.createId(), idempotencyKey: this.createId() },
+    };
+    return this.repository.saveVisitStockAndEnqueue(command);
   }
 
   async refresh(partition: OfflinePartition) {
@@ -332,8 +410,11 @@ export class OfflineFoundationService {
 
   private async invalidateLocalAccess(deviceId: string, ...userIds: Array<string | null>) {
     let storageFailure: unknown;
-    try { window.localStorage.removeItem(userStorageKey); } catch (error) { storageFailure = error; }
     const uniqueUserIds = [...new Set(userIds.filter((userId): userId is string => Boolean(userId)))];
+    try {
+      const currentUserId = window.localStorage.getItem(userStorageKey);
+      if (currentUserId && uniqueUserIds.includes(currentUserId)) window.localStorage.removeItem(userStorageKey);
+    } catch (error) { storageFailure = error; }
     await Promise.all(uniqueUserIds.map((userId) => (
       this.repository.deleteLocalSession({ userId, deviceId })
     )));
@@ -346,10 +427,16 @@ export class OfflineFoundationService {
   }
 
   private async requireLocalAccess(partition: OfflinePartition) {
+    const denied = { allowed: false as const, reason: 'session_expired' as const };
+    if (this.accessRevoked) return denied;
     const session = await this.repository.getLocalSession(partition);
-    if (!session) return { allowed: false as const, reason: 'session_expired' as const };
+    if (this.accessRevoked || !session) return denied;
     const decision = evaluateLocalAccess(session, partition, this.now());
     if (decision.allowed) await this.repository.saveLocalSession(decision.session);
+    if (this.accessRevoked) {
+      await this.invalidateLocalAccess(partition.deviceId, partition.userId);
+      return denied;
+    }
     return decision;
   }
 
@@ -359,6 +446,7 @@ export class OfflineFoundationService {
     readiness?: { workerReady: boolean; storagePersisted: boolean },
   ): Promise<OfflineShellResult> {
     const access = await this.requireLocalAccess(partition);
+    if (this.accessRevoked) return revokedResult;
     if (!access.allowed) {
       const reason = access.reason === 'clock_rollback' ? 'clock_rollback' : 'session_expired';
       return {
@@ -373,9 +461,10 @@ export class OfflineFoundationService {
       this.repository.listRouteBundles(partition),
       this.repository.listDrafts(partition),
       this.repository.listOutbox(partition),
-      readiness ? Promise.resolve(readiness.workerReady) : workerIsReady(waitForInstall),
+      readiness ? Promise.resolve(readiness.workerReady) : workerIsReady(waitForInstall, this.revocationController.signal),
       readiness ? Promise.resolve(readiness.storagePersisted) : storageIsPersisted(),
     ]);
+    if (this.accessRevoked) return revokedResult;
     return { kind: 'ready', partition, routes, drafts, outbox, workerReady, storagePersisted };
   }
 }

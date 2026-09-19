@@ -20,7 +20,46 @@ import {
   restoreCanonicalRoute,
   toRouteTodayResponse,
   toSyncCommand,
+  assertVisitCanStart,
+  createVisitStartMutation,
+  normalizeVisitStart,
+  normalizeStockInput,
+  createVisitStockMutation,
 } from './index';
+
+it('normalizes stock and creates the next visit event while preserving zero', () => {
+  expect(normalizeStockInput({ heliarQuantity: 0, mouraQuantity: 2, observation: '  conferido   no local  ' }))
+    .toEqual({ heliarQuantity: 0, mouraQuantity: 2, observation: 'conferido no local' });
+  const mutation = createVisitStockMutation({
+    draft: {
+      schemaVersion: 1,
+      userId: '11111111-1111-4111-8111-111111111111',
+      deviceId: '22222222-2222-4222-8222-222222222222',
+      offlineId: '55555555-5555-4555-8555-555555555555',
+      routeVersionStopId: '44444444-4444-4444-8444-444444444444',
+      currentStep: 'start',
+      deviceStartedAt: '2026-09-17T12:00:00.000Z',
+      localStatus: 'draft',
+      persistenceState: 'synced',
+      lastConfirmedSequence: 1,
+      updatedAt: '2026-09-17T12:00:01.000Z',
+    },
+    values: { heliarQuantity: 0, mouraQuantity: 2 },
+    deviceSavedAt: '2026-09-17T12:05:00.000Z',
+    sequence: 2,
+    ids: {
+      eventId: '66666666-6666-4666-8666-666666666667',
+      idempotencyKey: '77777777-7777-4777-8777-777777777778',
+    },
+  });
+  expect(mutation.draft).toMatchObject({
+    currentStep: 'prices',
+    stock: { heliarQuantity: 0, mouraQuantity: 2, persistenceState: 'saved_on_device' },
+  });
+  expect(toSyncCommand(mutation.event)).toMatchObject({
+    operation: 'visit.stock.saved.v1', aggregateType: 'visit', sequence: 2,
+  });
+});
 
 it('normalizes a valid route draft while preserving non-contiguous business order', () => {
   const normalized = normalizeRouteDraft({
@@ -278,4 +317,34 @@ it('classifies retryable, authentication, dependency and action-required failure
   expect(nextRetryDelayMs(1, () => 0.5)).toBe(2_000);
   expect(nextRetryDelayMs(99, () => 0.5)).toBe(300_000);
   expect(() => nextRetryDelayMs(0)).toThrow('Contagem de tentativa inválida.');
+});
+
+it('creates a visit start draft and the matching versioned outbox event', () => {
+  const startedAt = '2026-09-17T12:00:00.000Z';
+  const mutation = createVisitStartMutation({
+    partition,
+    routeVersionStopId: '44444444-4444-4444-8444-444444444441',
+    deviceStartedAt: startedAt,
+    sequence: 1,
+    ids: {
+      offlineId: '55555555-5555-4555-8555-555555555555',
+      eventId: '66666666-6666-4666-8666-666666666666',
+      idempotencyKey: '77777777-7777-4777-8777-777777777777',
+    },
+  });
+  expect(mutation.draft).toMatchObject({
+    offlineId: mutation.event.aggregateId,
+    deviceStartedAt: startedAt,
+    persistenceState: 'saved_on_device',
+  });
+  expect(toSyncCommand(mutation.event)).toMatchObject({
+    operation: 'visit.started.v1',
+    aggregateType: 'visit',
+    occurredAt: startedAt,
+    payload: { offlineId: mutation.draft.offlineId, deviceStartedAt: startedAt },
+  });
+  expect(normalizeVisitStart({ schemaVersion: 1, ...mutation.event.payload }))
+    .toMatchObject({ offlineId: mutation.draft.offlineId });
+  expect(assertVisitCanStart('pending')).toBeUndefined();
+  expect(() => assertVisitCanStart('in_visit')).toThrow('não está disponível');
 });

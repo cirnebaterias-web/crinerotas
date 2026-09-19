@@ -46,7 +46,7 @@ select is((
 select is((
   select jsonb_agg(permission_code order by permission_code)
   from api.role_permissions where role_id = '00000000-0000-4000-8000-000000000001'
-), '["identity.read_self", "route.read_self", "route.reorder_self", "sync.write_self"]'::jsonb, 'seller receives self route capabilities');
+), '["identity.read_self", "route.read_self", "route.reorder_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller receives self route and visit capabilities');
 
 select id as seller_a_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a' \gset
 select id as seller_b_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_b' \gset

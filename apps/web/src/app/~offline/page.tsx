@@ -1,5 +1,5 @@
-import { OfflineRouteScreen } from '@/features/routes/offline-route-screen';
+import { OfflineFieldShell } from '@/features/offline/field-shell';
 
 export default function OfflineFallbackPage() {
-  return <OfflineRouteScreen />;
+  return <OfflineFieldShell />;
 }

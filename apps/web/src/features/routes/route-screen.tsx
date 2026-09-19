@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import type { CanonicalRoute, MeResponse, RouteTodayResponse } from '@cirne/contracts';
+import type { CanonicalRoute, LocalVisitDraft, MeResponse, RouteTodayResponse } from '@cirne/contracts';
 import { Brand } from '@/features/auth/brand';
+import { SavedVisits } from '@/features/visits/saved-visits';
 import { OfflineFoundationService } from '@/lib/offline/service';
+import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { isSessionFailure, sellerClient, SellerHttpError } from '@/lib/seller-client';
 import { formatServiceDate, movePending, orderedStops, pendingIds, routeProgress } from './route-model';
 import { NavigationActions } from './navigation-actions';
@@ -21,14 +23,17 @@ export function RouteScreen() {
   const [offline, setOffline] = useState(false);
   const [offlineCache, setOfflineCache] = useState<'saving' | 'ready' | 'unavailable' | null>(null);
   const [compositionMessage, setCompositionMessage] = useState('');
+  const [visitDrafts, setVisitDrafts] = useState<Record<string, LocalVisitDraft>>({});
+  const [visitBusyStop, setVisitBusyStop] = useState<string | null>(null);
   const generation = useRef(0);
+  const accessBlocked = useRef(false);
   const cacheGeneration = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const offlineService = useRef<OfflineFoundationService | null>(null);
 
   const clearPrivate = useCallback(() => {
     ++cacheGeneration.current;
-    setIdentity(null); setToday(null); setDraft(null); setOfflineCache(null); setCompositionMessage('');
+    setIdentity(null); setToday(null); setDraft(null); setOfflineCache(null); setCompositionMessage(''); setVisitDrafts({});
   }, []);
   const cacheRoute = useCallback((userId: string, route: CanonicalRoute, current: number) => {
     const service = offlineService.current;
@@ -36,7 +41,7 @@ export function RouteScreen() {
     const currentCache = ++cacheGeneration.current;
     setOfflineCache('saving');
     void service.cacheCanonicalRoute(userId, route)
-      .then(({ availableOffline, bundle, compositionUpdated }) => {
+      .then(async ({ availableOffline, bundle, compositionUpdated }) => {
         if (current === generation.current && currentCache === cacheGeneration.current) {
           setOfflineCache(availableOffline ? 'ready' : 'unavailable');
           if (compositionUpdated && bundle.schemaVersion === 3 && bundle.compositionChange) {
@@ -45,6 +50,12 @@ export function RouteScreen() {
               `Rota atualizada pelo Gestor: ${added.length} incluído${added.length === 1 ? '' : 's'} e ` +
               `${removed.length} retirado${removed.length === 1 ? '' : 's'}. Motivo: ${reason}`,
             );
+          }
+          const snapshot = await service.refresh({ userId, deviceId: bundle.deviceId });
+          if (current === generation.current && currentCache === cacheGeneration.current) {
+            setVisitDrafts(Object.fromEntries(snapshot.kind === 'ready'
+              ? snapshot.drafts.filter((visit) => visit.deviceStartedAt).map((visit) => [visit.routeVersionStopId, visit])
+              : []));
           }
         }
       })
@@ -55,6 +66,7 @@ export function RouteScreen() {
       });
   }, []);
   const load = useCallback(async () => {
+    if (accessBlocked.current) return;
     const current = ++generation.current;
     controller.current?.abort();
     const active = new AbortController();
@@ -78,25 +90,33 @@ export function RouteScreen() {
   useEffect(() => {
     const localService = new OfflineFoundationService();
     offlineService.current = localService;
+    accessBlocked.current = false;
+    const stopObserving = observeLocalAccessRevocation(() => {
+      accessBlocked.current = true;
+      ++generation.current;
+      controller.current?.abort();
+      localService.blockLocalAccess();
+      clearPrivate();
+      setLoginRequired(true); setBusy(false); setMessage(''); setVisitBusyStop(null);
+    });
     void load();
     const connectivity = () => setOffline(!navigator.onLine);
     connectivity();
     const restored = (event: PageTransitionEvent) => { if (event.persisted) void load(); };
-    const channel = new BroadcastChannel('cirne-session');
-    channel.onmessage = () => { void load(); };
     window.addEventListener('online', connectivity);
     window.addEventListener('offline', connectivity);
     window.addEventListener('pageshow', restored);
     return () => {
-      ++generation.current; controller.current?.abort(); channel.close();
+      ++generation.current; controller.current?.abort(); stopObserving();
       localService.close();
       if (offlineService.current === localService) offlineService.current = null;
       window.removeEventListener('online', connectivity); window.removeEventListener('offline', connectivity);
       window.removeEventListener('pageshow', restored);
     };
-  }, [load]);
+  }, [load, clearPrivate]);
 
   async function logout() {
+    accessBlocked.current = true;
     ++generation.current; controller.current?.abort(); clearPrivate(); setBusy(true); setMessage('');
     try {
       try { await offlineService.current?.revokeLocalAccess(identity?.id); } catch { /* Private UI is already hidden; remote logout must still run. */ }
@@ -130,6 +150,31 @@ export function RouteScreen() {
           : 'Não foi possível confirmar o salvamento. Seu rascunho continua nesta tela. Confira a conexão.');
       }
     } finally { if (current === generation.current) setBusy(false); }
+  }
+
+  async function beginVisit(stop: CanonicalRoute['stops'][number]) {
+    if (accessBlocked.current || !identity || !offlineService.current || visitBusyStop) return;
+    const current = generation.current;
+    const existing = visitDrafts[stop.routeVersionStopId];
+    if (existing) {
+      window.location.assign(`/visit/${existing.offlineId}?step=${existing.currentStep}`);
+      return;
+    }
+    setVisitBusyStop(stop.routeVersionStopId);
+    setMessage('');
+    try {
+      const result = await offlineService.current.startVisit({
+        userId: identity.id,
+        routeVersionStopId: stop.routeVersionStopId,
+      });
+      if (current !== generation.current || accessBlocked.current) return;
+      setVisitDrafts((current) => ({ ...current, [stop.routeVersionStopId]: result.draft }));
+      window.location.assign(`/visit/${result.draft.offlineId}?step=${result.draft.currentStep}`);
+    } catch {
+      if (current !== generation.current || accessBlocked.current) return;
+      setMessage('Não foi possível salvar o início da visita neste aparelho. A parada continua inalterada.');
+      setVisitBusyStop(null);
+    }
   }
 
   const route = today?.availability === 'available' ? today.route : null;
@@ -188,6 +233,12 @@ export function RouteScreen() {
               <div className="seller-stop-info"><div className="seller-stop-meta"><span className={`seller-stop-status status-${stop.status}`}>{statusLabels[stop.status]}</span><span>Prioridade {stop.priority}</span></div><h3>{stop.client.name}</h3><p>{stop.client.address}</p>
                 <span className="seller-planned-order">Ordem planejada {stop.plannedOrder}</span>
                 <NavigationActions client={stop.client} offline={offline} busy={busy || needsReload} />
+                {!draft && (stop.status === 'pending' || visitDrafts[stop.routeVersionStopId]) && <button
+                  className="seller-button seller-visit-action"
+                  disabled={busy || needsReload || visitBusyStop !== null || offlineCache === null || offlineCache === 'saving'}
+                  onClick={() => void beginVisit(stop)}
+                >{visitBusyStop === stop.routeVersionStopId ? 'Salvando no aparelho…'
+                    : visitDrafts[stop.routeVersionStopId] ? 'Continuar visita' : 'Iniciar visita'}</button>}
               </div>
               {draft && stop.status === 'pending' && <div className="seller-move-controls">
                 <button className="seller-button seller-secondary" aria-label={`Subir ${stop.client.name}`} disabled={busy || needsReload || pendingIndex === 0} onClick={() => setDraft(movePending(stops, stop.routeVersionStopId, -1))}>↑</button>
@@ -195,10 +246,11 @@ export function RouteScreen() {
               </div>}
             </li>;
           })}</ol>
+          <SavedVisits route={route} drafts={Object.values(visitDrafts)} />
           {!draft && <button className="seller-button seller-refresh" onClick={() => void load()} disabled={busy || offline}>↻ Atualizar rota</button>}
         </section>
       </div>}
-      <footer className="seller-footer"><span>CIRNE ROTAS</span><p>Primeira experiência do MVP · Registro de visitas ainda não disponível.</p></footer>
+      <footer className="seller-footer"><span>CIRNE ROTAS</span><p>Rota e início de visita disponíveis online e offline.</p></footer>
     </main>
   </div>;
 }

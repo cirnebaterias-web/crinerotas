@@ -118,7 +118,7 @@ test('does not claim a saved draft after quota failure and safely retries the sa
   await expect(page.getByText('1 evento(s)')).toBeVisible();
 });
 
-test('upgrades an existing browser database from v1 to v5 without deleting durable records', async ({ page }) => {
+test('upgrades an existing browser database from v1 to v7 without deleting durable records', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(async ({ syntheticSellerId, deviceId, routeId, stopId }) => {
     await new Promise<void>((resolve, reject) => {
@@ -196,5 +196,5 @@ test('upgrades an existing browser database from v1 to v5 without deleting durab
     database.close();
     return { logicalVersion, hasSessions, counts };
   });
-  expect(migrated).toEqual({ logicalVersion: 5, hasSessions: true, counts: [1, 1, 1] });
+  expect(migrated).toEqual({ logicalVersion: 7, hasSessions: true, counts: [1, 1, 1] });
 });

@@ -1413,6 +1413,14 @@ Funções de entrada derivam identidade de `auth.uid()`, validam usuário ativo,
 
 Autorização que consulta papéis deve evitar ciclos recursivos de políticas. Contas bloqueadas não acessam linhas pelo BFF, Data API ou emissão Storage. Referências: [funções Supabase](https://supabase.com/docs/guides/database/functions), [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security).
 
+#### Implementação verificada nas Stories 3.1–3.2
+
+Os wrappers estreitos `api.start_visit`, `api.save_visit_stock` e `api.sync_event` usam `SECURITY DEFINER` com `search_path` vazio. Esta variante mantém `anon` e `authenticated` sem `USAGE` no schema `private` e sem DML nas tabelas; somente `authenticated` executa os wrappers públicos. Os helpers privados recebem grants explícitos entre executores. As funções revalidam identidade ativa, papel, capacidade e ownership, inclusive em replay.
+
+Os executores dedicados são `NOLOGIN`, `NOSUPERUSER` e `NOBYPASSRLS`. Nesta implementação eles também possuem suas tabelas de capability; `FORCE ROW LEVEL SECURITY` e políticas restritas aos executores delimitam o acesso interno, enquanto a autorização por vendedor ocorre obrigatoriamente nas funções. Esta é uma decisão documentada para o arranjo RPC existente, não uma dependência da RLS do chamador. A alteração futura de owner, grants ou wrapper exige repetir os testes de chamadas diretas e isolamento.
+
+Revisão local de 18/09/2026: a migração `20260918170000_visit_stock_contract_acl.sql` revoga o `EXECUTE` padrão dos helpers de estoque no contexto do owner; `20260918173000_visit_stock_replay_result.sql` preserva a resposta da intenção original após edições posteriores. Decisão: `Docs/architecture/decisions/001-visit-rpc-executor-boundary.md`. Evidência: `Docs/qa/evidence/3.1-3.2-specialized-review.md`.
+
 ## 10. Arquitetura frontend
 
 ### 10.1 Estratégia de renderização

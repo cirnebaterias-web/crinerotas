@@ -7,6 +7,10 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { root, run, supabaseBinary } from '../../scripts/process';
 
 const exec = promisify(execFile);
+const dockerProgram = process.platform === 'win32' ? 'wsl' : 'docker';
+const dockerPrefix = process.platform === 'win32'
+  ? ['-d', 'rancher-desktop', '--', 'docker']
+  : [];
 let server: ChildProcess | undefined;
 let origin: string;
 let output = '';
@@ -255,7 +259,7 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   expect(await sellerResponse.json()).toMatchObject({
     id: seller.id,
     roles: ['seller'],
-    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'sync.write_self'],
+    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'sync.write_self', 'visit.start_self'],
     scopeIds: [seller.id],
     status: 'active',
   });
@@ -534,12 +538,41 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
     body: JSON.stringify({ schemaVersion: 1, expectedVersion: acceptedCompositionBody.expectedVersion }),
   });
   expect(successorPublication.status).toBe(200);
-  const operationalRoute = await fetch(`${origin}/api/v1/me/routes/today`, {
+  const revisedDailyRoute = await fetch(`${origin}/api/v1/me/routes/today`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(revisedDailyRoute.status).toBe(200);
+  expect(await revisedDailyRoute.json()).toMatchObject({
+    route: { executionVersion: acceptedCompositionBody.expectedVersion + 1 },
+  });
+  // Reordering requires two pending stops. Keep the daily visits intact and exercise
+  // the same HTTP contract on a dedicated future route instead of resetting executions.
+  if (!/^[0-9a-f-]{36}$/i.test(seller.id)) throw new Error('Invalid synthetic seller UUID');
+  const nextDate = await exec(dockerProgram, [...dockerPrefix, 'exec', 'supabase_db_cirne-rotas-dev',
+    'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c',
+    `select (coalesce(max(service_date), date '2399-12-31') + 1)::text from api.routes
+      where seller_id = '${seller.id}' and service_date >= date '2400-01-01' and service_date < date '2500-01-01'`],
+  { windowsHide: true, timeout: 25_000 });
+  const reorderDraftResponse = await fetch(`${origin}/api/v1/routes`, {
+    method: 'POST', headers: compositionHeaders,
+    body: JSON.stringify({ schemaVersion: 1, sellerId: seller.id,
+      serviceDate: nextDate.stdout.trim(), stops: compositionCommands[0] }),
+  });
+  expect(reorderDraftResponse.status).toBe(201);
+  const reorderDraft = await reorderDraftResponse.json() as { routeId: string; expectedVersion: number };
+  const reorderRouteId = reorderDraft.routeId;
+  const reorderPublication = await fetch(`${origin}/api/v1/routes/${reorderRouteId}/publish`, {
+    method: 'POST', headers: compositionHeaders,
+    body: JSON.stringify({ schemaVersion: 1, expectedVersion: reorderDraft.expectedVersion }),
+  });
+  expect(reorderPublication.status).toBe(200);
+  const operationalRoute = await fetch(`${origin}/api/v1/routes/${reorderRouteId}`, {
     headers: { Authorization: `Bearer ${seller.accessToken}` },
   });
   expect(operationalRoute.status).toBe(200);
-  const operationalRouteBody = await operationalRoute.json() as typeof ownRouteBody;
-  expect(operationalRouteBody.route.executionVersion).toBe(acceptedCompositionBody.expectedVersion + 1);
+  const operationalRouteBody = { route: await operationalRoute.json() } as typeof ownRouteBody;
+  expect(operationalRouteBody.route.executionVersion).toBe(reorderDraft.expectedVersion + 1);
+  expect(operationalRouteBody.route.stops.filter(({ status }) => status === 'pending')).toHaveLength(2);
 
   const competingOrder = [...operationalRouteBody.route.stops]
     .filter(({ status }) => status === 'pending')
@@ -557,19 +590,19 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
       expectedVersion: operationalRouteBody.route.executionVersion,
       pendingStopIds: [competingOrder[0], competingOrder[0]] }), 422],
   ] as const) {
-    const rejected = await fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+    const rejected = await fetch(`${origin}/api/v1/routes/${reorderRouteId}/execution-order`, {
       method: 'PUT', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body,
     });
     expect(rejected.status).toBe(expectedStatus);
     expect(rejected.headers.get('cache-control')).toContain('no-store');
   }
   const [sellerReorder, managerReorder] = await Promise.all([
-    fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+    fetch(`${origin}/api/v1/routes/${reorderRouteId}/execution-order`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
       body: reorderBody,
     }),
-    fetch(`${origin}/api/v1/routes/${publishedRouteId}/execution-order`, {
+    fetch(`${origin}/api/v1/routes/${reorderRouteId}/execution-order`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${manager.accessToken}`, 'Content-Type': 'application/json' },
       body: reorderBody,
@@ -582,7 +615,7 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
     changed: true, executionVersion: operationalRouteBody.route.executionVersion + 1,
   });
   expect(await conflictedReorder.json()).toMatchObject({ error: { code: 'VERSION_CONFLICT' } });
-  const confirmed = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
+  const confirmed = await fetch(`${origin}/api/v1/routes/${reorderRouteId}`, {
     headers: { Authorization: `Bearer ${seller.accessToken}` },
   });
   expect(confirmed.status).toBe(200);
@@ -591,7 +624,7 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
   };
   expect(confirmedBody.executionVersion).toBe(operationalRouteBody.route.executionVersion + 1);
   expect(confirmedBody.stops.map((stop) => stop.routeVersionStopId)).toEqual(competingOrder);
-  const uppercaseNoOp = await fetch(`${origin}/api/v1/routes/${publishedRouteId.toUpperCase()}/execution-order`, {
+  const uppercaseNoOp = await fetch(`${origin}/api/v1/routes/${reorderRouteId.toUpperCase()}/execution-order`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${seller.accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ schemaVersion: 1, expectedVersion: confirmedBody.executionVersion,
@@ -616,6 +649,38 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
   });
   expect(forbiddenCreate.status).toBe(403);
   expect(output).not.toMatch(/Cliente Sintético|Endereço sintético|CARTEIRA-SINTETICA/i);
+});
+
+it('runs the real visit API through the CLI with canonical idempotent confirmation', async () => {
+  const seller = actorManifest.actors.seller_a;
+  if (!seller) throw new Error('Synthetic seller missing');
+  const result = await runWithClosedInput(process.execPath, [
+    '--import', 'tsx', 'apps/cli/src/visits-cli.ts', '--url', origin, '--json',
+  ], {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      CIRNE_ACCESS_TOKEN: seller.accessToken,
+    },
+  });
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    status: 'ok',
+    visitStatus: 'in_progress',
+    checks: {
+      started: true,
+      replayMatched: true,
+      divergentRejected: true,
+      canonicalContext: true,
+      stockSaved: true,
+      stockReplayMatched: true,
+      stockDivergentRejected: true,
+    },
+  });
+  expect(result.stdout + result.stderr).not.toContain(seller.accessToken);
+  expect(result.stdout + result.stderr).not.toMatch(
+    /routeVersionStopId|offlineId|deviceId|eventId|idempotencyKey|latitude|longitude|payload/i,
+  );
 });
 
 it('enforces sync BFF authorization and preserves independent partial progress', async () => {

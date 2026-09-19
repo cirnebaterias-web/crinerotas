@@ -262,8 +262,117 @@ export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
 
 export const maxSyncBatchEvents = 25;
 export const syncBatchPath = '/api/v1/sync/batches';
-export const syncOperationSchema = z.literal('visit.draft.saved');
-export const syncAggregateTypeSchema = z.literal('visit_draft');
+export const visitsPath = '/api/v1/visits';
+export const visitStockPath = (offlineId: string) => `${visitsPath}/${offlineId}/sections/stock`;
+export const visitCsrfToken = 'cirne-visit-v1';
+
+const canonicalDecimalSchema = z.string().regex(/^-?\d+(\.\d+)?$/);
+const nonNegativeDecimalSchema = z.string().regex(/^\d+(\.\d+)?$/);
+
+export const visitStartLocationSchema = z.object({
+  latitude: canonicalDecimalSchema.refine((value) => Math.abs(Number(value)) <= 90),
+  longitude: canonicalDecimalSchema.refine((value) => Math.abs(Number(value)) <= 180),
+  accuracyM: nonNegativeDecimalSchema.optional(),
+  distanceM: nonNegativeDecimalSchema.optional(),
+}).strict();
+export type VisitStartLocation = z.infer<typeof visitStartLocationSchema>;
+
+export const startVisitRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  offlineId: z.uuid(),
+  routeVersionStopId: z.uuid(),
+  deviceStartedAt: z.iso.datetime({ offset: true }),
+  location: visitStartLocationSchema.optional(),
+}).strict();
+export type StartVisitRequest = z.infer<typeof startVisitRequestSchema>;
+
+export const visitContextSnapshotSchema = z.object({
+  schemaVersion: z.literal(1),
+  sourceRouteVersionId: z.uuid(),
+  snapshotCreatedAt: z.iso.datetime({ offset: true }),
+  route: z.object({
+    id: z.uuid(),
+    versionNumber: z.number().int().positive(),
+    serviceDate: z.iso.date(),
+    publishedAt: z.iso.datetime({ offset: true }),
+    plannedOrder: z.number().int().positive().max(50),
+    priority: z.number().int().min(0).max(9),
+  }).strict(),
+  client: routeClientSnapshotSchema,
+  seller: routeSellerSnapshotSchema,
+  parameters: z.object({ id: z.uuid(), version: z.number().int().positive() }).strict(),
+}).strict();
+export type VisitContextSnapshot = z.infer<typeof visitContextSnapshotSchema>;
+
+export const visitStartResultSchema = z.object({
+  schemaVersion: z.literal(1),
+  visitId: z.uuid(),
+  offlineId: z.uuid(),
+  deviceId: z.uuid(),
+  routeVersionStopId: z.uuid(),
+  routeVersionId: z.uuid(),
+  clientId: z.uuid(),
+  sellerId: z.uuid(),
+  parameterSetId: z.uuid(),
+  status: z.literal('in_progress'),
+  contextSnapshot: visitContextSnapshotSchema,
+  deviceStartedAt: z.iso.datetime({ offset: true }),
+  serverStartedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type VisitStartResult = z.infer<typeof visitStartResultSchema>;
+
+const stockObservationSchema = z.preprocess(
+  (value) => typeof value === 'string' ? value.replace(/\s+/gu, ' ').trim() || undefined : value,
+  z.string().max(500).optional(),
+);
+
+export const stockInputSchema = z.object({
+  heliarQuantity: z.number().int().nonnegative(),
+  mouraQuantity: z.number().int().nonnegative(),
+  observation: stockObservationSchema,
+}).strict();
+export type StockInput = z.infer<typeof stockInputSchema>;
+
+export const saveStockRequestSchema = stockInputSchema.extend({
+  schemaVersion: z.literal(1),
+  offlineId: z.uuid(),
+  deviceSavedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type SaveStockRequest = z.infer<typeof saveStockRequestSchema>;
+
+export const stockSnapshotResultSchema = stockInputSchema.extend({
+  schemaVersion: z.literal(1),
+  stockSnapshotId: z.uuid(),
+  visitId: z.uuid(),
+  offlineId: z.uuid(),
+  serverSavedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type StockSnapshotResult = z.infer<typeof stockSnapshotResultSchema>;
+
+export const visitErrorCodeSchema = z.enum([
+  'AUTH_REQUIRED',
+  'FORBIDDEN',
+  'NOT_FOUND',
+  'VALIDATION_FAILED',
+  'VERSION_CONFLICT',
+  'EVENT_OUT_OF_ORDER',
+  'IDEMPOTENCY_KEY_REUSED',
+  'DEPENDENCY_UNAVAILABLE',
+  'INTERNAL_ERROR',
+]);
+export type VisitErrorCode = z.infer<typeof visitErrorCodeSchema>;
+
+export const visitStartedPayloadSchema = startVisitRequestSchema.omit({ schemaVersion: true }).extend({
+  // Present only in the TypeScript shape so legacy consumers can narrow safely.
+  acknowledged: z.never().optional(),
+}).strict();
+export type VisitStartedPayload = z.infer<typeof visitStartedPayloadSchema>;
+
+export const visitStockSavedPayloadSchema = saveStockRequestSchema.omit({ schemaVersion: true }).strict();
+export type VisitStockSavedPayload = z.infer<typeof visitStockSavedPayloadSchema>;
+
+export const syncOperationSchema = z.enum(['visit.draft.saved', 'visit.started.v1', 'visit.stock.saved.v1']);
+export const syncAggregateTypeSchema = z.enum(['visit_draft', 'visit']);
 export const syncErrorCodeSchema = z.enum([
   'AUTH_REQUIRED',
   'FORBIDDEN',
@@ -277,15 +386,18 @@ export const syncErrorCodeSchema = z.enum([
 ]);
 export type SyncErrorCode = z.infer<typeof syncErrorCodeSchema>;
 
-export const syncCommandSchema = z.object({
+const syncCommandBaseSchema = z.object({
   eventId: z.uuid(),
   idempotencyKey: z.uuid(),
-  operation: syncOperationSchema,
   schemaVersion: z.literal(1),
   sequence: z.number().int().positive(),
-  aggregateType: syncAggregateTypeSchema,
   aggregateId: z.uuid(),
   occurredAt: z.iso.datetime({ offset: true }),
+});
+
+const legacyDraftSyncCommandSchema = syncCommandBaseSchema.extend({
+  operation: z.literal('visit.draft.saved'),
+  aggregateType: z.literal('visit_draft'),
   payload: z.object({
     draftOfflineId: z.uuid(),
     routeVersionStopId: z.uuid(),
@@ -300,6 +412,68 @@ export const syncCommandSchema = z.object({
     });
   }
 });
+
+const visitStartedSyncCommandSchema = syncCommandBaseSchema.extend({
+  operation: z.literal('visit.started.v1'),
+  aggregateType: z.literal('visit'),
+  payload: visitStartedPayloadSchema,
+}).strict().superRefine((command, context) => {
+  if (command.sequence !== 1) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sequence'],
+      message: 'O início deve ser o primeiro evento da visita.',
+    });
+  }
+  if (command.aggregateId !== command.payload.offlineId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['payload', 'offlineId'],
+      message: 'O agregado deve corresponder ao offlineId da visita.',
+    });
+  }
+  if (command.occurredAt !== command.payload.deviceStartedAt) {
+    context.addIssue({
+      code: 'custom',
+      path: ['occurredAt'],
+      message: 'O horário do evento deve corresponder ao início no aparelho.',
+    });
+  }
+});
+
+const visitStockSavedSyncCommandSchema = syncCommandBaseSchema.extend({
+  operation: z.literal('visit.stock.saved.v1'),
+  aggregateType: z.literal('visit'),
+  payload: visitStockSavedPayloadSchema,
+}).strict().superRefine((command, context) => {
+  if (command.sequence < 2) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sequence'],
+      message: 'O estoque exige o início anterior da visita.',
+    });
+  }
+  if (command.aggregateId !== command.payload.offlineId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['payload', 'offlineId'],
+      message: 'O agregado deve corresponder ao offlineId da visita.',
+    });
+  }
+  if (command.occurredAt !== command.payload.deviceSavedAt) {
+    context.addIssue({
+      code: 'custom',
+      path: ['occurredAt'],
+      message: 'O horário do evento deve corresponder ao salvamento no aparelho.',
+    });
+  }
+});
+
+export const syncCommandSchema = z.discriminatedUnion('operation', [
+  legacyDraftSyncCommandSchema,
+  visitStartedSyncCommandSchema,
+  visitStockSavedSyncCommandSchema,
+]);
 export type SyncCommand = z.infer<typeof syncCommandSchema>;
 
 export const syncBatchRequestSchema = z.object({
@@ -486,8 +660,19 @@ export const localVisitDraftSchema = z.object({
   userId: z.uuid(),
   deviceId: z.uuid(),
   routeVersionStopId: z.uuid(),
-  currentStep: z.literal('start'),
-  acknowledged: z.boolean(),
+  currentStep: z.enum(['start', 'stock', 'prices']),
+  acknowledged: z.boolean().optional(),
+  deviceStartedAt: z.iso.datetime({ offset: true }).optional(),
+  client: routeClientSnapshotSchema.optional(),
+  canonicalVisitId: z.uuid().optional(),
+  serverStartedAt: z.iso.datetime({ offset: true }).optional(),
+  lastConfirmedSequence: z.number().int().positive().optional(),
+  stock: stockInputSchema.extend({
+    eventId: z.uuid(),
+    deviceSavedAt: z.iso.datetime({ offset: true }),
+    serverSavedAt: z.iso.datetime({ offset: true }).optional(),
+    persistenceState: z.enum(['saved_on_device', 'synced']),
+  }).strict().optional(),
   localStatus: z.literal('draft'),
   persistenceState: z.enum(['saved_on_device', 'synced']),
   updatedAt: z.iso.datetime({ offset: true }),
@@ -508,21 +693,40 @@ export const draftSavedPayloadSchema = z.object({
   acknowledged: z.boolean(),
 }).strict();
 
-export const offlineOutboxEventSchema = z.object({
+const offlineOutboxBaseSchema = z.object({
   schemaVersion: offlineSchemaVersionSchema,
   userId: z.uuid(),
   deviceId: z.uuid(),
   eventId: z.uuid(),
   idempotencyKey: z.uuid(),
-  operation: z.literal('visit.draft.saved'),
   aggregateId: z.uuid(),
   sequence: z.number().int().positive(),
-  payload: draftSavedPayloadSchema,
   status: offlineOutboxStatusSchema,
   attemptCount: z.number().int().nonnegative(),
   lastErrorCode: syncErrorCodeSchema.optional(),
   nextAttemptAt: z.iso.datetime({ offset: true }).optional(),
   leaseUntil: z.iso.datetime({ offset: true }).optional(),
   occurredAt: z.iso.datetime({ offset: true }),
+});
+
+const legacyOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
+  operation: z.literal('visit.draft.saved'),
+  payload: draftSavedPayloadSchema,
 }).strict();
+
+const visitStartedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
+  operation: z.literal('visit.started.v1'),
+  payload: visitStartedPayloadSchema,
+}).strict();
+
+const visitStockSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
+  operation: z.literal('visit.stock.saved.v1'),
+  payload: visitStockSavedPayloadSchema,
+}).strict();
+
+export const offlineOutboxEventSchema = z.discriminatedUnion('operation', [
+  legacyOfflineOutboxEventSchema,
+  visitStartedOfflineOutboxEventSchema,
+  visitStockSavedOfflineOutboxEventSchema,
+]);
 export type OfflineOutboxEvent = z.infer<typeof offlineOutboxEventSchema>;
