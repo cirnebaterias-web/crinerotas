@@ -400,8 +400,10 @@ test('retries a lost stock response with the exact same event and key', async ({
   await page.getByLabel('Quantidade observada — Heliar').fill('0');
   await page.getByLabel('Quantidade observada — Moura').fill('3');
   await page.getByRole('button', { name: 'Salvar estoque e continuar' }).click();
+  await expect(page.getByRole('heading', { name: 'Salvo no aparelho', exact: true })).toBeVisible();
+  // An empty outbox also exists before the save commits; observe the retry first.
+  await expect.poll(async () => page.evaluate(() => sessionStorage.getItem('visit-stock-sync-batches'))).toBe('2');
   await expect.poll(async () => (await offlineCounts(page)).events.length).toBe(0);
-  expect(await page.evaluate(() => sessionStorage.getItem('visit-stock-sync-batches'))).toBe('2');
   expect(await page.evaluate(() => sessionStorage.getItem('same-visit-stock-batch'))).toBe('true');
   expect((await offlineCounts(page)).drafts).toMatchObject([{
     stock: { heliarQuantity: 0, mouraQuantity: 3, persistenceState: 'synced' },
