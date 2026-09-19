@@ -481,6 +481,8 @@ for (const surface of ['loaded-route', 'offline-shell'] as const) {
     expect(saved.events).toHaveLength(1);
     const otherTab = await context.newPage();
     await otherTab.goto('/route', { waitUntil: 'domcontentloaded' });
+    // Test revocation of loaded views, not cancellation of the sender's session validation.
+    await expect(otherTab.getByRole('region', { name: 'Visitas salvas de outras versões' })).toBeVisible();
     if (signal === 'local-revocation') {
       await otherTab.getByRole('button', { name: 'Bloquear acesso local' }).click();
       await expect(otherTab.getByRole('heading', { name: 'Acesso local bloqueado' })).toBeVisible();
