@@ -517,6 +517,49 @@ describe('OfflineRepository', () => {
     expect(await repository.listOutbox(partitionA)).toEqual([legacy.event]);
   });
 
+  it.each(['stock-edit', 'legacy-event'])('persists each stock confirmation while %s remains pending', async (laterKind) => {
+    const { db, repository } = makeRepository();
+    await seedCanonical(repository);
+    const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+    const canonicalId = '88888888-8888-4888-8888-888888888888';
+    await repository.applySyncConfirmation(partitionA, {
+      eventId: started.event!.eventId, status: 'confirmed', canonicalId,
+      confirmedAt: '2026-09-17T12:01:01.000Z',
+    });
+    const stock = { partition: partitionA, offlineId: started.draft.offlineId,
+      heliarQuantity: 0, mouraQuantity: 7, deviceSavedAt: '2026-09-17T12:02:00.000Z',
+      ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() } };
+    const saved = await repository.saveVisitStockAndEnqueue(stock);
+    if (laterKind === 'stock-edit') {
+      await repository.saveVisitStockAndEnqueue({ ...stock, mouraQuantity: 9,
+        deviceSavedAt: '2026-09-17T12:03:00.000Z',
+        ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() } });
+    } else {
+      // A valid later legacy event shares the aggregate but does not supersede its stock section.
+      await db.outboxEvents.add({ ...saved.event, operation: 'visit.draft.saved', sequence: 3,
+        eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+        payload: { draftOfflineId: saved.draft.offlineId, routeVersionStopId: stopId, acknowledged: true } });
+    }
+    const beforeDraft = await repository.getDraft(partitionA, saved.draft.offlineId);
+    const beforeOutbox = await repository.listOutbox(partitionA);
+    const confirmation = { eventId: saved.event.eventId, status: 'confirmed' as const, canonicalId,
+      confirmedAt: '2026-09-17T12:03:01.000Z' };
+    vi.spyOn(db.visitDrafts, 'put').mockRejectedValueOnce(new DOMException('Storage full', 'QuotaExceededError'));
+    await expect(repository.applySyncConfirmation(partitionA, confirmation))
+      .rejects.toMatchObject({ name: 'QuotaExceededError' });
+    expect(await repository.getDraft(partitionA, saved.draft.offlineId)).toEqual(beforeDraft);
+    expect(await repository.listOutbox(partitionA)).toEqual(beforeOutbox);
+    await repository.applySyncConfirmation(partitionA, confirmation);
+    expect(await repository.getDraft(partitionA, saved.draft.offlineId)).toMatchObject({
+      canonicalVisitId: canonicalId, lastConfirmedSequence: 2,
+      persistenceState: 'saved_on_device', updatedAt: beforeDraft!.updatedAt,
+      stock: laterKind === 'stock-edit'
+        ? { mouraQuantity: 9, persistenceState: 'saved_on_device' }
+        : { mouraQuantity: 7, persistenceState: 'synced', serverSavedAt: confirmation.confirmedAt },
+    });
+    expect(await repository.listOutbox(partitionA)).toEqual(beforeOutbox.filter(e => e.eventId !== saved.event.eventId));
+  });
+
   it('commits stock with the next aggregate sequence, restores zero and confirms only its event', async () => {
     const { db, repository } = makeRepository();
     await seedCanonical(repository);

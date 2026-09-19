@@ -272,26 +272,24 @@ export class OfflineRepository {
           [partition.userId, partition.deviceId, event.aggregateId, Dexie.maxKey],
         )
         .count();
-      // Preserve the start's canonical identity even while later changes are still queued.
-      if (remaining === 0 || event.operation === 'visit.started.v1') {
-        await this.db.visitDrafts.put(localVisitDraftSchema.parse({
-          ...draft,
-          ...(event.operation === 'visit.started.v1' ? {
-            canonicalVisitId: confirmationInput.canonicalId,
-            serverStartedAt: confirmationInput.confirmedAt,
-          } : {}),
-          ...(event.operation === 'visit.stock.saved.v1' && draft.stock?.eventId === event.eventId ? {
-            stock: {
-              ...draft.stock,
-              persistenceState: 'synced' as const,
-              serverSavedAt: confirmationInput.confirmedAt,
-            },
-          } : {}),
-          lastConfirmedSequence: Math.max(draft.lastConfirmedSequence ?? 0, event.sequence),
-          persistenceState: remaining === 0 ? 'synced' : draft.persistenceState,
-          updatedAt: remaining === 0 ? confirmationInput.confirmedAt : draft.updatedAt,
-        }));
-      }
+      // Persist every event's confirmation; only an empty queue confirms the entire draft.
+      await this.db.visitDrafts.put(localVisitDraftSchema.parse({
+        ...draft,
+        ...(event.operation === 'visit.started.v1' ? {
+          canonicalVisitId: confirmationInput.canonicalId,
+          serverStartedAt: confirmationInput.confirmedAt,
+        } : {}),
+        ...(event.operation === 'visit.stock.saved.v1' && draft.stock?.eventId === event.eventId ? {
+          stock: {
+            ...draft.stock,
+            persistenceState: 'synced' as const,
+            serverSavedAt: confirmationInput.confirmedAt,
+          },
+        } : {}),
+        lastConfirmedSequence: Math.max(draft.lastConfirmedSequence ?? 0, event.sequence),
+        persistenceState: remaining === 0 ? 'synced' : draft.persistenceState,
+        updatedAt: remaining === 0 ? confirmationInput.confirmedAt : draft.updatedAt,
+      }));
       return true;
     });
   }
