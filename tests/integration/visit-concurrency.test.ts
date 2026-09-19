@@ -3,15 +3,17 @@ import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { expect, it } from 'vitest';
 
-const dockerProgram = process.platform === 'win32' ? 'wsl' : 'docker';
-const dockerPrefix = process.platform === 'win32'
+const useRancherDesktopWsl = process.platform === 'win32' &&
+  process.env.CIRNE_DOCKER_BACKEND === 'rancher-desktop-wsl';
+const dockerProgram = useRancherDesktopWsl ? 'wsl' : 'docker';
+const dockerPrefix = useRancherDesktopWsl
   ? ['-d', 'rancher-desktop', '--', 'docker']
   : [];
 
 // Deliberately local-only: no database URL, password, remote host or new driver dependency.
 function runSql(command: string) {
   return new Promise<{ ok: boolean; output: string }>((resolve) => {
-    const commandArgument = process.platform === 'win32' ? command.replace(/\$/g, '\\$') : command;
+    const commandArgument = useRancherDesktopWsl ? command.replace(/\$/g, '\\$') : command;
     execFile(dockerProgram, [...dockerPrefix, 'exec', 'supabase_db_cirne-rotas-dev', 'psql', '-X', '-qAt',
       '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', commandArgument],
     { windowsHide: true, timeout: 25_000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {

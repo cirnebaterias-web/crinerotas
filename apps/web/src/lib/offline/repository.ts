@@ -424,20 +424,29 @@ export class OfflineRepository {
           throw new Error('A parada não está pendente para iniciar a visita.');
         }
 
+        const offlineId = existingDraft?.offlineId ?? command.ids.offlineId;
+        const lastPending = await this.db.outboxEvents
+          .where('[userId+deviceId+aggregateId+sequence]')
+          .between(
+            [partition.userId, partition.deviceId, offlineId, Dexie.minKey],
+            [partition.userId, partition.deviceId, offlineId, Dexie.maxKey],
+          ).last();
         const mutation = createVisitStartMutation({
           partition,
           routeVersionStopId: command.routeVersionStopId,
           deviceStartedAt: command.deviceStartedAt,
           client: stop.client,
           ...(command.location ? { location: command.location } : {}),
-          sequence: 1,
-          ids: command.ids,
+          sequence: Math.max(lastPending?.sequence ?? 0, existingDraft?.lastConfirmedSequence ?? 0) + 1,
+          ids: { ...command.ids, offlineId },
         });
+        const draft = localVisitDraftSchema.parse({ ...existingDraft, ...mutation.draft });
         assertPartition(partition, mutation.draft);
         assertPartition(partition, mutation.event);
-        await this.db.visitDrafts.add(mutation.draft);
+        if (existingDraft) await this.db.visitDrafts.put(draft);
+        else await this.db.visitDrafts.add(draft);
         await this.db.outboxEvents.add(mutation.event);
-        return { ...mutation, reopened: false };
+        return { draft, event: mutation.event, reopened: false };
       },
     );
   }

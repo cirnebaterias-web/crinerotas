@@ -33,8 +33,8 @@ export const test = base.extend<{ realRoute: RealRouteFixture }>({
         'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres',
         '-c', `insert into api.clients (id, external_reference, name, address, portfolio_reference, status) values ${values}`],
       { windowsHide: true, timeout: 25_000 });
-    } catch {
-      throw new Error('Could not create exclusively synthetic browser clients in the local database.');
+    } catch (cause) {
+      throw new Error('Could not create exclusively synthetic browser clients in the local database.', { cause });
     }
     const currentResponse = await request.get('/api/v1/me/routes/today', {
       headers: { Authorization: `Bearer ${seller.accessToken}` },

@@ -1403,7 +1403,7 @@ Constraints mínimas adicionais, a concretizar por migrações e pgTAP:
 
 Não usar CHECK com consulta a outra tabela; usar FK/UNIQUE, função transacional ou trigger apropriada. Recibo não terá unicidade global presumida (AB-06); precisão/limites de peso permanecem AB-05. Coletor deve ser identificado; o contrato não obriga que todo coletor tenha login. Se houver conta associada, usar FK; modo de identificação operacional depende da definição aprovada.
 
-Referências: [constraints PostgreSQL 17](https://www.postgresql.org/docs/17/ddl-constraints.html), PRD FR-005/042/052/053 e DATA-03/04. A revisão é documental; migrações e testes de integridade ainda serão implementados.
+Referências: [constraints PostgreSQL 17](https://www.postgresql.org/docs/17/ddl-constraints.html), PRD FR-005/042/052/053 e DATA-03/04. A revisão original desta seção foi documental. As migrações e os testes de integridade do recorte entregue até as Stories 3.1–3.2 estão implementados e verificados; as capacidades de stories posteriores continuam pendentes. O estado atual e suas evidências estão detalhados na seção 9.12 e nos registros de QA das stories.
 
 ### 9.12 Grants e funções internas
 

@@ -475,6 +475,48 @@ describe('OfflineRepository', () => {
     expect(await repository.listDrafts(partitionA)).toEqual([]);
   });
 
+  it.each([false, true])('starts an existing legacy draft without duplicating its identity (confirmed=%s)', async (confirmed) => {
+    const { repository } = makeRepository();
+    await seedCanonical(repository);
+    const legacy = await repository.saveDraftAndEnqueue(command());
+    if (confirmed) {
+      await repository.applySyncConfirmation(partitionA, {
+        eventId: legacy.event.eventId, status: 'confirmed', canonicalId: legacy.draft.offlineId,
+        confirmedAt: '2026-09-17T12:00:00.000Z',
+      });
+    }
+    const start = { ...visitStartCommand(), ids: {
+      offlineId: crypto.randomUUID(), eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+    } };
+    const saved = await repository.saveVisitStartAndEnqueue(start);
+    expect(saved).toMatchObject({
+      reopened: false,
+      draft: { offlineId: legacy.draft.offlineId, acknowledged: true, deviceStartedAt: start.deviceStartedAt },
+      event: { operation: 'visit.started.v1', aggregateId: legacy.draft.offlineId, sequence: 2,
+        payload: { offlineId: legacy.draft.offlineId } },
+    });
+    expect(await repository.listDrafts(partitionA)).toEqual([saved.draft]);
+    expect(await repository.findDraftForStop(partitionA, stopId)).toEqual(saved.draft);
+    expect(await repository.listOutbox(partitionA)).toEqual(confirmed ? [saved.event] : [legacy.event, saved.event]);
+    if (confirmed) expect(saved.draft.lastConfirmedSequence).toBe(1);
+    const reopened = await repository.saveVisitStartAndEnqueue(start);
+    expect(reopened).toMatchObject({ reopened: true, draft: saved.draft });
+    expect(await repository.listDrafts(partitionA)).toHaveLength(1);
+    expect(await repository.listDrafts(partitionB)).toEqual([]);
+  });
+
+  it('preserves the legacy draft and its pending event when starting fails to enqueue', async () => {
+    const { db, repository } = makeRepository();
+    await seedCanonical(repository);
+    const legacy = await repository.saveDraftAndEnqueue(command());
+    vi.spyOn(db.outboxEvents, 'add').mockRejectedValueOnce(new DOMException('Storage full', 'QuotaExceededError'));
+    await expect(repository.saveVisitStartAndEnqueue({ ...visitStartCommand(), ids: {
+      offlineId: crypto.randomUUID(), eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+    } })).rejects.toMatchObject({ name: 'QuotaExceededError' });
+    expect(await repository.listDrafts(partitionA)).toEqual([legacy.draft]);
+    expect(await repository.listOutbox(partitionA)).toEqual([legacy.event]);
+  });
+
   it('commits stock with the next aggregate sequence, restores zero and confirms only its event', async () => {
     const { db, repository } = makeRepository();
     await seedCanonical(repository);

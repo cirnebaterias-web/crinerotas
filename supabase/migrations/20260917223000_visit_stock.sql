@@ -442,21 +442,28 @@ alter function api.save_visit_stock(uuid, uuid, jsonb) owner to cirne_visit_exec
 revoke create on schema api, private from cirne_visit_executor;
 revoke create on schema private from cirne_sync_executor;
 
+set local role cirne_visit_executor;
+revoke all on function private.get_visit_stock_result(uuid),
+  private.apply_visit_stock_saved(uuid, jsonb)
+  from public, anon, authenticated;
+revoke all on function api.save_visit_stock(uuid, uuid, jsonb) from public, anon;
+grant execute on function api.save_visit_stock(uuid, uuid, jsonb) to authenticated;
+grant execute on function private.get_visit_stock_result(uuid),
+  private.apply_visit_stock_saved(uuid, jsonb) to cirne_sync_executor;
+reset role;
+
+set local role cirne_sync_executor;
+revoke all on function private.save_visit_stock(uuid, uuid, jsonb)
+  from public, anon, authenticated;
+grant execute on function private.save_visit_stock(uuid, uuid, jsonb) to cirne_visit_executor;
+grant execute on function private.sync_event(uuid, jsonb) to cirne_visit_executor;
+reset role;
+
 do $final_ownership$
 begin
   execute pg_catalog.format('revoke cirne_visit_executor from %I granted by current_user', current_user);
   execute pg_catalog.format('revoke cirne_sync_executor from %I granted by current_user', current_user);
 end
 $final_ownership$;
-
-revoke all on function private.get_visit_stock_result(uuid),
-  private.apply_visit_stock_saved(uuid, jsonb), private.save_visit_stock(uuid, uuid, jsonb)
-  from public, anon, authenticated;
-revoke all on function api.save_visit_stock(uuid, uuid, jsonb) from public, anon;
-grant execute on function api.save_visit_stock(uuid, uuid, jsonb) to authenticated;
-grant execute on function private.get_visit_stock_result(uuid),
-  private.apply_visit_stock_saved(uuid, jsonb) to cirne_sync_executor;
-grant execute on function private.save_visit_stock(uuid, uuid, jsonb) to cirne_visit_executor;
-grant execute on function private.sync_event(uuid, jsonb) to cirne_visit_executor;
 
 commit;

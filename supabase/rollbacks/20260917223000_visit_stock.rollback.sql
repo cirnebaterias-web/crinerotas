@@ -61,6 +61,7 @@ reset role;
 set local role cirne_visit_executor;
 drop function api.save_visit_stock(uuid, uuid, jsonb);
 reset role;
+grant create on schema private to cirne_sync_executor;
 set local role cirne_sync_executor;
 drop function private.save_visit_stock(uuid, uuid, jsonb);
 drop function private.sync_event(uuid, jsonb);
@@ -69,6 +70,7 @@ alter table private.sync_events drop constraint sync_events_operation_check;
 alter table private.sync_events add constraint sync_events_operation_check
   check (operation in ('visit.draft.saved', 'visit.started.v1'));
 reset role;
+revoke create on schema private from cirne_sync_executor;
 set local role cirne_visit_executor;
 drop function private.apply_visit_stock_saved(uuid, jsonb);
 drop function private.get_visit_stock_result(uuid);

@@ -7,8 +7,10 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { root, run, supabaseBinary } from '../../scripts/process';
 
 const exec = promisify(execFile);
-const dockerProgram = process.platform === 'win32' ? 'wsl' : 'docker';
-const dockerPrefix = process.platform === 'win32'
+const useRancherDesktopWsl = process.platform === 'win32' &&
+  process.env.CIRNE_DOCKER_BACKEND === 'rancher-desktop-wsl';
+const dockerProgram = useRancherDesktopWsl ? 'wsl' : 'docker';
+const dockerPrefix = useRancherDesktopWsl
   ? ['-d', 'rancher-desktop', '--', 'docker']
   : [];
 let server: ChildProcess | undefined;
