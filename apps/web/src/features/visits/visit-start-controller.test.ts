@@ -15,7 +15,7 @@ function fixture() {
     }],
     outbox: [{
       schemaVersion: 1, ...partition, operation: 'visit.started.v1', eventId: 'event-a',
-      idempotencyKey: 'key-a', aggregateId: 'visit-a', sequence: 1, occurredAt: stamp,
+      idempotencyKey: 'key-a', aggregateType: 'visit', aggregateId: 'visit-a', sequence: 1, occurredAt: stamp,
       payload: { offlineId: 'visit-a', routeVersionStopId: 'stop-a', deviceStartedAt: stamp },
       status: 'pending', attemptCount: 0,
     }],

@@ -711,16 +711,21 @@ const offlineOutboxBaseSchema = z.object({
 
 const legacyOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
   operation: z.literal('visit.draft.saved'),
+  aggregateType: z.literal('visit_draft').default('visit_draft'),
   payload: draftSavedPayloadSchema,
 }).strict();
 
 const visitStartedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
   operation: z.literal('visit.started.v1'),
+  aggregateType: z.literal('visit').default('visit'),
+  sequence: z.literal(1),
   payload: visitStartedPayloadSchema,
 }).strict();
 
 const visitStockSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
   operation: z.literal('visit.stock.saved.v1'),
+  aggregateType: z.literal('visit').default('visit'),
+  sequence: z.number().int().min(2),
   payload: visitStockSavedPayloadSchema,
 }).strict();
 

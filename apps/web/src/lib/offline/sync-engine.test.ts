@@ -20,6 +20,7 @@ function event(sequence = 1): Extract<OfflineOutboxEvent, { operation: 'visit.dr
     eventId: `60000000-0000-4000-8000-00000000000${sequence}`,
     idempotencyKey: `70000000-0000-4000-8000-00000000000${sequence}`,
     operation: 'visit.draft.saved',
+    aggregateType: 'visit_draft',
     aggregateId: '50000000-0000-4000-8000-000000000001',
     sequence,
     payload: {

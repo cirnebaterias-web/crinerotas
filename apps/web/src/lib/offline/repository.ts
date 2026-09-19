@@ -196,12 +196,13 @@ export class OfflineRepository {
 
       for (const event of all) {
         if (selected.length >= limit) break;
-        if (blockedAggregates.has(event.aggregateId)) continue;
+        const aggregateKey = `${event.aggregateType}:${event.aggregateId}`;
+        if (blockedAggregates.has(aggregateKey)) continue;
         const eligible = event.status === 'pending' ||
           (event.status === 'recoverable_error' && (!event.nextAttemptAt || Date.parse(event.nextAttemptAt) <= nowMs)) ||
           (event.status === 'sending' && Boolean(event.leaseUntil) && Date.parse(event.leaseUntil!) <= nowMs);
         if (!eligible) {
-          blockedAggregates.add(event.aggregateId);
+          blockedAggregates.add(aggregateKey);
           continue;
         }
         const reserved = offlineOutboxEventSchema.parse({
@@ -286,7 +287,9 @@ export class OfflineRepository {
             serverSavedAt: confirmationInput.confirmedAt,
           },
         } : {}),
-        lastConfirmedSequence: Math.max(draft.lastConfirmedSequence ?? 0, event.sequence),
+        lastConfirmedSequence: event.operation === 'visit.draft.saved' && draft.deviceStartedAt
+          ? draft.lastConfirmedSequence
+          : Math.max(draft.lastConfirmedSequence ?? 0, event.sequence),
         persistenceState: remaining === 0 ? 'synced' : draft.persistenceState,
         updatedAt: remaining === 0 ? confirmationInput.confirmedAt : draft.updatedAt,
       }));
@@ -384,10 +387,10 @@ export class OfflineRepository {
           .first();
         if (existingDraft?.deviceStartedAt) {
           const event = await this.db.outboxEvents
-            .where('[userId+deviceId+aggregateId+sequence]')
+            .where('[userId+deviceId+aggregateType+aggregateId+sequence]')
             .between(
-              [partition.userId, partition.deviceId, existingDraft.offlineId, Dexie.minKey],
-              [partition.userId, partition.deviceId, existingDraft.offlineId, Dexie.maxKey],
+              [partition.userId, partition.deviceId, 'visit', existingDraft.offlineId, Dexie.minKey],
+              [partition.userId, partition.deviceId, 'visit', existingDraft.offlineId, Dexie.maxKey],
             ).first();
           return { draft: existingDraft, event, reopened: true };
         }
@@ -423,22 +426,18 @@ export class OfflineRepository {
         }
 
         const offlineId = existingDraft?.offlineId ?? command.ids.offlineId;
-        const lastPending = await this.db.outboxEvents
-          .where('[userId+deviceId+aggregateId+sequence]')
-          .between(
-            [partition.userId, partition.deviceId, offlineId, Dexie.minKey],
-            [partition.userId, partition.deviceId, offlineId, Dexie.maxKey],
-          ).last();
         const mutation = createVisitStartMutation({
           partition,
           routeVersionStopId: command.routeVersionStopId,
           deviceStartedAt: command.deviceStartedAt,
           client: stop.client,
           ...(command.location ? { location: command.location } : {}),
-          sequence: Math.max(lastPending?.sequence ?? 0, existingDraft?.lastConfirmedSequence ?? 0) + 1,
+          sequence: 1,
           ids: { ...command.ids, offlineId },
         });
-        const draft = localVisitDraftSchema.parse({ ...existingDraft, ...mutation.draft });
+        const draft = localVisitDraftSchema.parse({
+          ...existingDraft, ...mutation.draft, lastConfirmedSequence: undefined,
+        });
         assertPartition(partition, mutation.draft);
         assertPartition(partition, mutation.event);
         if (existingDraft) await this.db.visitDrafts.put(draft);
@@ -470,10 +469,10 @@ export class OfflineRepository {
       if (eventCollision || keyCollision) throw new Error('Identificador de evento local já utilizado.');
 
       const lastPending = await this.db.outboxEvents
-        .where('[userId+deviceId+aggregateId+sequence]')
+        .where('[userId+deviceId+aggregateType+aggregateId+sequence]')
         .between(
-          [partition.userId, partition.deviceId, command.offlineId, Dexie.minKey],
-          [partition.userId, partition.deviceId, command.offlineId, Dexie.maxKey],
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.minKey],
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.maxKey],
         ).last();
       const sequence = Math.max(lastPending?.sequence ?? 0, currentDraft.lastConfirmedSequence ?? 0) + 1;
       const mutation = createVisitStockMutation({

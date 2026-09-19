@@ -5,10 +5,13 @@ import {
   createCanonicalLocalRouteBundle,
   createSyntheticRouteBundle,
   createValidatedLocalSession,
+  toSyncCommand,
 } from '@cirne/domain';
-import { OfflineDatabase, offlineV2Stores } from './database';
+import { OfflineDatabase, offlineV2Stores, offlineV7Stores } from './database';
 import { OfflineRepository, type SaveDraftCommand, type SaveVisitStartCommand, type SaveVisitStockCommand } from './repository';
 import { SyncEventPersistenceError } from './sync-persistence-error';
+import { SyncEngine } from './sync-engine';
+import { processSyncBatch, SyncEventFailure } from '../../server/sync/service';
 
 const partitionA = {
   userId: '11111111-1111-4111-8111-111111111111',
@@ -132,11 +135,11 @@ describe('OfflineRepository', () => {
     expect(await repository.listDrafts(partitionB)).toEqual([]);
   });
 
-  it('preserves route, session, draft and outbox during the schema v2 to v7 upgrade', async () => {
+  it.each([2, 7])('preserves route, session, draft and outbox during the schema v%s to v8 upgrade', async (version) => {
     const name = `offline-migration-${crypto.randomUUID()}`;
     names.push(name);
     const legacy = new Dexie(name, { indexedDB, IDBKeyRange });
-    legacy.version(2).stores(offlineV2Stores);
+    legacy.version(version).stores(version === 2 ? offlineV2Stores : offlineV7Stores);
     await legacy.open();
     const bundle = createSyntheticRouteBundle(partitionA, '2026-09-11T12:00:00.000Z');
     await legacy.table('routeBundles').put(bundle);
@@ -165,14 +168,21 @@ describe('OfflineRepository', () => {
       attemptCount: 0,
       occurredAt: '2026-09-11T12:01:00.000Z',
     });
+    const previousEvent = await legacy.table('outboxEvents').toCollection().first();
     legacy.close();
 
     const repository = new OfflineRepository(new OfflineDatabase(name, { indexedDB, IDBKeyRange }));
     await repository.open();
     expect(await repository.listRouteBundles(partitionA)).toEqual([bundle]);
     expect(await repository.listDrafts(partitionA)).toHaveLength(1);
-    expect(await repository.listOutbox(partitionA)).toHaveLength(1);
+    expect(await repository.listOutbox(partitionA)).toEqual([{ ...previousEvent, aggregateType: 'visit_draft' }]);
     expect(await repository.getLocalSession(partitionA)).toBeDefined();
+    await seedCanonical(repository);
+    const started = await repository.saveVisitStartAndEnqueue({ ...visitStartCommand(), ids: {
+      offlineId: crypto.randomUUID(), eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+    } });
+    expect(started.event).toMatchObject({ aggregateType: 'visit', aggregateId: previousEvent.aggregateId, sequence: 1 });
+    expect(await repository.listOutbox(partitionA)).toHaveLength(2);
     repository.close();
   });
 
@@ -492,17 +502,102 @@ describe('OfflineRepository', () => {
     expect(saved).toMatchObject({
       reopened: false,
       draft: { offlineId: legacy.draft.offlineId, acknowledged: true, deviceStartedAt: start.deviceStartedAt },
-      event: { operation: 'visit.started.v1', aggregateId: legacy.draft.offlineId, sequence: 2,
+      event: { operation: 'visit.started.v1', aggregateId: legacy.draft.offlineId, sequence: 1,
         payload: { offlineId: legacy.draft.offlineId } },
     });
     expect(await repository.listDrafts(partitionA)).toEqual([saved.draft]);
     expect(await repository.findDraftForStop(partitionA, stopId)).toEqual(saved.draft);
     expect(await repository.listOutbox(partitionA)).toEqual(confirmed ? [saved.event] : [legacy.event, saved.event]);
-    if (confirmed) expect(saved.draft.lastConfirmedSequence).toBe(1);
+    expect(saved.draft.lastConfirmedSequence).toBeUndefined();
+    expect(toSyncCommand(saved.event!)).toMatchObject({ aggregateType: 'visit', sequence: 1 });
     const reopened = await repository.saveVisitStartAndEnqueue(start);
     expect(reopened).toMatchObject({ reopened: true, draft: saved.draft });
     expect(await repository.listDrafts(partitionA)).toHaveLength(1);
     expect(await repository.listDrafts(partitionB)).toEqual([]);
+  });
+
+  it.each([false, true])('syncs independent draft/visit sequences through the engine and batch service (legacy confirmed first=%s)', async (confirmedFirst) => {
+    const { db, repository } = makeRepository();
+    await seedCanonical(repository);
+    const legacyEvents = [];
+    for (let index = 0; index < 5; index += 1) {
+      const legacy = await repository.saveDraftAndEnqueue(command({ ids: {
+        draftOfflineId: command().ids.draftOfflineId,
+        eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+      } }));
+      legacyEvents.push(legacy.event);
+    }
+    const canonicalId = crypto.randomUUID();
+    const confirmedSequences = new Map<string, number>();
+    const engine = new SyncEngine(repository, { send: async (batch) => processSyncBatch(
+      batch, crypto.randomUUID(), { synchronize: async (_deviceId, event) => {
+        const key = `${event.aggregateType}:${event.aggregateId}`;
+        expect(event.sequence).toBe((confirmedSequences.get(key) ?? 0) + 1);
+        confirmedSequences.set(key, event.sequence);
+        return { eventId: event.eventId, status: 'confirmed',
+          canonicalId: event.aggregateType === 'visit' ? canonicalId : event.aggregateId,
+          confirmedAt: '2026-09-17T12:05:00.000Z' };
+      } },
+    ) });
+    if (confirmedFirst) expect(await engine.synchronize(partitionA)).toMatchObject({ confirmed: 5 });
+    const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+    expect(started.event).toMatchObject({ sequence: 1, aggregateType: 'visit' });
+    expect(started.draft.lastConfirmedSequence).toBeUndefined();
+    const stockCommand: SaveVisitStockCommand = { partition: partitionA, offlineId: started.draft.offlineId,
+      heliarQuantity: 0, mouraQuantity: 7, deviceSavedAt: '2026-09-17T12:02:00.000Z',
+      ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() } };
+    const stock = await repository.saveVisitStockAndEnqueue(stockCommand);
+    expect(stock.event.sequence).toBe(2);
+    // Sequence 1 is legal in each namespace, but still unique within the visit.
+    await expect(db.outboxEvents.add({ ...started.event!, eventId: crypto.randomUUID(),
+      idempotencyKey: crypto.randomUUID() })).rejects.toMatchObject({ name: 'ConstraintError' });
+    if (!confirmedFirst) {
+      const queued = await repository.listOutbox(partitionA);
+      expect(queued.filter(event => event.aggregateType === 'visit_draft')
+        .sort((left, right) => left.sequence - right.sequence)).toEqual(legacyEvents);
+    }
+    expect(await engine.synchronize(partitionA)).toMatchObject({
+      confirmed: confirmedFirst ? 2 : 7, recoverable: 0, actionRequired: 0,
+    });
+    expect(await repository.listOutbox(partitionA)).toEqual([]);
+    expect(await repository.getDraft(partitionA, started.draft.offlineId)).toMatchObject({
+      canonicalVisitId: canonicalId, lastConfirmedSequence: 2, persistenceState: 'synced',
+      stock: { heliarQuantity: 0, mouraQuantity: 7, persistenceState: 'synced' },
+    });
+    const edited = await repository.saveVisitStockAndEnqueue({ ...stockCommand,
+      ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() } });
+    expect(edited.event.sequence).toBe(3);
+  });
+
+  it('keeps legacy reservation, server and local-confirmation failures isolated from the visit namespace', async () => {
+    const { repository } = makeRepository();
+    await seedCanonical(repository);
+    const legacy = await repository.saveDraftAndEnqueue(command());
+    const started = await repository.saveVisitStartAndEnqueue({ ...visitStartCommand(), ids: {
+      offlineId: crypto.randomUUID(), eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
+    } });
+    await repository.recordOutboxFailure(partitionA, legacy.event.eventId, {
+      status: 'action_required', code: 'VALIDATION_FAILED',
+    });
+    const reserved = await repository.reserveOutboxBatch(partitionA, '2026-09-17T12:02:00.000Z', '2026-09-17T12:03:00.000Z');
+    expect(reserved.map(event => event.eventId)).toEqual([started.event!.eventId]);
+    const batch = { deviceId: partitionA.deviceId, events: [legacy.event, started.event!].map(toSyncCommand) };
+    const response = await processSyncBatch(batch, crypto.randomUUID(), { synchronize: async (_deviceId, event) => {
+      if (event.aggregateType === 'visit_draft') throw new SyncEventFailure('VALIDATION_FAILED', 'invalid legacy', false);
+      return { eventId: event.eventId, status: 'confirmed', canonicalId: crypto.randomUUID(),
+        confirmedAt: '2026-09-17T12:02:00.000Z' };
+    } });
+    expect(response.results.map(result => result.status)).toEqual(['rejected', 'confirmed']);
+    const apply = vi.fn().mockRejectedValueOnce(new SyncEventPersistenceError('legacy mismatch')).mockResolvedValueOnce(true);
+    const engine = new SyncEngine({ reserveOutboxBatch: async () => [legacy.event, started.event!],
+      recordOutboxFailure: vi.fn(), applySyncConfirmation: apply }, {
+      send: async () => ({ requestId: crypto.randomUUID(), results: [legacy.event, started.event!].map(event => ({
+        eventId: event.eventId, status: 'confirmed' as const, canonicalId: event.aggregateId,
+        confirmedAt: '2026-09-17T12:02:00.000Z',
+      })) }),
+    });
+    expect(await engine.synchronize(partitionA)).toMatchObject({ confirmed: 1, actionRequired: 1, recoverable: 0 });
+    expect(apply).toHaveBeenCalledTimes(2);
   });
 
   it('preserves the legacy draft and its pending event when starting fails to enqueue', async () => {
@@ -536,7 +631,7 @@ describe('OfflineRepository', () => {
         ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() } });
     } else {
       // A valid later legacy event shares the aggregate but does not supersede its stock section.
-      await db.outboxEvents.add({ ...saved.event, operation: 'visit.draft.saved', sequence: 3,
+      await db.outboxEvents.add({ ...saved.event, operation: 'visit.draft.saved', aggregateType: 'visit_draft', sequence: 3,
         eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
         payload: { draftOfflineId: saved.draft.offlineId, routeVersionStopId: stopId, acknowledged: true } });
     }

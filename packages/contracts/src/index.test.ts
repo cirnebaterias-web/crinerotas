@@ -326,7 +326,8 @@ it('validates versioned offline records and rejects private or unknown fields', 
     attemptCount: 0,
     occurredAt: '2026-09-11T12:01:00.000Z',
   };
-  expect(offlineOutboxEventSchema.parse(event)).toEqual(event);
+  expect(offlineOutboxEventSchema.parse(event)).toEqual({ ...event, aggregateType: 'visit_draft' });
+  expect(offlineOutboxEventSchema.safeParse({ ...event, aggregateType: 'visit' }).success).toBe(false);
   expect(offlineOutboxEventSchema.safeParse({ ...event, status: 'synced' }).success).toBe(false);
 });
 

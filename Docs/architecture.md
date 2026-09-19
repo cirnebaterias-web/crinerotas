@@ -707,6 +707,8 @@ components:
 
 O lote inicia com limite técnico de 25 eventos e corpo JSON de 1 MiB (seção 15.3), sujeito a ensaio. Somente eventos individualmente confirmados sairão da outbox. `sequence` é por agregado; os bytes de anexos não integram o lote.
 
+Na implementação das Stories 3.1/3.2, o agregado é identificado por `(aggregateType, aggregateId)` dentro da partição de usuário/dispositivo. O Dexie v8 acrescenta esse tipo aos eventos existentes sem alterar identidade, payload, sequência ou chave idempotente, e inclui o tipo no índice único de sequência. Um rascunho legado `visit_draft` pode compartilhar o `offlineId` com a visita `visit`, mas o início desta sempre tem sequência 1; estoque começa em 2. Ao iniciar a visita, o contador confirmado do rascunho antigo deixa de ser utilizado; confirmações tardias dele não avançam a sequência da visita. Reservas, ordenação e bloqueios de sincronização local/servidor respeitam o mesmo namespace. A conclusão visual do rascunho compartilhado ainda exige esvaziar todas as pendências locais desse identificador.
+
 ### 5.4 Regras de idempotência
 
 - Mesma chave e mesmo conteúdo retorna o resultado canônico anterior.

@@ -75,7 +75,8 @@ export async function processSyncBatch(
   const results: SyncResult[] = [];
 
   for (const command of batch.events) {
-    if (blockedAggregates.has(command.aggregateId)) {
+    const aggregateKey = `${command.aggregateType}:${command.aggregateId}`;
+    if (blockedAggregates.has(aggregateKey)) {
       results.push(failedResult(command.eventId, new SyncEventFailure(
         'EVENT_OUT_OF_ORDER',
         publicSyncMessage('EVENT_OUT_OF_ORDER'),
@@ -91,7 +92,7 @@ export async function processSyncBatch(
         ? error
         : new SyncEventFailure('INTERNAL_ERROR', publicSyncMessage('INTERNAL_ERROR'), true);
       results.push(failedResult(command.eventId, failure));
-      blockedAggregates.add(command.aggregateId);
+      blockedAggregates.add(aggregateKey);
     }
   }
 

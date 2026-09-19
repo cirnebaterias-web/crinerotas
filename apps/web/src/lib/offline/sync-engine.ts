@@ -97,7 +97,8 @@ export class SyncEngine {
     const results = new Map(response.results.map((result) => [result.eventId, result]));
     const locallyBlockedAggregates = new Set<string>();
     for (const event of events) {
-      if (locallyBlockedAggregates.has(event.aggregateId)) {
+      const aggregateKey = `${event.aggregateType}:${event.aggregateId}`;
+      if (locallyBlockedAggregates.has(aggregateKey)) {
         await this.persistRecoverable(partition, event, 'EVENT_OUT_OF_ORDER');
         summary.recoverable += 1;
         continue;
@@ -122,7 +123,7 @@ export class SyncEngine {
             code: 'INTERNAL_ERROR',
           });
           summary.actionRequired += 1;
-          locallyBlockedAggregates.add(event.aggregateId);
+          locallyBlockedAggregates.add(aggregateKey);
         }
         continue;
       }

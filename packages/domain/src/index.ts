@@ -519,6 +519,7 @@ export async function hashSyncCommand(command: SyncCommand) {
 export function orderOutboxEvents(events: readonly OfflineOutboxEvent[]) {
   return events.map((event) => offlineOutboxEventSchema.parse(event)).sort((left, right) =>
     left.aggregateId.localeCompare(right.aggregateId) ||
+    left.aggregateType.localeCompare(right.aggregateType) ||
     left.sequence - right.sequence ||
     left.occurredAt.localeCompare(right.occurredAt));
 }

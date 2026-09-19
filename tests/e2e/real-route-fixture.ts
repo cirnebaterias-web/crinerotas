@@ -28,8 +28,12 @@ export const test = base.extend<{ realRoute: RealRouteFixture }>({
     // Only generated values enter SQL, in the project's fixed local container. Keep old facts.
     const values = clients.map(({ id, name }, index) =>
       `('${id}', 'E2E-${id}', '${name}', 'Endereco E2E sintetico ${index + 1}', 'CARTEIRA-E2E', 'active')`).join(',');
+    const useRancherDesktopWsl = process.platform === 'win32' &&
+      process.env.CIRNE_DOCKER_BACKEND === 'rancher-desktop-wsl';
+    const dockerProgram = useRancherDesktopWsl ? 'wsl' : 'docker';
+    const dockerPrefix = useRancherDesktopWsl ? ['-d', 'rancher-desktop', '--', 'docker'] : [];
     try {
-      await promisify(execFile)('docker', ['exec', 'supabase_db_cirne-rotas-dev',
+      await promisify(execFile)(dockerProgram, [...dockerPrefix, 'exec', 'supabase_db_cirne-rotas-dev',
         'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres',
         '-c', `insert into api.clients (id, external_reference, name, address, portfolio_reference, status) values ${values}`],
       { windowsHide: true, timeout: 25_000 });
