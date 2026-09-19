@@ -3,9 +3,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { configureLocalIdentityEnvironment } from './local-identity-environment';
 import { root, run, supabaseBinary, type Run } from './process';
-import { syntheticClientIds } from '@cirne/domain';
+import { syntheticClientIds, syntheticParameterSetId } from '@cirne/domain';
 
-export const actorKeys = ['administrator', 'seller_a', 'seller_b', 'manager_a', 'blocked'] as const;
+export const actorKeys = ['administrator', 'seller_a', 'seller_b', 'manager_a', 'blocked',
+  'seller_e2e', 'manager_e2e', 'seller_regression', 'manager_regression'] as const;
 export type ActorKey = (typeof actorKeys)[number];
 export { syntheticClientIds };
 
@@ -49,6 +50,10 @@ const assignments: Record<ActorKey, keyof typeof roleIds> = {
   seller_b: 'seller',
   manager_a: 'manager',
   blocked: 'seller',
+  seller_e2e: 'seller',
+  manager_e2e: 'manager',
+  seller_regression: 'seller',
+  manager_regression: 'manager',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -111,6 +116,10 @@ export function parseManifest(raw: string): ActorManifest {
     throw new Error('Manifesto sintético incompatível; remova o arquivo local e reprovisione.');
   }
   const storedActors = value.actors;
+  // Preserve manual-preview credentials while adding isolated automated-browser actors.
+  for (const key of ['seller_e2e', 'manager_e2e', 'seller_regression', 'manager_regression'] as const) {
+    if (!(key in storedActors)) storedActors[key] = createStoredActor(key);
+  }
   if (actorKeys.some((key) => !validateStoredActor(storedActors[key]))) {
     throw new Error('Manifesto sintético incompatível; remova o arquivo local e reprovisione.');
   }
@@ -263,6 +272,10 @@ export async function provisionSyntheticActors(options: {
   await restWrite(fetcher, status, 'user_profiles?on_conflict=id', actorKeys.map((key) => ({
     id: actors[key].id,
     display_name: key === 'administrator' ? 'Administrador Sintético' :
+      key === 'manager_regression' ? 'Gestor Regressão Sintético' :
+      key === 'seller_regression' ? 'Vendedor Regressão Sintético' :
+      key === 'manager_e2e' ? 'Gestor E2E Sintético' :
+      key === 'seller_e2e' ? 'Vendedor E2E Sintético' :
       key === 'manager_a' ? 'Gestor A Sintético' :
       key === 'seller_a' ? 'Vendedor A Sintético' :
       key === 'seller_b' ? 'Vendedor B Sintético' : 'Usuário Bloqueado Sintético',
@@ -285,16 +298,29 @@ export async function provisionSyntheticActors(options: {
     }
   }
 
-  const scopeExists = await activeRelationExists(fetcher, status, 'user_seller_scopes', {
-    manager_user_id: `eq.${actors.manager_a.id}`,
-    seller_user_id: `eq.${actors.seller_a.id}`,
-  });
-  if (!scopeExists) {
-    await restWrite(fetcher, status, 'user_seller_scopes', {
-      manager_user_id: actors.manager_a.id,
-      seller_user_id: actors.seller_a.id,
+  for (const [manager, seller] of [
+    ['manager_a', 'seller_a'], ['manager_e2e', 'seller_e2e'], ['manager_regression', 'seller_regression'],
+  ] as const) {
+    const scopeExists = await activeRelationExists(fetcher, status, 'user_seller_scopes', {
+      manager_user_id: `eq.${actors[manager].id}`,
+      seller_user_id: `eq.${actors[seller].id}`,
     });
+    if (!scopeExists) {
+      await restWrite(fetcher, status, 'user_seller_scopes', {
+        manager_user_id: actors[manager].id,
+        seller_user_id: actors[seller].id,
+      });
+    }
   }
+
+  await restWrite(fetcher, status, 'parameter_sets?on_conflict=id', {
+    id: syntheticParameterSetId,
+    version: 1,
+    status: 'published',
+    valid_from: '2026-01-01T00:00:00.000Z',
+    published_at: '2026-01-01T00:00:00.000Z',
+    published_by: administratorId,
+  }, 'resolution=merge-duplicates,return=minimal');
 
   await restWrite(fetcher, status, 'clients?on_conflict=id', syntheticClientIds.map((id, index) => ({
     id,

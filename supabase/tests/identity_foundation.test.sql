@@ -1,6 +1,6 @@
 begin;
 
-select plan(43);
+select plan(44);
 
 select has_schema('api', 'api schema exists');
 select has_schema('private', 'private schema exists');
@@ -71,10 +71,18 @@ select ok(not has_function_privilege('authenticated', 'private.resolve_current_i
 select ok(not has_function_privilege('anon', 'api.get_my_identity()', 'EXECUTE'), 'anon cannot execute the identity wrapper');
 
 select is((select count(*)::integer from api.roles), 3, 'only confirmed roles are seeded');
-select is((select count(*)::integer from api.role_permissions), 10, 'only minimal identity, sync and route capabilities are seeded');
-select is((select count(*)::integer from api.user_profiles), 5, 'five synthetic profiles were provisioned');
-select is((select count(*)::integer from api.user_role_assignments where revoked_at is null), 5, 'each synthetic actor has one active role');
-select is((select count(*)::integer from api.user_seller_scopes where revoked_at is null), 1, 'only manager A to seller A scope exists');
+select is((select count(*)::integer from api.role_permissions), 11, 'only minimal identity, sync, route and visit capabilities are seeded');
+select is((select count(*)::integer from api.user_profiles), 9, 'nine synthetic profiles were provisioned');
+select is((select count(*)::integer from api.user_role_assignments where revoked_at is null), 9, 'each synthetic actor has one active role');
+select is((select count(*)::integer from api.user_seller_scopes where revoked_at is null), 3, 'API, manual preview and browser regression actors have separate scopes');
+select is((select array_agg((manager.raw_user_meta_data ->> 'actorKey') || ':' ||
+    (seller.raw_user_meta_data ->> 'actorKey') order by manager.raw_user_meta_data ->> 'actorKey')
+  from api.user_seller_scopes scope_row
+  join auth.users manager on manager.id = scope_row.manager_user_id
+  join auth.users seller on seller.id = scope_row.seller_user_id
+  where scope_row.revoked_at is null),
+  array['manager_a:seller_a', 'manager_e2e:seller_e2e', 'manager_regression:seller_regression'],
+  'synthetic scopes never cross suite or manual-preview boundaries');
 
 select id as seller_a_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a' \gset
 select id as seller_b_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_b' \gset
@@ -85,7 +93,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
 select is(api.get_my_identity() ->> 'id', :'seller_a_id', 'seller A resolves only its own identity');
 select is(api.get_my_identity() -> 'roles', '["seller"]'::jsonb, 'seller A receives its active role');
-select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "route.read_self", "route.reorder_self", "sync.write_self"]'::jsonb, 'seller A receives minimal capabilities');
+select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "route.read_self", "route.reorder_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller A receives minimal capabilities');
 select is(api.get_my_identity() -> 'scopeIds', jsonb_build_array(:'seller_a_id'::uuid), 'seller A scope is itself');
 select is((select count(*)::integer from api.user_profiles), 1, 'direct profile read is restricted to the caller');
 select is((select count(*)::integer from api.user_profiles where id = :'seller_b_id'::uuid), 0, 'seller A cannot read seller B profile');

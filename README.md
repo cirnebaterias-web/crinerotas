@@ -1,6 +1,6 @@
 # Cirne Rotas
 
-Primeira experiência visual do vendedor (Stories 1.1–2.6): login, consulta da rota publicada, reordenação de pendências, navegação externa, consulta offline e recebimento explícito de uma nova composição publicada pelo Gestor, com Supabase Auth, permissões/RLS, versionamento e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; visita completa ainda não está disponível. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
+Primeira experiência visual do vendedor (Stories 1.1–3.2): login, consulta da rota publicada, reordenação de pendências, navegação externa, consulta offline, recebimento explícito de uma nova composição publicada pelo Gestor, início idempotente de visita e registro do estoque observado online/offline, com Supabase Auth, permissões/RLS, versionamento e auditoria. Há também um laboratório separado para IndexedDB e sincronização idempotente. O ambiente local usa exclusivamente dados sintéticos; preços e as demais etapas de conteúdo/conclusão da visita permanecem para stories posteriores. Desenvolvimento no computador; migração para VPS em incremento futuro, sem publicação automática.
 
 O checkpoint da preparação do host e o resultado da retomada estão em `Docs/RETOMADA_APOS_REINICIO.md`.
 
@@ -36,7 +36,15 @@ npm run ops:live -- --url http://127.0.0.1:3000 --json
 
 Resultado esperado: `{"status":"ok"}`. Para somente JSON, sem o cabeçalho do npm, use `npm run --silent ops:live -- --json`. Erros retornam código 1; o teste `live` confirma o processo, **não** banco/Auth/Storage. Pare o servidor com `Ctrl+C`.
 
-Para executar o build de produção local (sem containers):
+Para experimentar o produto, inclusive rotas e visitas **sem internet**, pare o servidor `dev` com `Ctrl+C` e execute o modo de validação local:
+
+```powershell
+npm run preview
+```
+
+O endereço permanece `http://127.0.0.1:3000` e o acesso usa os mesmos atores sintéticos. Atualize a página após trocar de modo e aguarde **Disponível offline neste aparelho** antes de desconectar. O modo `dev` desativa o service worker e serve apenas para desenvolvimento com atualização rápida; nele o aviso de cópia offline não confirmada é esperado. Não apague os dados do navegador para trocar de modo: podem conter visitas pendentes.
+
+`preview` gera o build de produção e o inicia localmente (sem publicação remota). Os comandos separados equivalentes são:
 
 ```powershell
 npm run build
@@ -69,7 +77,7 @@ O projeto `cirne-rotas-dev` usa a rede dedicada `cirne-rotas-dev-loopback`, brid
 
 Portas em `supabase/config.toml`: API 54321, banco 54322, shadow 54320, Studio 54323 e e-mail de testes 54324. Pooler, edge runtime e analytics estão desabilitados. Não inicie Supabase diretamente sem a rede isolada. Não exponha esta stack à internet.
 
-Para recriar a base, aplicar as migrações, restaurar a rede dedicada e provisionar cinco atores exclusivamente sintéticos:
+Para recriar a base, aplicar as migrações, restaurar a rede dedicada e provisionar nove atores exclusivamente sintéticos:
 
 ```powershell
 npm run db:reset
@@ -133,6 +141,25 @@ A saída contém o ID e a versão publicada da rota, `executionVersion`, status,
 
 As leituras canônicas novas usam `schemaVersion: 3`, com compatibilidade de leitura para v2. A alteração usa `PATCH /api/v1/routes/{routeId}`, `Idempotency-Key`, motivo, versão esperada e composição completa; somente o Gestor no escopo pode executá-la. A publicação sucessora preserva a versão anterior como histórico. A reordenação continua em `PUT /api/v1/routes/{routeId}/execution-order` e atua somente nas pendências; conflito de versão retorna `409`. Para verificar rollback/reaplicação sem persistir mudanças no banco local, execute `npx tsx scripts/verify-route-composition-rollback.ts` após `db:reset` e novamente após a integração.
 
+## Verificar o início de visita pela CLI
+
+Depois de publicar a rota sintética com `ops:routes`, use o token de `seller_a` por ambiente ou stdin:
+
+```powershell
+$actors = Get-Content .local/identity-actors.json | ConvertFrom-Json
+$env:CIRNE_ACCESS_TOKEN = $actors.actors.seller_a.accessToken
+npm run --silent ops:visits -- --url http://127.0.0.1:3000 --json
+Remove-Item Env:CIRNE_ACCESS_TOKEN
+```
+
+O diagnóstico chama `POST /api/v1/visits`, inicia uma parada pendente, repete a mesma chave para confirmar idempotência e verifica a rejeição de conteúdo divergente. Em seguida, chama `PUT /api/v1/visits/{offlineId}/sections/stock`, confirma quantidades sintéticas, replay idempotente e conflito de payload. A saída contém somente o ID, o estado canônico e checks públicos; token, localização, observação, IDs técnicos de evento, chave idempotente, snapshots e payload não são exibidos.
+
+Após provisionar os atores sintéticos locais, `npm run db:test` verifica também rollback integral quando a auditoria falha e preservação da visita após republicação da rota. Para comprovar concorrência com duas sessões reais PostgreSQL, execute `npx vitest run --project integration tests/integration/visit-concurrency.test.ts`. Esse ensaio exige Docker e o container local `supabase_db_cirne-rotas-dev`, observa a espera pela trava e verifica um único efeito para chamadas simultâneas. Ele conserva duas visitas sintéticas em uma rota futura dedicada (a partir de 2200) por execução, sem reset ou alteração da rota diária.
+
+O rollback estrutural `supabase/rollbacks/20260917140000_visit_start.rollback.sql` só permite remover a capacidade enquanto não houver visitas nem confirmações de início. Pare os processos que escrevem no banco antes de executá-lo. Seu preflight bloqueia escritas concorrentes e recusa a operação com `VISIT_ROLLBACK_REQUIRES_COORDINATED_RECOVERY` se já houver histórico; nesse caso, mantenha o esquema e prepare uma recuperação coordenada com backup e revisão. Não apague registros para contornar a proteção. O teste concorrente verifica essa recusa executando somente o preflight em uma transação, sem executar o corpo destrutivo do rollback.
+
+O rollback de Estoque `supabase/rollbacks/20260917223000_visit_stock.rollback.sql` também é coordenado: recusa a remoção se houver snapshots ou eventos `visit.stock.saved.v1`. O preflight pode ser inspecionado/testado isoladamente em transação, mas o corpo destrutivo não deve ser executado sobre uma base com histórico. Mantenha o esquema e planeje backup/migração de recuperação em vez de apagar os registros.
+
 Para a prova no navegador, gere o build de produção e execute o Playwright:
 
 ```powershell
@@ -150,14 +177,28 @@ O teste instala o Service Worker, confirma sua revisão, carrega uma rota sinté
 5. Em `/route`, escolha **Reordenar**, use as setas e **Salvar ordem**. **Cancelar** descarta o rascunho visual. Um conflito exige **Recarregar rota**. **Sair** encerra a sessão deste navegador.
 6. Aguarde a indicação **Disponível offline neste aparelho**. Depois, desligue a conexão e recarregue `/route`: a última versão confirmada continua exibindo vendedor, data, progresso, clientes, estados e endereços. Se o Gestor publicar outra composição enquanto o aparelho estiver offline, a cópia anterior permanece; ao reconectar e confirmar o novo cache, a tela informa inclusões, retiradas e motivo. Atualização e reordenação permanecem online; **Bloquear acesso local** exige nova validação online sem apagar silenciosamente a cópia durável.
 7. Em cada cliente, **Navegar** abre o Google Maps em outra aba/aplicativo com o destino preenchido; abrir ou retornar não inicia/conclui visita nem salva a reordenação. **Copiar endereço** funciona também sem rede. Se o navegador negar a cópia, um campo selecionável permite copiar manualmente.
+8. Em uma parada pendente, selecione **Iniciar visita**. O rascunho e a outbox são gravados juntos antes da navegação para `/visit/{offlineId}?step=start`; depois, **Continuar visita** reabre o mesmo registro, inclusive após hard refresh offline. GPS é opcional e não há fotografia, raio ou bloqueio por ausência de localização nesta story.
+9. Selecione **Preencher estoque**, informe as quantidades observadas de Heliar e Moura (zero é válido) e, opcionalmente, uma observação. **Salvar estoque e continuar** grava a seção e o evento juntos antes de avançar para `?step=prices`; essa próxima etapa ainda é apenas um destino indisponível. Sem conexão, os valores continuam editáveis e são sincronizados depois com a mesma chave/evento.
 
 Login, atualização, reordenação e Maps exigem conexão; a consulta da rota já carregada não. A sessão usa cookies SameSite, sem tokens em localStorage ou IndexedDB. A autorização local fica particionada por vendedor/dispositivo e expira após 24 horas; logout ou troca de vendedor revoga seu acesso sem expor a partição anterior. Origem e cabeçalho CSRF são obrigatórios em login, logout e mutações por cookie. `APP_BASE_URL` precisa corresponder exatamente à origem usada no navegador (prefira `127.0.0.1`, não alterne com `localhost`). HTTPS habilita `Secure` nos cookies. A recuperação de senha orienta contato com administrador: não há SMTP implementado nesta etapa.
 
-A rota exibida vem do servidor, inclusive data operacional, estado das paradas e progresso. Esta entrega não inclui registrar visitas ou painel gerencial. No celular, a mesma tela é responsiva; o servidor local continua restrito ao próprio computador, sem exposição na rede.
+A rota exibida vem do servidor, inclusive data operacional, estado das paradas e progresso. Na tela inicial da visita, a sincronização retoma ao recuperar conexão ou voltar ao primeiro plano; falhas recuperáveis respeitam a espera persistida na outbox. **Tentar sincronizar novamente** permite uma tentativa manual sem gerar outra visita ou chave. Sessão expirada pede novo login e conflitos exigem revisão, sempre preservando o rascunho. A confirmação exibida pertence à visita aberta, não a outro evento do lote.
+
+Ao confirmar o início, o repositório salva o ID e o horário canônicos mesmo se outro evento da mesma visita permanecer na fila. Nesse caso o estado local continua pendente; somente a confirmação do último evento marca o rascunho como sincronizado. Testes unitários cobrem a confirmação parcial, a preservação do vínculo após o último evento e o rollback da remoção da outbox quando a gravação do rascunho falha.
+
+Se outra aba encerrar ou trocar a sessão, a tela de visita oculta imediatamente cliente/endereço e pede novo acesso. O rascunho e a fila permanecem salvos; uma confirmação já enviada pode terminar sua gravação local, sem voltar a exibir os dados na tela bloqueada. Eventos de reconexão não desbloqueiam essa tela automaticamente.
+
+Se o Gestor retirar um cliente enquanto o Vendedor estiver offline, a visita feita com a rota antiga é preservada e sincronizada na versão/parada original. Depois de atualizar a composição, o aparelho não permite novo início para a parada retirada. A seção **Visitas salvas de outras versões** permite continuar os atendimentos anteriores online ou offline, sem mudar seu vínculo nem criar outra visita. Essa regra foi confirmada pelo negócio em 17/09/2026; não depende de confiar no horário do aparelho como prova de autorização, e o vendedor ainda precisa ter acesso válido.
+
+Esta entrega inclui o início e o estoque observado da visita. Não define unidade comercial, estimativa ou detalhamento por modelo; preços, ações, sucata, resultado, revisão, conclusão e painel gerencial ainda não estão disponíveis. No celular, a mesma tela é responsiva; o servidor local continua restrito ao próprio computador, sem exposição na rede.
 
 A navegação usa [Google Maps URLs](https://developers.google.com/maps/documentation/urls/get-started), sem API key, SDK, origem fixa ou solicitação de geolocalização pelo Cirne Rotas. Coordenadas válidas completas têm preferência; caso contrário, usa o endereço. Não há consulta ao Google antes de clicar. O link exige conexão detectada e o app não verifica se o Maps está disponível: endereço copiável é a alternativa. O diagnóstico `npm run ops:navigation -- --json` testa essa regra com dados sintéticos, sem rede nem abertura de navegador.
 
-`npm run test:e2e` valida os estados de interface com respostas controladas, cache canônico, hard refresh sem rede, revogação local e a regressão do laboratório offline, sem exigir banco. Depois de `npm run test:integration` (que provisiona/publica a rota sintética), execute `npm run test:e2e:real` para provar login → rota → cache → hard refresh offline → reordenação → reload → logout no navegador contra Supabase local. Esse ensaio usa apenas `seller_a`, altera sua ordem sintética e desativa traces para não guardar credenciais.
+`npm run test:e2e` valida os estados de interface com respostas controladas, cache canônico, início/retomada da visita, estoque com zero e validações, falha atômica local, resposta perdida, hard refresh sem rede, upgrade Dexie v1→v8, revogação local e a regressão do laboratório offline, sem exigir banco. Com Supabase local e build de produção, execute `npm run test:e2e:real` para provar login → rota → cache → reordenação, início canônico → estoque → sincronização → hard refresh offline → continuar sem duplicar e retirada de cliente durante uma visita offline → sincronização histórica → retomada online/offline. A suíte usa exclusivamente `seller_regression` e `manager_regression`, separados dos atores da integração e de `seller_e2e`/`manager_e2e`, reservados à demonstração manual existente. O provisionamento acrescenta os novos atores sem trocar as credenciais anteriores. Traces são desativados para não guardar credenciais. Cada cenário cria três clientes exclusivamente sintéticos e publica sua própria composição pela API; não depende de uma execução anterior da integração, não altera a rota da demonstração manual nem apaga visitas existentes. As capturas ficam nos artefatos de teste, sem sobrescrever evidências aprovadas de stories anteriores.
+
+O Dexie v8 preserva a fila antiga e separa sequências por tipo de agregado: rascunho legado e visita podem compartilhar o identificador sem compartilhar o contador. O início da visita usa sequência 1 e estoque começa em 2. No Windows, as fixtures reais usam Docker direto por padrão; `CIRNE_DOCKER_BACKEND=rancher-desktop-wsl` seleciona explicitamente Rancher/WSL.
+
+A regressão HTTP usa uma rota futura dedicada (a partir de 2400) para disputar reordenações de duas paradas pendentes. A disputa de início de visita usa datas de 2200 a 2299. Isso separa os testes das visitas sintéticas já iniciadas na rota diária, preservando os registros históricos. Execute as suítes reais sequencialmente no mesmo ambiente local.
 
 ## Quality gates
 
@@ -209,6 +250,6 @@ Divergências justificadas da arquitetura: TypeScript 7.0.2 não é aceito pelo 
 
 No npm 11.17.0, `npm ci` pode avisar que o postinstall de esbuild não tem política `allowScripts` explícita. Não foi feita aprovação global nem instalação forçada; build e testes foram executados com a instalação resultante. Reavalie scripts de instalação antes de aprová-los em futuras atualizações.
 
-`apps/cli` consome os contratos de `packages/contracts`; `apps/web` expõe `/api/v1/health/live`, `/api/v1/me`, `POST /api/v1/sync/batches` e os endpoints autenticados de criação, publicação e leitura de rotas. `packages/config/public` contém somente identificação pública; `/server` valida configurações e não é importável em componentes pela regra de lint. Logs de aplicação usam JSON, ID de correlação próprio e allowlist: rota-modelo, método, status e duração; não registrar URL bruta, token, cookie, e-mail, GPS ou corpo. Mensagens internas do Next podem usar formato próprio.
+`apps/cli` consome os contratos de `packages/contracts`; `apps/web` expõe `/api/v1/health/live`, `/api/v1/me`, `POST /api/v1/sync/batches`, `POST /api/v1/visits`, `PUT /api/v1/visits/{offlineId}/sections/stock` e os endpoints autenticados de criação, publicação e leitura de rotas. `packages/config/public` contém somente identificação pública; `/server` valida configurações e não é importável em componentes pela regra de lint. Logs de aplicação usam JSON, ID de correlação próprio e allowlist: rota-modelo, método, status e duração; não registrar URL bruta, token, cookie, e-mail, GPS ou corpo. Mensagens internas do Next podem usar formato próprio.
 
 `scripts/` contém infraestrutura local; `supabase/` sua configuração; `infrastructure/` contém Docker/Compose; `Docs/` mantém PRD/arquitetura monolíticos, stories e evidências. O repositório Git usa o remoto `origin` com a conta dedicada do projeto; push e publicação continuam operações explícitas de `@devops`. Preserve os arquivos existentes das ferramentas AIOX.

@@ -26,6 +26,10 @@ import {
   syncBatchExchangeSchema,
   syncBatchResponseSchema,
   syncCommandSchema,
+  startVisitRequestSchema,
+  saveStockRequestSchema,
+  stockSnapshotResultSchema,
+  visitStartResultSchema,
 } from './index';
 
 const routeRequest = {
@@ -322,7 +326,8 @@ it('validates versioned offline records and rejects private or unknown fields', 
     attemptCount: 0,
     occurredAt: '2026-09-11T12:01:00.000Z',
   };
-  expect(offlineOutboxEventSchema.parse(event)).toEqual(event);
+  expect(offlineOutboxEventSchema.parse(event)).toEqual({ ...event, aggregateType: 'visit_draft' });
+  expect(offlineOutboxEventSchema.safeParse({ ...event, aggregateType: 'visit' }).success).toBe(false);
   expect(offlineOutboxEventSchema.safeParse({ ...event, status: 'synced' }).success).toBe(false);
 });
 
@@ -443,4 +448,131 @@ it('keeps canonical confirmations distinct from recoverable and rejected results
       results: [{ ...confirmed, eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }],
     },
   }).success).toBe(false);
+});
+
+it('validates strict visit starts, optional location as a complete pair and canonical results', () => {
+  const command = {
+    schemaVersion: 1 as const,
+    offlineId: '55555555-5555-4555-8555-555555555555',
+    routeVersionStopId: '44444444-4444-4444-8444-444444444444',
+    deviceStartedAt: '2026-09-17T12:00:00.000Z',
+    location: { latitude: '-7.115', longitude: '-34.864', accuracyM: '12.5' },
+  };
+  expect(startVisitRequestSchema.parse(command)).toEqual(command);
+  expect(startVisitRequestSchema.safeParse({ ...command, sellerId: partition.userId }).success).toBe(false);
+  expect(startVisitRequestSchema.safeParse({
+    ...command,
+    location: { latitude: '-91', longitude: '-34.864' },
+  }).success).toBe(false);
+  expect(startVisitRequestSchema.safeParse({
+    ...command,
+    location: { latitude: '-7.115' },
+  }).success).toBe(false);
+
+  const startedEvent = {
+    eventId: '66666666-6666-4666-8666-666666666666',
+    idempotencyKey: '77777777-7777-4777-8777-777777777777',
+    operation: 'visit.started.v1' as const,
+    schemaVersion: 1 as const,
+    sequence: 1,
+    aggregateType: 'visit' as const,
+    aggregateId: command.offlineId,
+    occurredAt: command.deviceStartedAt,
+    payload: {
+      offlineId: command.offlineId,
+      routeVersionStopId: command.routeVersionStopId,
+      deviceStartedAt: command.deviceStartedAt,
+      location: command.location,
+    },
+  };
+  expect(syncCommandSchema.parse(startedEvent)).toEqual(startedEvent);
+  expect(syncCommandSchema.safeParse({ ...startedEvent, sequence: 2 }).success).toBe(false);
+
+  const result = {
+    schemaVersion: 1 as const,
+    visitId: '88888888-8888-4888-8888-888888888888',
+    offlineId: command.offlineId,
+    deviceId: partition.deviceId,
+    routeVersionStopId: command.routeVersionStopId,
+    routeVersionId: '99999999-9999-4999-8999-999999999999',
+    clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    sellerId: partition.userId,
+    parameterSetId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    status: 'in_progress' as const,
+    contextSnapshot: {
+      schemaVersion: 1 as const,
+      sourceRouteVersionId: '99999999-9999-4999-8999-999999999999',
+      snapshotCreatedAt: '2026-09-17T12:00:01.000Z',
+      route: {
+        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        versionNumber: 2,
+        serviceDate: '2026-09-17',
+        publishedAt: '2026-09-17T08:00:00.000Z',
+        plannedOrder: 1,
+        priority: 1,
+      },
+      client: {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        externalReference: null,
+        name: 'Cliente Sintético',
+        address: 'Endereço sintético',
+        latitude: null,
+        longitude: null,
+        portfolioReference: null,
+      },
+      seller: { id: partition.userId, displayName: 'Vendedor Sintético' },
+      parameters: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', version: 1 },
+    },
+    deviceStartedAt: command.deviceStartedAt,
+    serverStartedAt: '2026-09-17T12:00:01.000Z',
+  };
+  expect(visitStartResultSchema.parse(result)).toEqual(result);
+});
+
+it('validates stock quantities without inventing unit, estimate or model fields', () => {
+  const stock = {
+    schemaVersion: 1 as const,
+    offlineId: '55555555-5555-4555-8555-555555555555',
+    heliarQuantity: 0,
+    mouraQuantity: 12,
+    observation: 'Estoque contado no local',
+    deviceSavedAt: '2026-09-17T13:00:00.000Z',
+  };
+  expect(saveStockRequestSchema.parse(stock)).toEqual(stock);
+  expect(saveStockRequestSchema.parse({ ...stock, observation: '  conferido   no local  ' })).toMatchObject({
+    observation: 'conferido no local',
+  });
+  expect(saveStockRequestSchema.parse({ ...stock, observation: '   ' }).observation).toBeUndefined();
+  for (const invalid of [
+    { ...stock, heliarQuantity: -1 },
+    { ...stock, mouraQuantity: 1.5 },
+    { ...stock, heliarQuantity: Number.NaN },
+    { ...stock, unit: 'baterias' },
+    { ...stock, estimated: true },
+  ]) expect(saveStockRequestSchema.safeParse(invalid).success).toBe(false);
+
+  const event = {
+    eventId: '66666666-6666-4666-8666-666666666667',
+    idempotencyKey: '77777777-7777-4777-8777-777777777778',
+    operation: 'visit.stock.saved.v1' as const,
+    schemaVersion: 1 as const,
+    sequence: 2,
+    aggregateType: 'visit' as const,
+    aggregateId: stock.offlineId,
+    occurredAt: stock.deviceSavedAt,
+    payload: { ...stock, schemaVersion: undefined },
+  };
+  delete (event.payload as { schemaVersion?: unknown }).schemaVersion;
+  expect(syncCommandSchema.parse(event)).toEqual(event);
+  expect(syncCommandSchema.safeParse({ ...event, sequence: 1 }).success).toBe(false);
+  expect(stockSnapshotResultSchema.safeParse({
+    schemaVersion: 1,
+    offlineId: stock.offlineId,
+    heliarQuantity: stock.heliarQuantity,
+    mouraQuantity: stock.mouraQuantity,
+    observation: stock.observation,
+    stockSnapshotId: '88888888-8888-4888-8888-888888888888',
+    visitId: '99999999-9999-4999-8999-999999999999',
+    serverSavedAt: '2026-09-17T13:00:01.000Z',
+  }).success).toBe(true);
 });

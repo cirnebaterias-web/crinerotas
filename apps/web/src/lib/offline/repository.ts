@@ -13,7 +13,15 @@ import {
   type SyncErrorCode,
   type SyncResult,
 } from '@cirne/contracts';
-import { createDraftMutation, orderOutboxEvents, type DraftMutationIds } from '@cirne/domain';
+import {
+  createDraftMutation,
+  createVisitStartMutation,
+  createVisitStockMutation,
+  orderOutboxEvents,
+  type DraftMutationIds,
+  type VisitStartMutationIds,
+  type VisitStockMutationIds,
+} from '@cirne/domain';
 import type { OfflineDatabase } from './database';
 import { SyncEventPersistenceError } from './sync-persistence-error';
 
@@ -30,6 +38,29 @@ export interface SaveDraftCommand {
   acknowledged: boolean;
   occurredAt: string;
   ids: DraftMutationIds;
+}
+
+export interface SaveVisitStartCommand {
+  partition: OfflinePartition;
+  routeVersionStopId: string;
+  deviceStartedAt: string;
+  location?: {
+    latitude: string;
+    longitude: string;
+    accuracyM?: string;
+    distanceM?: string;
+  };
+  ids: VisitStartMutationIds;
+}
+
+export interface SaveVisitStockCommand {
+  partition: OfflinePartition;
+  offlineId: string;
+  heliarQuantity: number;
+  mouraQuantity: number;
+  observation?: string;
+  deviceSavedAt: string;
+  ids: VisitStockMutationIds;
 }
 
 type FailedOutboxStatus = Extract<OfflineOutboxEvent['status'], 'recoverable_error' | 'action_required'>;
@@ -117,6 +148,20 @@ export class OfflineRepository {
     ]).toArray();
   }
 
+  async getDraft(partitionInput: OfflinePartition, offlineId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.visitDrafts.get([partition.userId, partition.deviceId, offlineId]);
+  }
+
+  async findDraftForStop(partitionInput: OfflinePartition, routeVersionStopId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.visitDrafts.where('[userId+deviceId+routeVersionStopId]').equals([
+      partition.userId,
+      partition.deviceId,
+      routeVersionStopId,
+    ]).first();
+  }
+
   async listOutbox(partitionInput: OfflinePartition) {
     const partition = offlinePartitionSchema.parse(partitionInput);
     return this.db.outboxEvents.where('[userId+deviceId]').equals([
@@ -151,12 +196,13 @@ export class OfflineRepository {
 
       for (const event of all) {
         if (selected.length >= limit) break;
-        if (blockedAggregates.has(event.aggregateId)) continue;
+        const aggregateKey = `${event.aggregateType}:${event.aggregateId}`;
+        if (blockedAggregates.has(aggregateKey)) continue;
         const eligible = event.status === 'pending' ||
           (event.status === 'recoverable_error' && (!event.nextAttemptAt || Date.parse(event.nextAttemptAt) <= nowMs)) ||
           (event.status === 'sending' && Boolean(event.leaseUntil) && Date.parse(event.leaseUntil!) <= nowMs);
         if (!eligible) {
-          blockedAggregates.add(event.aggregateId);
+          blockedAggregates.add(aggregateKey);
           continue;
         }
         const reserved = offlineOutboxEventSchema.parse({
@@ -208,12 +254,16 @@ export class OfflineRepository {
       const event = await this.db.outboxEvents.get(key);
       if (!event) return false;
       assertPartition(partition, event);
-      if (confirmationInput.canonicalId !== event.aggregateId) {
+      if (event.operation === 'visit.draft.saved' && confirmationInput.canonicalId !== event.aggregateId) {
         throw new SyncEventPersistenceError('Confirmação canônica não corresponde ao agregado local.');
       }
       const draftKey: [string, string, string] = [partition.userId, partition.deviceId, event.aggregateId];
       const draft = await this.db.visitDrafts.get(draftKey);
       if (!draft) throw new SyncEventPersistenceError('Confirmação sem rascunho local correspondente.');
+      if (event.operation !== 'visit.draft.saved' && draft.canonicalVisitId &&
+          confirmationInput.canonicalId !== draft.canonicalVisitId) {
+        throw new SyncEventPersistenceError('Confirmação canônica não corresponde à visita local.');
+      }
 
       await this.db.outboxEvents.delete(key);
       const remaining = await this.db.outboxEvents
@@ -223,13 +273,26 @@ export class OfflineRepository {
           [partition.userId, partition.deviceId, event.aggregateId, Dexie.maxKey],
         )
         .count();
-      if (remaining === 0) {
-        await this.db.visitDrafts.put(localVisitDraftSchema.parse({
-          ...draft,
-          persistenceState: 'synced',
-          updatedAt: confirmationInput.confirmedAt,
-        }));
-      }
+      // Persist every event's confirmation; only an empty queue confirms the entire draft.
+      await this.db.visitDrafts.put(localVisitDraftSchema.parse({
+        ...draft,
+        ...(event.operation === 'visit.started.v1' ? {
+          canonicalVisitId: confirmationInput.canonicalId,
+          serverStartedAt: confirmationInput.confirmedAt,
+        } : {}),
+        ...(event.operation === 'visit.stock.saved.v1' && draft.stock?.eventId === event.eventId ? {
+          stock: {
+            ...draft.stock,
+            persistenceState: 'synced' as const,
+            serverSavedAt: confirmationInput.confirmedAt,
+          },
+        } : {}),
+        lastConfirmedSequence: event.operation === 'visit.draft.saved' && draft.deviceStartedAt
+          ? draft.lastConfirmedSequence
+          : Math.max(draft.lastConfirmedSequence ?? 0, event.sequence),
+        persistenceState: remaining === 0 ? 'synced' : draft.persistenceState,
+        updatedAt: remaining === 0 ? confirmationInput.confirmedAt : draft.updatedAt,
+      }));
       return true;
     });
   }
@@ -254,6 +317,7 @@ export class OfflineRepository {
         if (existing) {
           if (existing.idempotencyKey !== command.ids.idempotencyKey ||
               existing.aggregateId !== command.ids.draftOfflineId ||
+              existing.operation !== 'visit.draft.saved' ||
               existing.payload.routeVersionStopId !== command.routeVersionStopId ||
               existing.payload.acknowledged !== command.acknowledged) {
             throw new Error('Evento repetido com conteúdo divergente.');
@@ -303,5 +367,128 @@ export class OfflineRepository {
         return { draft, event, repeated: false };
       },
     );
+  }
+
+  async saveVisitStartAndEnqueue(command: SaveVisitStartCommand): Promise<{
+    draft: LocalVisitDraft;
+    event?: OfflineOutboxEvent;
+    reopened: boolean;
+  }> {
+    const partition = offlinePartitionSchema.parse(command.partition);
+    return this.db.transaction(
+      'rw',
+      this.db.routeBundles,
+      this.db.visitDrafts,
+      this.db.outboxEvents,
+      async () => {
+        const existingDraft = await this.db.visitDrafts
+          .where('[userId+deviceId+routeVersionStopId]')
+          .equals([partition.userId, partition.deviceId, command.routeVersionStopId])
+          .first();
+        if (existingDraft?.deviceStartedAt) {
+          const event = await this.db.outboxEvents
+            .where('[userId+deviceId+aggregateType+aggregateId+sequence]')
+            .between(
+              [partition.userId, partition.deviceId, 'visit', existingDraft.offlineId, Dexie.minKey],
+              [partition.userId, partition.deviceId, 'visit', existingDraft.offlineId, Dexie.maxKey],
+            ).first();
+          return { draft: existingDraft, event, reopened: true };
+        }
+
+        const eventCollision = await this.db.outboxEvents.get([
+          partition.userId,
+          partition.deviceId,
+          command.ids.eventId,
+        ]);
+        const keyCollision = await this.db.outboxEvents
+          .where('[userId+deviceId+idempotencyKey]')
+          .equals([partition.userId, partition.deviceId, command.ids.idempotencyKey])
+          .first();
+        if (eventCollision || keyCollision) {
+          throw new Error('Identificador de evento local já utilizado.');
+        }
+
+        const bundles = await this.db.routeBundles.where('[userId+deviceId]').equals([
+          partition.userId,
+          partition.deviceId,
+        ]).toArray();
+        const canonicalBundle = bundles.find((bundle) =>
+          (bundle.schemaVersion === 2 || bundle.schemaVersion === 3) &&
+          bundle.stops.some((stop) => stop.routeVersionStopId === command.routeVersionStopId));
+        if (!canonicalBundle || (canonicalBundle.schemaVersion !== 2 && canonicalBundle.schemaVersion !== 3)) {
+          throw new Error('Parada indisponível nesta partição offline.');
+        }
+        const stop = canonicalBundle.stops.find(
+          (candidate) => candidate.routeVersionStopId === command.routeVersionStopId,
+        );
+        if (!stop || stop.status !== 'pending') {
+          throw new Error('A parada não está pendente para iniciar a visita.');
+        }
+
+        const offlineId = existingDraft?.offlineId ?? command.ids.offlineId;
+        const mutation = createVisitStartMutation({
+          partition,
+          routeVersionStopId: command.routeVersionStopId,
+          deviceStartedAt: command.deviceStartedAt,
+          client: stop.client,
+          ...(command.location ? { location: command.location } : {}),
+          sequence: 1,
+          ids: { ...command.ids, offlineId },
+        });
+        const draft = localVisitDraftSchema.parse({
+          ...existingDraft, ...mutation.draft, lastConfirmedSequence: undefined,
+        });
+        assertPartition(partition, mutation.draft);
+        assertPartition(partition, mutation.event);
+        if (existingDraft) await this.db.visitDrafts.put(draft);
+        else await this.db.visitDrafts.add(draft);
+        await this.db.outboxEvents.add(mutation.event);
+        return { draft, event: mutation.event, reopened: false };
+      },
+    );
+  }
+
+  async saveVisitStockAndEnqueue(command: SaveVisitStockCommand): Promise<{
+    draft: LocalVisitDraft;
+    event: OfflineOutboxEvent;
+  }> {
+    const partition = offlinePartitionSchema.parse(command.partition);
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, async () => {
+      const draftKey: [string, string, string] = [partition.userId, partition.deviceId, command.offlineId];
+      const currentDraft = await this.db.visitDrafts.get(draftKey);
+      if (!currentDraft) throw new Error('Visita não encontrada nesta partição offline.');
+      assertPartition(partition, currentDraft);
+
+      const eventCollision = await this.db.outboxEvents.get([
+        partition.userId, partition.deviceId, command.ids.eventId,
+      ]);
+      const keyCollision = await this.db.outboxEvents
+        .where('[userId+deviceId+idempotencyKey]')
+        .equals([partition.userId, partition.deviceId, command.ids.idempotencyKey])
+        .first();
+      if (eventCollision || keyCollision) throw new Error('Identificador de evento local já utilizado.');
+
+      const lastPending = await this.db.outboxEvents
+        .where('[userId+deviceId+aggregateType+aggregateId+sequence]')
+        .between(
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.minKey],
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.maxKey],
+        ).last();
+      const sequence = Math.max(lastPending?.sequence ?? 0, currentDraft.lastConfirmedSequence ?? 0) + 1;
+      const mutation = createVisitStockMutation({
+        draft: currentDraft,
+        values: {
+          heliarQuantity: command.heliarQuantity,
+          mouraQuantity: command.mouraQuantity,
+          ...(command.observation === undefined ? {} : { observation: command.observation }),
+        },
+        deviceSavedAt: command.deviceSavedAt,
+        sequence,
+        ids: command.ids,
+      });
+      await this.db.visitDrafts.put(mutation.draft);
+      await this.db.outboxEvents.add(mutation.event);
+      return mutation;
+    });
   }
 }

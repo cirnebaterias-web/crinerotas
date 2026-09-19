@@ -27,6 +27,12 @@ import {
   syncCommandSchema,
   type SyncCommand,
   type SyncErrorCode,
+  startVisitRequestSchema,
+  saveStockRequestSchema,
+  stockInputSchema,
+  type StartVisitRequest,
+  type StockInput,
+  type VisitStartResult,
 } from '@cirne/contracts';
 
 export class RouteDomainError extends Error {
@@ -163,6 +169,184 @@ export interface DraftMutationIds {
   idempotencyKey: string;
 }
 
+type LegacyDraftOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.draft.saved' }>;
+type VisitStartedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.started.v1' }>;
+type VisitStockSavedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.stock.saved.v1' }>;
+type LegacyDraftSyncCommand = Extract<SyncCommand, { operation: 'visit.draft.saved' }>;
+type VisitStartedSyncCommand = Extract<SyncCommand, { operation: 'visit.started.v1' }>;
+type VisitStockSavedSyncCommand = Extract<SyncCommand, { operation: 'visit.stock.saved.v1' }>;
+
+export interface VisitStartMutationIds {
+  offlineId: string;
+  eventId: string;
+  idempotencyKey: string;
+}
+
+export interface VisitStockMutationIds {
+  eventId: string;
+  idempotencyKey: string;
+}
+
+export class VisitDomainError extends Error {
+  constructor(
+    public readonly code: 'VALIDATION_FAILED' | 'VERSION_CONFLICT',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export function normalizeVisitStart(input: StartVisitRequest): StartVisitRequest {
+  const parsed = startVisitRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Início de visita inválido.');
+  }
+  return parsed.data;
+}
+
+export function normalizeStockInput(input: StockInput): StockInput {
+  const parsed = stockInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Estoque observado inválido.');
+  }
+  const observation = parsed.data.observation?.replace(/\s+/g, ' ').trim();
+  return {
+    heliarQuantity: parsed.data.heliarQuantity,
+    mouraQuantity: parsed.data.mouraQuantity,
+    ...(observation ? { observation } : {}),
+  };
+}
+
+export function createVisitStockMutation(input: {
+  draft: LocalVisitDraft;
+  values: StockInput;
+  deviceSavedAt: string;
+  sequence: number;
+  ids: VisitStockMutationIds;
+}): { draft: LocalVisitDraft; event: VisitStockSavedOutboxEvent } {
+  const currentDraft = localVisitDraftSchema.parse(input.draft);
+  if (!currentDraft.deviceStartedAt) {
+    throw new VisitDomainError('VERSION_CONFLICT', 'A visita precisa ser iniciada antes do estoque.');
+  }
+  const values = normalizeStockInput(input.values);
+  saveStockRequestSchema.parse({
+    schemaVersion: 1,
+    offlineId: currentDraft.offlineId,
+    deviceSavedAt: input.deviceSavedAt,
+    ...values,
+  });
+  const draft = localVisitDraftSchema.parse({
+    ...currentDraft,
+    currentStep: 'prices',
+    stock: {
+      ...values,
+      eventId: input.ids.eventId,
+      deviceSavedAt: input.deviceSavedAt,
+      persistenceState: 'saved_on_device',
+    },
+    persistenceState: 'saved_on_device',
+    updatedAt: input.deviceSavedAt,
+  });
+  const event = offlineOutboxEventSchema.parse({
+    schemaVersion: 1,
+    userId: currentDraft.userId,
+    deviceId: currentDraft.deviceId,
+    eventId: input.ids.eventId,
+    idempotencyKey: input.ids.idempotencyKey,
+    operation: 'visit.stock.saved.v1',
+    aggregateId: currentDraft.offlineId,
+    sequence: input.sequence,
+    payload: {
+      offlineId: currentDraft.offlineId,
+      deviceSavedAt: input.deviceSavedAt,
+      ...values,
+    },
+    status: 'pending',
+    attemptCount: 0,
+    occurredAt: input.deviceSavedAt,
+  });
+  if (event.operation !== 'visit.stock.saved.v1') {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Evento de estoque inválido.');
+  }
+  return { draft, event };
+}
+
+export function assertVisitCanStart(status: 'pending' | 'in_visit' | 'completed' | 'not_visited') {
+  if (status !== 'pending') {
+    throw new VisitDomainError('VERSION_CONFLICT', 'A parada não está disponível para iniciar.');
+  }
+}
+
+export function createVisitStartMutation(input: {
+  partition: OfflinePartition;
+  routeVersionStopId: string;
+  deviceStartedAt: string;
+  client?: CanonicalRoute['stops'][number]['client'];
+  location?: StartVisitRequest['location'];
+  sequence: number;
+  ids: VisitStartMutationIds;
+}): { draft: LocalVisitDraft; event: VisitStartedOutboxEvent } {
+  const request = normalizeVisitStart({
+    schemaVersion: 1,
+    offlineId: input.ids.offlineId,
+    routeVersionStopId: input.routeVersionStopId,
+    deviceStartedAt: input.deviceStartedAt,
+    ...(input.location ? { location: input.location } : {}),
+  });
+  const draft = localVisitDraftSchema.parse({
+    schemaVersion: 1,
+    ...input.partition,
+    offlineId: input.ids.offlineId,
+    routeVersionStopId: input.routeVersionStopId,
+    currentStep: 'start',
+    deviceStartedAt: input.deviceStartedAt,
+    ...(input.client ? { client: input.client } : {}),
+    localStatus: 'draft',
+    persistenceState: 'saved_on_device',
+    updatedAt: input.deviceStartedAt,
+  });
+  const event = offlineOutboxEventSchema.parse({
+    schemaVersion: 1,
+    ...input.partition,
+    eventId: input.ids.eventId,
+    idempotencyKey: input.ids.idempotencyKey,
+    operation: 'visit.started.v1',
+    aggregateId: input.ids.offlineId,
+    sequence: input.sequence,
+    payload: visitStartedPayload(request),
+    status: 'pending',
+    attemptCount: 0,
+    occurredAt: input.deviceStartedAt,
+  });
+  if (event.operation !== 'visit.started.v1') {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Evento de início de visita inválido.');
+  }
+  return { draft, event };
+}
+
+function visitStartedPayload(request: StartVisitRequest) {
+  return {
+    offlineId: request.offlineId,
+    routeVersionStopId: request.routeVersionStopId,
+    deviceStartedAt: request.deviceStartedAt,
+    ...(request.location ? { location: request.location } : {}),
+  };
+}
+
+export function applyVisitStartConfirmation(
+  draftInput: LocalVisitDraft,
+  result: Pick<VisitStartResult, 'visitId' | 'serverStartedAt'>,
+): LocalVisitDraft {
+  const draft = localVisitDraftSchema.parse(draftInput);
+  return localVisitDraftSchema.parse({
+    ...draft,
+    canonicalVisitId: result.visitId,
+    serverStartedAt: result.serverStartedAt,
+    persistenceState: 'synced',
+    updatedAt: result.serverStartedAt,
+  });
+}
+
 export function createDraftMutation(input: {
   partition: OfflinePartition;
   routeVersionStopId: string;
@@ -170,7 +354,7 @@ export function createDraftMutation(input: {
   sequence: number;
   occurredAt: string;
   ids: DraftMutationIds;
-}): { draft: LocalVisitDraft; event: OfflineOutboxEvent } {
+}): { draft: LocalVisitDraft; event: LegacyDraftOutboxEvent } {
   const { partition, routeVersionStopId, acknowledged, sequence, occurredAt, ids } = input;
   const draft = localVisitDraftSchema.parse({
     schemaVersion: 1,
@@ -196,6 +380,9 @@ export function createDraftMutation(input: {
     attemptCount: 0,
     occurredAt,
   });
+  if (event.operation !== 'visit.draft.saved') {
+    throw new Error('Evento de rascunho inválido.');
+  }
   return {
     draft,
     event,
@@ -213,6 +400,8 @@ export const syntheticClientIds = [
   '10000000-0000-4000-8000-000000000002',
   '10000000-0000-4000-8000-000000000003',
 ] as const;
+
+export const syntheticParameterSetId = '90000000-0000-4000-8000-000000000001';
 
 export function createSyntheticRouteBundle(
   partition: OfflinePartition,
@@ -271,9 +460,13 @@ export function restoreCanonicalRoute(bundleInput: AnyCanonicalLocalRouteBundle)
   });
 }
 
+export function toSyncCommand(eventInput: LegacyDraftOutboxEvent): LegacyDraftSyncCommand;
+export function toSyncCommand(eventInput: VisitStartedOutboxEvent): VisitStartedSyncCommand;
+export function toSyncCommand(eventInput: VisitStockSavedOutboxEvent): VisitStockSavedSyncCommand;
+export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand;
 export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand {
   const event = offlineOutboxEventSchema.parse(eventInput);
-  return syncCommandSchema.parse({
+  const common = {
     eventId: event.eventId,
     idempotencyKey: event.idempotencyKey,
     operation: event.operation,
@@ -283,7 +476,10 @@ export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand {
     aggregateId: event.aggregateId,
     occurredAt: event.occurredAt,
     payload: event.payload,
-  });
+  };
+  return syncCommandSchema.parse(event.operation === 'visit.draft.saved'
+    ? { ...common, aggregateType: 'visit_draft' }
+    : { ...common, aggregateType: 'visit' });
 }
 
 function canonicalJsonValue(value: unknown): string {
@@ -323,6 +519,7 @@ export async function hashSyncCommand(command: SyncCommand) {
 export function orderOutboxEvents(events: readonly OfflineOutboxEvent[]) {
   return events.map((event) => offlineOutboxEventSchema.parse(event)).sort((left, right) =>
     left.aggregateId.localeCompare(right.aggregateId) ||
+    left.aggregateType.localeCompare(right.aggregateType) ||
     left.sequence - right.sequence ||
     left.occurredAt.localeCompare(right.occurredAt));
 }

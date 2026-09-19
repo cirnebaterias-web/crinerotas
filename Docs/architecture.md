@@ -707,6 +707,8 @@ components:
 
 O lote inicia com limite técnico de 25 eventos e corpo JSON de 1 MiB (seção 15.3), sujeito a ensaio. Somente eventos individualmente confirmados sairão da outbox. `sequence` é por agregado; os bytes de anexos não integram o lote.
 
+Na implementação das Stories 3.1/3.2, o agregado é identificado por `(aggregateType, aggregateId)` dentro da partição de usuário/dispositivo. O Dexie v8 acrescenta esse tipo aos eventos existentes sem alterar identidade, payload, sequência ou chave idempotente, e inclui o tipo no índice único de sequência. Um rascunho legado `visit_draft` pode compartilhar o `offlineId` com a visita `visit`, mas o início desta sempre tem sequência 1; estoque começa em 2. Ao iniciar a visita, o contador confirmado do rascunho antigo deixa de ser utilizado; confirmações tardias dele não avançam a sequência da visita. Reservas, ordenação e bloqueios de sincronização local/servidor respeitam o mesmo namespace. A conclusão visual do rascunho compartilhado ainda exige esvaziar todas as pendências locais desse identificador.
+
 ### 5.4 Regras de idempotência
 
 - Mesma chave e mesmo conteúdo retorna o resultado canônico anterior.
@@ -1403,7 +1405,7 @@ Constraints mínimas adicionais, a concretizar por migrações e pgTAP:
 
 Não usar CHECK com consulta a outra tabela; usar FK/UNIQUE, função transacional ou trigger apropriada. Recibo não terá unicidade global presumida (AB-06); precisão/limites de peso permanecem AB-05. Coletor deve ser identificado; o contrato não obriga que todo coletor tenha login. Se houver conta associada, usar FK; modo de identificação operacional depende da definição aprovada.
 
-Referências: [constraints PostgreSQL 17](https://www.postgresql.org/docs/17/ddl-constraints.html), PRD FR-005/042/052/053 e DATA-03/04. A revisão é documental; migrações e testes de integridade ainda serão implementados.
+Referências: [constraints PostgreSQL 17](https://www.postgresql.org/docs/17/ddl-constraints.html), PRD FR-005/042/052/053 e DATA-03/04. A revisão original desta seção foi documental. As migrações e os testes de integridade do recorte entregue até as Stories 3.1–3.2 estão implementados e verificados; as capacidades de stories posteriores continuam pendentes. O estado atual e suas evidências estão detalhados na seção 9.12 e nos registros de QA das stories.
 
 ### 9.12 Grants e funções internas
 
@@ -1412,6 +1414,14 @@ Uma função `api.* SECURITY INVOKER` delega a uma função `private.* SECURITY 
 Funções de entrada derivam identidade de `auth.uid()`, validam usuário ativo, capacidade, escopo e parentesco, usam search_path vazio e nomes qualificados. Seu dono é role dedicada NOLOGIN/NOBYPASSRLS, diferente da dona das tabelas, com privilégios e políticas mínimos. Não presumir herança automática da RLS do chamador. Testar também chamada direta ao wrapper via Data API. Views security_invoker exigem grants de leitura mínimos; campos sensíveis usam projeções autorizadas, sem conceder leitura integral da base só para viabilizar uma view.
 
 Autorização que consulta papéis deve evitar ciclos recursivos de políticas. Contas bloqueadas não acessam linhas pelo BFF, Data API ou emissão Storage. Referências: [funções Supabase](https://supabase.com/docs/guides/database/functions), [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security).
+
+#### Implementação verificada nas Stories 3.1–3.2
+
+Os wrappers estreitos `api.start_visit`, `api.save_visit_stock` e `api.sync_event` usam `SECURITY DEFINER` com `search_path` vazio. Esta variante mantém `anon` e `authenticated` sem `USAGE` no schema `private` e sem DML nas tabelas; somente `authenticated` executa os wrappers públicos. Os helpers privados recebem grants explícitos entre executores. As funções revalidam identidade ativa, papel, capacidade e ownership, inclusive em replay.
+
+Os executores dedicados são `NOLOGIN`, `NOSUPERUSER` e `NOBYPASSRLS`. Nesta implementação eles também possuem suas tabelas de capability; `FORCE ROW LEVEL SECURITY` e políticas restritas aos executores delimitam o acesso interno, enquanto a autorização por vendedor ocorre obrigatoriamente nas funções. Esta é uma decisão documentada para o arranjo RPC existente, não uma dependência da RLS do chamador. A alteração futura de owner, grants ou wrapper exige repetir os testes de chamadas diretas e isolamento.
+
+Revisão local de 18/09/2026: a migração `20260918170000_visit_stock_contract_acl.sql` revoga o `EXECUTE` padrão dos helpers de estoque no contexto do owner; `20260918173000_visit_stock_replay_result.sql` preserva a resposta da intenção original após edições posteriores. Decisão: `Docs/architecture/decisions/001-visit-rpc-executor-boundary.md`. Evidência: `Docs/qa/evidence/3.1-3.2-specialized-review.md`.
 
 ## 10. Arquitetura frontend
 
