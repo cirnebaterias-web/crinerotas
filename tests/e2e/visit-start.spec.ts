@@ -492,6 +492,10 @@ test('keeps competitor price values on screen when the atomic local commit fails
   await page.getByLabel('Quantidade observada — Heliar').fill('0');
   await page.getByLabel('Quantidade observada — Moura').fill('1');
   await page.getByRole('button', { name: 'Salvar estoque e continuar' }).click();
+  await expect(page).toHaveURL(/\?step=prices$/);
+  await expect.poll(() => page.evaluate(
+    () => Number(sessionStorage.getItem('visit-stock-sync-batches') ?? '0'),
+  )).toBeGreaterThan(0);
   await expect.poll(async () => (await offlineCounts(page)).events.length).toBe(0);
   await context.setOffline(true);
   await page.getByLabel('Marca ou concorrente').selectOption(competitorId);
