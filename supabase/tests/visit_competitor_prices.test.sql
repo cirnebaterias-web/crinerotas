@@ -56,6 +56,15 @@ insert into api.parameter_values (id, parameter_set_id, category, code, label)
 values ('31000000-0000-4000-8000-000000000005', '90000000-0000-4000-8000-000000000100',
   'competitor', 'wrong_set_competitor', 'Concorrente de Outro Conjunto');
 
+select throws_ok(
+  $$update api.parameter_values set label = 'Alterado' where id = '31000000-0000-4000-8000-000000000001'$$,
+  'P0001', 'VERSION_CONFLICT', 'published parameter values are immutable');
+select throws_ok(
+  $$update api.parameter_values
+      set parameter_set_id = '90000000-0000-4000-8000-000000000100'
+      where id = '31000000-0000-4000-8000-000000000004'$$,
+  'P0001', 'VERSION_CONFLICT', 'published parameter values cannot be moved into a draft set');
+
 insert into api.clients (id, external_reference, name, address, portfolio_reference)
 values ('10000000-0000-4000-8000-000000000099', 'PRICE-099', 'Cliente Precos', 'Endereco sintetico', 'CARTEIRA-PRECOS')
 on conflict (id) do update set name = excluded.name;
@@ -165,15 +174,6 @@ select throws_ok(
     '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":"available","quotations":[{"competitorId":"31000000-0000-4000-8000-000000000005","modelOrAmperage":"60 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"499.90","conditionId":"31000000-0000-4000-8000-000000000003"}],"deviceSavedAt":"2099-09-21T12:03:00.000Z"}'::jsonb)$$,
   'P0001', 'VALIDATION_FAILED', 'catalog value from another parameter set is rejected');
 reset role;
-
-select throws_ok(
-  $$update api.parameter_values set label = 'Alterado' where id = '31000000-0000-4000-8000-000000000001'$$,
-  'P0001', 'VERSION_CONFLICT', 'published parameter values are immutable');
-select throws_ok(
-  $$update api.parameter_values
-      set parameter_set_id = '90000000-0000-4000-8000-000000000100'
-      where id = '31000000-0000-4000-8000-000000000004'$$,
-  'P0001', 'VERSION_CONFLICT', 'published parameter values cannot be moved into a draft set');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
