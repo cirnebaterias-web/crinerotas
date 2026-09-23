@@ -2,11 +2,12 @@ import Dexie, { type DexieOptions, type Table } from 'dexie';
 import type {
   LocalSession,
   LocalVisitDraft,
+  LocalCompetitorPriceParameterSet,
   OfflineRouteBundle,
   OfflineOutboxEvent,
 } from '@cirne/contracts';
 
-export const offlineDatabaseVersion = 8;
+export const offlineDatabaseVersion = 9;
 
 export const offlineV1Stores = {
   routeBundles: '&[userId+deviceId+routeId], [userId+deviceId], userId, deviceId, cachedAt',
@@ -45,11 +46,17 @@ export const offlineV8Stores = {
   outboxEvents: '&[userId+deviceId+eventId], &[userId+deviceId+idempotencyKey], &[userId+deviceId+aggregateType+aggregateId+sequence], [userId+deviceId+aggregateId+sequence], [userId+deviceId], [userId+deviceId+status], status, nextAttemptAt, leaseUntil, occurredAt',
 } as const;
 
+export const offlineV9Stores = {
+  ...offlineV8Stores,
+  priceParameterSets: '&[userId+deviceId+parameterSetId], [userId+deviceId], validFrom, cachedAt',
+} as const;
+
 export class OfflineDatabase extends Dexie {
   routeBundles!: Table<OfflineRouteBundle, [string, string, string]>;
   visitDrafts!: Table<LocalVisitDraft, [string, string, string]>;
   outboxEvents!: Table<OfflineOutboxEvent, [string, string, string]>;
   localSessions!: Table<LocalSession, [string, string]>;
+  priceParameterSets!: Table<LocalCompetitorPriceParameterSet, [string, string, string]>;
 
   constructor(name = 'cirne-rotas-offline', options?: DexieOptions) {
     super(name, options);
@@ -60,11 +67,12 @@ export class OfflineDatabase extends Dexie {
     this.version(5).stores(offlineV5Stores);
     this.version(6).stores(offlineV6Stores);
     this.version(7).stores(offlineV7Stores);
-    this.version(offlineDatabaseVersion).stores(offlineV8Stores).upgrade(async (transaction) => {
+    this.version(8).stores(offlineV8Stores).upgrade(async (transaction) => {
       // The namespace is already part of the wire contract. Preserve event identities and payloads.
       await transaction.table('outboxEvents').toCollection().modify((event) => {
         event.aggregateType = event.operation === 'visit.draft.saved' ? 'visit_draft' : 'visit';
       });
     });
+    this.version(offlineDatabaseVersion).stores(offlineV9Stores);
   }
 }

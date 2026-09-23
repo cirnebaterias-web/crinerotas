@@ -30,8 +30,11 @@ import {
   startVisitRequestSchema,
   saveStockRequestSchema,
   stockInputSchema,
+  saveCompetitorPricesRequestSchema,
+  competitorPricesInputSchema,
   type StartVisitRequest,
   type StockInput,
+  type CompetitorPricesInput,
   type VisitStartResult,
 } from '@cirne/contracts';
 
@@ -172,9 +175,11 @@ export interface DraftMutationIds {
 type LegacyDraftOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.draft.saved' }>;
 type VisitStartedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.started.v1' }>;
 type VisitStockSavedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.stock.saved.v1' }>;
+type VisitPricesSavedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.prices.saved.v1' }>;
 type LegacyDraftSyncCommand = Extract<SyncCommand, { operation: 'visit.draft.saved' }>;
 type VisitStartedSyncCommand = Extract<SyncCommand, { operation: 'visit.started.v1' }>;
 type VisitStockSavedSyncCommand = Extract<SyncCommand, { operation: 'visit.stock.saved.v1' }>;
+type VisitPricesSavedSyncCommand = Extract<SyncCommand, { operation: 'visit.prices.saved.v1' }>;
 
 export interface VisitStartMutationIds {
   offlineId: string;
@@ -183,6 +188,11 @@ export interface VisitStartMutationIds {
 }
 
 export interface VisitStockMutationIds {
+  eventId: string;
+  idempotencyKey: string;
+}
+
+export interface VisitPricesMutationIds {
   eventId: string;
   idempotencyKey: string;
 }
@@ -271,6 +281,68 @@ export function createVisitStockMutation(input: {
   return { draft, event };
 }
 
+export function normalizeCompetitorPricesInput(input: CompetitorPricesInput): CompetitorPricesInput {
+  const parsed = competitorPricesInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Preços da concorrência inválidos.');
+  }
+  return parsed.data;
+}
+
+export function createVisitPricesMutation(input: {
+  draft: LocalVisitDraft;
+  values: CompetitorPricesInput;
+  deviceSavedAt: string;
+  sequence: number;
+  ids: VisitPricesMutationIds;
+}): { draft: LocalVisitDraft; event: VisitPricesSavedOutboxEvent } {
+  const currentDraft = localVisitDraftSchema.parse(input.draft);
+  if (!currentDraft.stock) {
+    throw new VisitDomainError('VERSION_CONFLICT', 'O estoque precisa ser salvo antes dos preços.');
+  }
+  const values = normalizeCompetitorPricesInput(input.values);
+  saveCompetitorPricesRequestSchema.parse({
+    schemaVersion: 1,
+    offlineId: currentDraft.offlineId,
+    deviceSavedAt: input.deviceSavedAt,
+    ...values,
+  });
+  const draft = localVisitDraftSchema.parse({
+    ...currentDraft,
+    currentStep: 'actions',
+    prices: {
+      ...values,
+      eventId: input.ids.eventId,
+      deviceSavedAt: input.deviceSavedAt,
+      persistenceState: 'saved_on_device',
+    },
+    persistenceState: 'saved_on_device',
+    updatedAt: input.deviceSavedAt,
+  });
+  const event = offlineOutboxEventSchema.parse({
+    schemaVersion: 1,
+    userId: currentDraft.userId,
+    deviceId: currentDraft.deviceId,
+    eventId: input.ids.eventId,
+    idempotencyKey: input.ids.idempotencyKey,
+    operation: 'visit.prices.saved.v1',
+    aggregateId: currentDraft.offlineId,
+    sequence: input.sequence,
+    payload: {
+      offlineId: currentDraft.offlineId,
+      deviceSavedAt: input.deviceSavedAt,
+      ...values,
+    },
+    status: 'pending',
+    attemptCount: 0,
+    occurredAt: input.deviceSavedAt,
+  });
+  if (event.operation !== 'visit.prices.saved.v1') {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Evento de preços inválido.');
+  }
+  return { draft, event };
+}
+
 export function assertVisitCanStart(status: 'pending' | 'in_visit' | 'completed' | 'not_visited') {
   if (status !== 'pending') {
     throw new VisitDomainError('VERSION_CONFLICT', 'A parada não está disponível para iniciar.');
@@ -335,12 +407,13 @@ function visitStartedPayload(request: StartVisitRequest) {
 
 export function applyVisitStartConfirmation(
   draftInput: LocalVisitDraft,
-  result: Pick<VisitStartResult, 'visitId' | 'serverStartedAt'>,
+  result: Pick<VisitStartResult, 'visitId' | 'parameterSetId' | 'serverStartedAt'>,
 ): LocalVisitDraft {
   const draft = localVisitDraftSchema.parse(draftInput);
   return localVisitDraftSchema.parse({
     ...draft,
     canonicalVisitId: result.visitId,
+    parameterSetId: result.parameterSetId,
     serverStartedAt: result.serverStartedAt,
     persistenceState: 'synced',
     updatedAt: result.serverStartedAt,
@@ -463,6 +536,7 @@ export function restoreCanonicalRoute(bundleInput: AnyCanonicalLocalRouteBundle)
 export function toSyncCommand(eventInput: LegacyDraftOutboxEvent): LegacyDraftSyncCommand;
 export function toSyncCommand(eventInput: VisitStartedOutboxEvent): VisitStartedSyncCommand;
 export function toSyncCommand(eventInput: VisitStockSavedOutboxEvent): VisitStockSavedSyncCommand;
+export function toSyncCommand(eventInput: VisitPricesSavedOutboxEvent): VisitPricesSavedSyncCommand;
 export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand;
 export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand {
   const event = offlineOutboxEventSchema.parse(eventInput);

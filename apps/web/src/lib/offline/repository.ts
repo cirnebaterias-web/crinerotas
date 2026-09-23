@@ -1,26 +1,31 @@
 import Dexie from 'dexie';
 import {
   localSessionSchema,
+  localCompetitorPriceParameterSetSchema,
   localVisitDraftSchema,
   offlineRouteBundleSchema,
   offlineOutboxEventSchema,
   offlinePartitionSchema,
   type LocalSession,
+  type LocalCompetitorPriceParameterSet,
   type LocalVisitDraft,
   type OfflineRouteBundle,
   type OfflineOutboxEvent,
   type OfflinePartition,
   type SyncErrorCode,
   type SyncResult,
+  type CompetitorPricesInput,
 } from '@cirne/contracts';
 import {
   createDraftMutation,
   createVisitStartMutation,
   createVisitStockMutation,
+  createVisitPricesMutation,
   orderOutboxEvents,
   type DraftMutationIds,
   type VisitStartMutationIds,
   type VisitStockMutationIds,
+  type VisitPricesMutationIds,
 } from '@cirne/domain';
 import type { OfflineDatabase } from './database';
 import { SyncEventPersistenceError } from './sync-persistence-error';
@@ -63,6 +68,14 @@ export interface SaveVisitStockCommand {
   ids: VisitStockMutationIds;
 }
 
+export interface SaveVisitPricesCommand {
+  partition: OfflinePartition;
+  offlineId: string;
+  values: CompetitorPricesInput;
+  deviceSavedAt: string;
+  ids: VisitPricesMutationIds;
+}
+
 type FailedOutboxStatus = Extract<OfflineOutboxEvent['status'], 'recoverable_error' | 'action_required'>;
 
 export class OfflineRepository {
@@ -98,6 +111,32 @@ export class OfflineRepository {
       await this.saveNewestLocalSession(session);
       return bundle;
     });
+  }
+
+  async savePriceParameterSet(input: LocalCompetitorPriceParameterSet) {
+    const catalog = localCompetitorPriceParameterSetSchema.parse(input);
+    await this.db.priceParameterSets.put(catalog);
+    return catalog;
+  }
+
+  async getPriceParameterSet(
+    partitionInput: OfflinePartition,
+    parameterSetId: string,
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.priceParameterSets.get([partition.userId, partition.deviceId, parameterSetId]);
+  }
+
+  async findPriceParameterSetAt(partitionInput: OfflinePartition, at: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const atMs = Date.parse(at);
+    if (!Number.isFinite(atMs)) throw new Error('Instante de catálogo inválido.');
+    const catalogs = await this.db.priceParameterSets.where('[userId+deviceId]').equals([
+      partition.userId, partition.deviceId,
+    ]).toArray();
+    return catalogs
+      .filter((catalog) => Date.parse(catalog.validFrom) <= atMs)
+      .sort((left, right) => right.version - left.version)[0];
   }
 
   private async saveNewestLocalSession(session: LocalSession) {
@@ -264,6 +303,9 @@ export class OfflineRepository {
           confirmationInput.canonicalId !== draft.canonicalVisitId) {
         throw new SyncEventPersistenceError('Confirmação canônica não corresponde à visita local.');
       }
+      if (event.operation === 'visit.started.v1' && !confirmationInput.parameterSetId) {
+        throw new SyncEventPersistenceError('Confirmação de início sem conjunto de parâmetros.');
+      }
 
       await this.db.outboxEvents.delete(key);
       const remaining = await this.db.outboxEvents
@@ -278,11 +320,19 @@ export class OfflineRepository {
         ...draft,
         ...(event.operation === 'visit.started.v1' ? {
           canonicalVisitId: confirmationInput.canonicalId,
+          parameterSetId: confirmationInput.parameterSetId,
           serverStartedAt: confirmationInput.confirmedAt,
         } : {}),
         ...(event.operation === 'visit.stock.saved.v1' && draft.stock?.eventId === event.eventId ? {
           stock: {
             ...draft.stock,
+            persistenceState: 'synced' as const,
+            serverSavedAt: confirmationInput.confirmedAt,
+          },
+        } : {}),
+        ...(event.operation === 'visit.prices.saved.v1' && draft.prices?.eventId === event.eventId ? {
+          prices: {
+            ...draft.prices,
             persistenceState: 'synced' as const,
             serverSavedAt: confirmationInput.confirmedAt,
           },
@@ -482,6 +532,46 @@ export class OfflineRepository {
           mouraQuantity: command.mouraQuantity,
           ...(command.observation === undefined ? {} : { observation: command.observation }),
         },
+        deviceSavedAt: command.deviceSavedAt,
+        sequence,
+        ids: command.ids,
+      });
+      await this.db.visitDrafts.put(mutation.draft);
+      await this.db.outboxEvents.add(mutation.event);
+      return mutation;
+    });
+  }
+
+  async saveVisitPricesAndEnqueue(command: SaveVisitPricesCommand): Promise<{
+    draft: LocalVisitDraft;
+    event: OfflineOutboxEvent;
+  }> {
+    const partition = offlinePartitionSchema.parse(command.partition);
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, async () => {
+      const draftKey: [string, string, string] = [partition.userId, partition.deviceId, command.offlineId];
+      const currentDraft = await this.db.visitDrafts.get(draftKey);
+      if (!currentDraft) throw new Error('Visita não encontrada nesta partição offline.');
+      assertPartition(partition, currentDraft);
+
+      const eventCollision = await this.db.outboxEvents.get([
+        partition.userId, partition.deviceId, command.ids.eventId,
+      ]);
+      const keyCollision = await this.db.outboxEvents
+        .where('[userId+deviceId+idempotencyKey]')
+        .equals([partition.userId, partition.deviceId, command.ids.idempotencyKey])
+        .first();
+      if (eventCollision || keyCollision) throw new Error('Identificador de evento local já utilizado.');
+
+      const lastPending = await this.db.outboxEvents
+        .where('[userId+deviceId+aggregateType+aggregateId+sequence]')
+        .between(
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.minKey],
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.maxKey],
+        ).last();
+      const sequence = Math.max(lastPending?.sequence ?? 0, currentDraft.lastConfirmedSequence ?? 0) + 1;
+      const mutation = createVisitPricesMutation({
+        draft: currentDraft,
+        values: command.values,
         deviceSavedAt: command.deviceSavedAt,
         sequence,
         ids: command.ids,

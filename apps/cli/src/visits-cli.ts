@@ -22,7 +22,7 @@ try {
   const token = selectIdentityToken(process.env.CIRNE_ACCESS_TOKEN, await readStandardInput());
   const result = await runVisitRoundTrip(values.url, token);
   console.log(json ? JSON.stringify(result) :
-    `OK: visita ${result.visitId} e estoque sintético reconhecidos sem duplicidade.`);
+    `OK: visita ${result.visitId}, estoque e preços sintéticos reconhecidos sem duplicidade.`);
 } catch (error) {
   const parseArgsFailure = error instanceof Error && 'code' in error &&
     typeof error.code === 'string' && error.code.startsWith('ERR_PARSE_ARGS_');

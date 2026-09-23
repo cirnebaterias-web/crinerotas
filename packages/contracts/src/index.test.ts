@@ -29,6 +29,9 @@ import {
   startVisitRequestSchema,
   saveStockRequestSchema,
   stockSnapshotResultSchema,
+  competitorPricesInputSchema,
+  saveCompetitorPricesRequestSchema,
+  competitorPricesResultSchema,
   visitStartResultSchema,
 } from './index';
 
@@ -305,6 +308,7 @@ it('validates versioned offline records and rejects private or unknown fields', 
     acknowledged: true,
     localStatus: 'draft',
     persistenceState: 'saved_on_device',
+    parameterSetId: '90000000-0000-4000-8000-000000000001',
     updatedAt: '2026-09-11T12:01:00.000Z',
   };
   expect(localVisitDraftSchema.parse(draft)).toEqual(draft);
@@ -396,6 +400,7 @@ it('keeps canonical confirmations distinct from recoverable and rejected results
     status: 'confirmed' as const,
     canonicalId: syncCommand.aggregateId,
     confirmedAt: '2026-09-11T12:02:00.000Z',
+    parameterSetId: '90000000-0000-4000-8000-000000000001',
   };
   expect(syncBatchResponseSchema.parse({
     requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -574,5 +579,70 @@ it('validates stock quantities without inventing unit, estimate or model fields'
     stockSnapshotId: '88888888-8888-4888-8888-888888888888',
     visitId: '99999999-9999-4999-8999-999999999999',
     serverSavedAt: '2026-09-17T13:00:01.000Z',
+  }).success).toBe(true);
+});
+
+it('validates repeatable competitor prices or an explicit unavailable reason', () => {
+  const offlineId = '55555555-5555-4555-8555-555555555555';
+  const deviceSavedAt = '2026-09-21T12:00:00.000Z';
+  const quotation = {
+    competitorId: '11111111-1111-4111-8111-111111111111',
+    modelOrAmperage: '60 Ah',
+    technologyId: '22222222-2222-4222-8222-222222222222',
+    priceBrl: '399.90',
+    conditionId: '33333333-3333-4333-8333-333333333333',
+    observation: '  valor   sintético  ',
+  };
+  const available = saveCompetitorPricesRequestSchema.parse({
+    schemaVersion: 1, offlineId, deviceSavedAt, availability: 'available', quotations: [quotation, quotation],
+  });
+  expect(available).toMatchObject({
+    availability: 'available',
+    quotations: [{ priceBrl: '399.90', observation: 'valor sintético' }, { priceBrl: '399.90' }],
+  });
+  expect(competitorPricesInputSchema.safeParse({ availability: 'available', quotations: [] }).success).toBe(false);
+  expect(competitorPricesInputSchema.safeParse({
+    availability: 'available', quotations: [{ ...quotation, priceBrl: '0' }],
+  }).success).toBe(false);
+  expect(competitorPricesInputSchema.safeParse({
+    availability: 'unavailable', unavailableReasonId: '44444444-4444-4444-8444-444444444444', quotations: [],
+  }).success).toBe(false);
+
+  const unavailable = {
+    schemaVersion: 1 as const,
+    offlineId,
+    deviceSavedAt,
+    availability: 'unavailable' as const,
+    unavailableReasonId: '44444444-4444-4444-8444-444444444444',
+  };
+  expect(saveCompetitorPricesRequestSchema.parse(unavailable)).toEqual(unavailable);
+  expect(syncCommandSchema.safeParse({
+    eventId: '66666666-6666-4666-8666-666666666666',
+    idempotencyKey: '77777777-7777-4777-8777-777777777777',
+    operation: 'visit.prices.saved.v1', schemaVersion: 1, sequence: 3,
+    aggregateType: 'visit', aggregateId: offlineId, occurredAt: deviceSavedAt,
+    payload: { ...unavailable, schemaVersion: undefined },
+  }).success).toBe(false);
+  const payload = {
+    offlineId: unavailable.offlineId,
+    deviceSavedAt: unavailable.deviceSavedAt,
+    availability: unavailable.availability,
+    unavailableReasonId: unavailable.unavailableReasonId,
+  };
+  expect(syncCommandSchema.safeParse({
+    eventId: '66666666-6666-4666-8666-666666666666',
+    idempotencyKey: '77777777-7777-4777-8777-777777777777',
+    operation: 'visit.prices.saved.v1', schemaVersion: 1, sequence: 3,
+    aggregateType: 'visit', aggregateId: offlineId, occurredAt: deviceSavedAt, payload,
+  }).success).toBe(true);
+  expect(competitorPricesResultSchema.safeParse({
+    schemaVersion: 1,
+    reportId: '88888888-8888-4888-8888-888888888888',
+    visitId: '99999999-9999-4999-8999-999999999999',
+    offlineId,
+    availability: 'unavailable',
+    quotationIds: [],
+    unavailableReasonId: unavailable.unavailableReasonId,
+    serverSavedAt: '2026-09-21T12:00:01.000Z',
   }).success).toBe(true);
 });

@@ -25,6 +25,8 @@ function fixture() {
     refresh: vi.fn().mockImplementation(async () => snapshot),
     synchronize: vi.fn().mockResolvedValue({ attempted: 1, confirmed: 0, recoverable: 1, actionRequired: 0, authenticationRequired: false }),
     saveVisitStock: vi.fn(),
+    saveVisitPrices: vi.fn(),
+    getVisitPriceParameters: vi.fn().mockResolvedValue(null),
     close: vi.fn(),
   };
   const publish = vi.fn();
@@ -51,6 +53,49 @@ describe('VisitStartController', () => {
     await expect(f.controller.saveStock({ heliarQuantity: 0, mouraQuantity: 3 })).resolves.toEqual(savedDraft);
     expect(f.publish).toHaveBeenLastCalledWith(expect.objectContaining({
       draft: savedDraft, message: 'Estoque salvo no aparelho.',
+    }));
+    expect(f.service.synchronize).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
+
+  it('loads the cached catalog and publishes a durable prices commit before synchronization', async () => {
+    const f = fixture();
+    f.online.mockReturnValue(false);
+    const parameters = {
+      schemaVersion: 1 as const,
+      ...partition,
+      parameterSetId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      version: 1,
+      validFrom: stamp,
+      cachedAt: stamp,
+      values: { competitors: [], technologies: [], conditions: [], unavailableReasons: [] },
+    };
+    f.service.getVisitPriceParameters.mockResolvedValue(parameters);
+    await f.controller.resume();
+    expect(f.publish).toHaveBeenLastCalledWith(expect.objectContaining({ priceParameters: parameters }));
+    const savedDraft = {
+      ...f.snapshot.drafts[0]!, currentStep: 'actions' as const,
+      stock: {
+        eventId: 'stock-event', heliarQuantity: 0, mouraQuantity: 3,
+        deviceSavedAt: stamp, persistenceState: 'saved_on_device' as const,
+      },
+      prices: {
+        eventId: 'prices-event', availability: 'unavailable' as const,
+        unavailableReasonId: '88888888-8888-4888-8888-888888888888',
+        deviceSavedAt: stamp, persistenceState: 'saved_on_device' as const,
+      },
+    };
+    f.service.saveVisitPrices.mockResolvedValue({ draft: savedDraft, event: {} });
+    const values = {
+      availability: 'unavailable' as const,
+      unavailableReasonId: '88888888-8888-4888-8888-888888888888',
+    };
+    await expect(f.controller.savePrices(values)).resolves.toEqual(savedDraft);
+    expect(f.service.saveVisitPrices).toHaveBeenCalledExactlyOnceWith({
+      userId: partition.userId, offlineId: 'visit-a', values,
+    });
+    expect(f.publish).toHaveBeenLastCalledWith(expect.objectContaining({
+      draft: savedDraft, message: 'Preços salvos no aparelho.', priceParameters: parameters,
     }));
     expect(f.service.synchronize).not.toHaveBeenCalled();
     f.controller.dispose();

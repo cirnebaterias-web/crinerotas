@@ -1,10 +1,15 @@
 import {
   apiErrorResponseSchema,
+  competitorPriceParameterSetSchema,
+  competitorPricesResultSchema,
+  currentParameterSetPath,
   myTodayRoutePath,
   routeTodayResponseSchema,
+  saveCompetitorPricesRequestSchema,
   startVisitRequestSchema,
   saveStockRequestSchema,
   stockSnapshotResultSchema,
+  visitCompetitorPricesPath,
   visitStockPath,
   visitStartResultSchema,
   visitsPath,
@@ -56,6 +61,9 @@ export interface VisitRoundTripResult {
     stockSaved: true;
     stockReplayMatched: true;
     stockDivergentRejected: true;
+    pricesSaved: true;
+    pricesReplayMatched: true;
+    pricesDivergentRejected: true;
   };
 }
 
@@ -165,6 +173,74 @@ export async function runVisitRoundTrip(
   if (!stockDivergentRejected) {
     throw new Error('O servidor não rejeitou o estoque divergente com a mesma chave.');
   }
+  const parameterAt = `${routeResponse.route.serviceDate}T12:00:00.000Z`;
+  const parameters = competitorPriceParameterSetSchema.parse(await requestJson(
+    origin,
+    `${currentParameterSetPath}?at=${encodeURIComponent(parameterAt)}`,
+    sellerAccessToken,
+    { method: 'GET' },
+    request,
+  ));
+  if (parameters.parameterSetId !== first.parameterSetId) {
+    throw new Error('O catálogo de preços não corresponde ao conjunto vinculado à visita.');
+  }
+  const competitor = parameters.values.competitors[0];
+  const technology = parameters.values.technologies[0];
+  const condition = parameters.values.conditions[0];
+  if (!competitor || !technology || !condition) {
+    throw new Error('Catálogo AB-02 incompleto para o diagnóstico de Preços.');
+  }
+  const pricesKey = crypto.randomUUID();
+  const pricesCommand = saveCompetitorPricesRequestSchema.parse({
+    schemaVersion: 1,
+    offlineId: command.offlineId,
+    availability: 'available',
+    quotations: [{
+      competitorId: competitor.id,
+      modelOrAmperage: 'Diagnóstico sintético',
+      technologyId: technology.id,
+      priceBrl: '1',
+      conditionId: condition.id,
+      observation: 'Gerado pelo comando ops:visits.',
+    }],
+    deviceSavedAt: new Date().toISOString(),
+  });
+  if (pricesCommand.availability !== 'available') {
+    throw new Error('O diagnóstico de Preços exige uma cotação sintética.');
+  }
+  const sendPrices = (body: unknown) => requestJson(
+    origin,
+    visitCompetitorPricesPath(command.offlineId),
+    sellerAccessToken,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': pricesKey,
+        'X-Device-Id': deviceId,
+      },
+      body: JSON.stringify(body),
+    },
+    request,
+  );
+  const prices = competitorPricesResultSchema.parse(await sendPrices(pricesCommand));
+  const pricesReplay = competitorPricesResultSchema.parse(await sendPrices(pricesCommand));
+  let pricesDivergentRejected = false;
+  try {
+    await sendPrices({
+      ...pricesCommand,
+      quotations: pricesCommand.quotations.map((quotation) => ({ ...quotation, priceBrl: '2' })),
+    });
+  } catch (error) {
+    pricesDivergentRejected = error instanceof Error && 'status' in error && error.status === 409;
+  }
+  if (JSON.stringify(prices) !== JSON.stringify(pricesReplay) || prices.visitId !== first.visitId ||
+      prices.availability !== 'available' || prices.quotationIds.length !== 1) {
+    throw new Error('Os preços não foram reconhecidos de forma canônica e idempotente.');
+  }
+  if (!pricesDivergentRejected) {
+    throw new Error('O servidor não rejeitou os preços divergentes com a mesma chave.');
+  }
   return {
     status: 'ok',
     visitId: first.visitId,
@@ -177,6 +253,9 @@ export async function runVisitRoundTrip(
       stockSaved: true,
       stockReplayMatched: true,
       stockDivergentRejected: true,
+      pricesSaved: true,
+      pricesReplayMatched: true,
+      pricesDivergentRejected: true,
     },
   };
 }

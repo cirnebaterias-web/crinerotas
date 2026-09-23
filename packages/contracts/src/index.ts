@@ -264,6 +264,9 @@ export const maxSyncBatchEvents = 25;
 export const syncBatchPath = '/api/v1/sync/batches';
 export const visitsPath = '/api/v1/visits';
 export const visitStockPath = (offlineId: string) => `${visitsPath}/${offlineId}/sections/stock`;
+export const visitCompetitorPricesPath = (offlineId: string) =>
+  `${visitsPath}/${offlineId}/sections/competitor-prices`;
+export const currentParameterSetPath = '/api/v1/parameter-sets/current';
 export const visitCsrfToken = 'cirne-visit-v1';
 
 const canonicalDecimalSchema = z.string().regex(/^-?\d+(\.\d+)?$/);
@@ -349,6 +352,101 @@ export const stockSnapshotResultSchema = stockInputSchema.extend({
 }).strict();
 export type StockSnapshotResult = z.infer<typeof stockSnapshotResultSchema>;
 
+const priceObservationSchema = z.preprocess(
+  (value) => typeof value === 'string' ? value.replace(/\s+/gu, ' ').trim() || undefined : value,
+  z.string().max(500).optional(),
+);
+const positiveMoneyBrlSchema = z.string()
+  .regex(/^\d+(?:\.\d+)?$/, 'Informe o preço como decimal positivo.')
+  .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0, 'O preço deve ser maior que zero.');
+
+export const competitorPriceQuotationSchema = z.object({
+  competitorId: z.uuid(),
+  modelOrAmperage: z.string().trim().min(1).max(120),
+  technologyId: z.uuid(),
+  priceBrl: positiveMoneyBrlSchema,
+  conditionId: z.uuid(),
+  observation: priceObservationSchema,
+}).strict();
+export type CompetitorPriceQuotation = z.infer<typeof competitorPriceQuotationSchema>;
+
+const availableCompetitorPricesSchema = z.object({
+  availability: z.literal('available'),
+  quotations: z.array(competitorPriceQuotationSchema).min(1).max(25),
+}).strict();
+const unavailableCompetitorPricesSchema = z.object({
+  availability: z.literal('unavailable'),
+  unavailableReasonId: z.uuid(),
+}).strict();
+export const competitorPricesInputSchema = z.discriminatedUnion('availability', [
+  availableCompetitorPricesSchema,
+  unavailableCompetitorPricesSchema,
+]);
+export type CompetitorPricesInput = z.infer<typeof competitorPricesInputSchema>;
+
+const competitorPricesRequestFields = {
+    schemaVersion: z.literal(1),
+    offlineId: z.uuid(),
+    deviceSavedAt: z.iso.datetime({ offset: true }),
+};
+export const saveCompetitorPricesRequestSchema = z.discriminatedUnion('availability', [
+  availableCompetitorPricesSchema.extend(competitorPricesRequestFields).strict(),
+  unavailableCompetitorPricesSchema.extend(competitorPricesRequestFields).strict(),
+]);
+export type SaveCompetitorPricesRequest = z.infer<typeof saveCompetitorPricesRequestSchema>;
+
+export const competitorPricesResultSchema = z.object({
+  schemaVersion: z.literal(1),
+  reportId: z.uuid(),
+  visitId: z.uuid(),
+  offlineId: z.uuid(),
+  availability: z.enum(['available', 'unavailable']),
+  quotationIds: z.array(z.uuid()).max(25),
+  unavailableReasonId: z.uuid().nullable(),
+  serverSavedAt: z.iso.datetime({ offset: true }),
+}).strict().superRefine((result, context) => {
+  if (result.availability === 'available' && (result.quotationIds.length === 0 || result.unavailableReasonId)) {
+    context.addIssue({ code: 'custom', path: ['availability'], message: 'Resposta disponível exige cotações e não aceita motivo.' });
+  }
+  if (result.availability === 'unavailable' && (result.quotationIds.length > 0 || !result.unavailableReasonId)) {
+    context.addIssue({ code: 'custom', path: ['availability'], message: 'Resposta indisponível exige motivo e não aceita cotações.' });
+  }
+});
+export type CompetitorPricesResult = z.infer<typeof competitorPricesResultSchema>;
+
+export const parameterValueCategorySchema = z.enum([
+  'competitor',
+  'competitor_price_technology',
+  'competitor_price_condition',
+  'competitor_price_unavailable_reason',
+]);
+export const parameterValueSchema = z.object({
+  id: z.uuid(),
+  category: parameterValueCategorySchema,
+  code: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+  label: z.string().trim().min(1).max(120),
+  sortOrder: z.number().int().nonnegative(),
+}).strict();
+export const competitorPriceParameterSetSchema = z.object({
+  schemaVersion: z.literal(1),
+  parameterSetId: z.uuid(),
+  version: z.number().int().positive(),
+  validFrom: z.iso.datetime({ offset: true }),
+  values: z.object({
+    competitors: z.array(parameterValueSchema.extend({ category: z.literal('competitor') })).max(100),
+    technologies: z.array(parameterValueSchema.extend({ category: z.literal('competitor_price_technology') })).max(100),
+    conditions: z.array(parameterValueSchema.extend({ category: z.literal('competitor_price_condition') })).max(100),
+    unavailableReasons: z.array(parameterValueSchema.extend({ category: z.literal('competitor_price_unavailable_reason') })).max(100),
+  }).strict(),
+}).strict();
+export type CompetitorPriceParameterSet = z.infer<typeof competitorPriceParameterSetSchema>;
+export const localCompetitorPriceParameterSetSchema = competitorPriceParameterSetSchema.extend({
+  userId: z.uuid(),
+  deviceId: z.uuid(),
+  cachedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type LocalCompetitorPriceParameterSet = z.infer<typeof localCompetitorPriceParameterSetSchema>;
+
 export const visitErrorCodeSchema = z.enum([
   'AUTH_REQUIRED',
   'FORBIDDEN',
@@ -371,7 +469,22 @@ export type VisitStartedPayload = z.infer<typeof visitStartedPayloadSchema>;
 export const visitStockSavedPayloadSchema = saveStockRequestSchema.omit({ schemaVersion: true }).strict();
 export type VisitStockSavedPayload = z.infer<typeof visitStockSavedPayloadSchema>;
 
-export const syncOperationSchema = z.enum(['visit.draft.saved', 'visit.started.v1', 'visit.stock.saved.v1']);
+const visitPricesSavedPayloadFields = {
+    offlineId: z.uuid(),
+    deviceSavedAt: z.iso.datetime({ offset: true }),
+};
+export const visitPricesSavedPayloadSchema = z.discriminatedUnion('availability', [
+  availableCompetitorPricesSchema.extend(visitPricesSavedPayloadFields).strict(),
+  unavailableCompetitorPricesSchema.extend(visitPricesSavedPayloadFields).strict(),
+]);
+export type VisitPricesSavedPayload = z.infer<typeof visitPricesSavedPayloadSchema>;
+
+export const syncOperationSchema = z.enum([
+  'visit.draft.saved',
+  'visit.started.v1',
+  'visit.stock.saved.v1',
+  'visit.prices.saved.v1',
+]);
 export const syncAggregateTypeSchema = z.enum(['visit_draft', 'visit']);
 export const syncErrorCodeSchema = z.enum([
   'AUTH_REQUIRED',
@@ -469,10 +582,27 @@ const visitStockSavedSyncCommandSchema = syncCommandBaseSchema.extend({
   }
 });
 
+const visitPricesSavedSyncCommandSchema = syncCommandBaseSchema.extend({
+  operation: z.literal('visit.prices.saved.v1'),
+  aggregateType: z.literal('visit'),
+  payload: visitPricesSavedPayloadSchema,
+}).strict().superRefine((command, context) => {
+  if (command.sequence < 3) {
+    context.addIssue({ code: 'custom', path: ['sequence'], message: 'Preços exigem início e estoque anteriores.' });
+  }
+  if (command.aggregateId !== command.payload.offlineId) {
+    context.addIssue({ code: 'custom', path: ['payload', 'offlineId'], message: 'O agregado deve corresponder ao offlineId da visita.' });
+  }
+  if (command.occurredAt !== command.payload.deviceSavedAt) {
+    context.addIssue({ code: 'custom', path: ['occurredAt'], message: 'O horário do evento deve corresponder ao salvamento no aparelho.' });
+  }
+});
+
 export const syncCommandSchema = z.discriminatedUnion('operation', [
   legacyDraftSyncCommandSchema,
   visitStartedSyncCommandSchema,
   visitStockSavedSyncCommandSchema,
+  visitPricesSavedSyncCommandSchema,
 ]);
 export type SyncCommand = z.infer<typeof syncCommandSchema>;
 
@@ -521,6 +651,7 @@ const confirmedSyncResultSchema = z.object({
   status: z.literal('confirmed'),
   canonicalId: z.uuid(),
   confirmedAt: z.iso.datetime({ offset: true }),
+  parameterSetId: z.uuid().optional(),
 }).strict();
 const recoverableSyncResultSchema = z.object({
   eventId: z.uuid(),
@@ -660,11 +791,12 @@ export const localVisitDraftSchema = z.object({
   userId: z.uuid(),
   deviceId: z.uuid(),
   routeVersionStopId: z.uuid(),
-  currentStep: z.enum(['start', 'stock', 'prices']),
+  currentStep: z.enum(['start', 'stock', 'prices', 'actions']),
   acknowledged: z.boolean().optional(),
   deviceStartedAt: z.iso.datetime({ offset: true }).optional(),
   client: routeClientSnapshotSchema.optional(),
   canonicalVisitId: z.uuid().optional(),
+  parameterSetId: z.uuid().optional(),
   serverStartedAt: z.iso.datetime({ offset: true }).optional(),
   lastConfirmedSequence: z.number().int().positive().optional(),
   stock: stockInputSchema.extend({
@@ -673,6 +805,20 @@ export const localVisitDraftSchema = z.object({
     serverSavedAt: z.iso.datetime({ offset: true }).optional(),
     persistenceState: z.enum(['saved_on_device', 'synced']),
   }).strict().optional(),
+  prices: z.discriminatedUnion('availability', [
+    availableCompetitorPricesSchema.extend({
+      eventId: z.uuid(),
+      deviceSavedAt: z.iso.datetime({ offset: true }),
+      serverSavedAt: z.iso.datetime({ offset: true }).optional(),
+      persistenceState: z.enum(['saved_on_device', 'synced']),
+    }).strict(),
+    unavailableCompetitorPricesSchema.extend({
+      eventId: z.uuid(),
+      deviceSavedAt: z.iso.datetime({ offset: true }),
+      serverSavedAt: z.iso.datetime({ offset: true }).optional(),
+      persistenceState: z.enum(['saved_on_device', 'synced']),
+    }).strict(),
+  ]).optional(),
   localStatus: z.literal('draft'),
   persistenceState: z.enum(['saved_on_device', 'synced']),
   updatedAt: z.iso.datetime({ offset: true }),
@@ -729,9 +875,17 @@ const visitStockSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
   payload: visitStockSavedPayloadSchema,
 }).strict();
 
+const visitPricesSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
+  operation: z.literal('visit.prices.saved.v1'),
+  aggregateType: z.literal('visit').default('visit'),
+  sequence: z.number().int().min(3),
+  payload: visitPricesSavedPayloadSchema,
+}).strict();
+
 export const offlineOutboxEventSchema = z.discriminatedUnion('operation', [
   legacyOfflineOutboxEventSchema,
   visitStartedOfflineOutboxEventSchema,
   visitStockSavedOfflineOutboxEventSchema,
+  visitPricesSavedOfflineOutboxEventSchema,
 ]);
 export type OfflineOutboxEvent = z.infer<typeof offlineOutboxEventSchema>;

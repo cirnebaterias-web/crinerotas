@@ -211,6 +211,78 @@ describe('OfflineFoundationService online authorization', () => {
 });
 
 describe('canonical route cache', () => {
+  it('caches the published price catalog for offline use without inventing missing categories', async () => {
+    const { repository, service } = await setup();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      schemaVersion: 1,
+      parameterSetId: '90000000-0000-4000-8000-000000000001',
+      version: 1,
+      validFrom: '2026-09-01T00:00:00.000Z',
+      values: {
+        competitors: [{ id: '31000000-0000-4000-8000-000000000001', category: 'competitor', code: 'synthetic_competitor', label: 'Concorrente Sintético', sortOrder: 1 }],
+        technologies: [], conditions: [], unavailableReasons: [],
+      },
+    })));
+
+    const saved = await service.cacheCompetitorPriceParameters(partition.userId, '2026-09-17');
+    expect(saved.values.technologies).toEqual([]);
+    await expect(repository.getPriceParameterSet(partition, saved.parameterSetId)).resolves.toEqual(saved);
+  });
+
+  it('loads the exact catalog confirmed for a visit after a newer catalog is cached', async () => {
+    const { repository, service } = await setup();
+    const olderCatalog = {
+      schemaVersion: 1 as const,
+      ...partition,
+      parameterSetId: '90000000-0000-4000-8000-000000000001',
+      version: 1,
+      validFrom: '2026-09-01T00:00:00.000Z',
+      cachedAt: '2026-09-11T12:00:00.000Z',
+      values: {
+        competitors: [{ id: '31000000-0000-4000-8000-000000000001', category: 'competitor' as const, code: 'older', label: 'Catálogo da visita', sortOrder: 1 }],
+        technologies: [], conditions: [], unavailableReasons: [],
+      },
+    };
+    await repository.savePriceParameterSet(olderCatalog);
+    await repository.savePriceParameterSet({
+      ...olderCatalog,
+      parameterSetId: '90000000-0000-4000-8000-000000000002',
+      version: 2,
+      validFrom: '2026-09-10T00:00:00.000Z',
+      values: { ...olderCatalog.values, competitors: [{
+        ...olderCatalog.values.competitors[0]!,
+        id: '31000000-0000-4000-8000-000000000002',
+        code: 'newer',
+        label: 'Catálogo posterior',
+      }] },
+    });
+    await service.cacheCanonicalRoute(partition.userId, canonicalRoute());
+    const route = (await repository.listRouteBundles(partition)).find(
+      (candidate) => candidate.schemaVersion !== 1
+        && candidate.routeVersionId === canonicalRoute().routeVersionId,
+    )!;
+    const started = await repository.saveVisitStartAndEnqueue({
+      partition,
+      routeVersionStopId: route.stops[0]!.routeVersionStopId,
+      deviceStartedAt: '2026-09-11T12:01:00.000Z',
+      ids: {
+        offlineId: '55000000-0000-4000-8000-000000000001',
+        eventId: '66000000-0000-4000-8000-000000000001',
+        idempotencyKey: '77000000-0000-4000-8000-000000000001',
+      },
+    });
+    await repository.applySyncConfirmation(partition, {
+      eventId: started.event!.eventId,
+      status: 'confirmed',
+      canonicalId: '88000000-0000-4000-8000-000000000001',
+      confirmedAt: '2026-09-11T12:01:01.000Z',
+      parameterSetId: olderCatalog.parameterSetId,
+    });
+
+    await expect(service.getVisitPriceParameters(partition.userId, started.draft.offlineId))
+      .resolves.toEqual(olderCatalog);
+  });
+
   it('commits a canonical route and session but reports unavailable without a verified worker', async () => {
     const { repository, service } = await setup();
 
