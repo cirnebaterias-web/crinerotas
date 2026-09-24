@@ -1,11 +1,22 @@
 {
-  "name": "cirne-rotas", "version": "0.1.0", "private": true, "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
-  "engines": {"node": ">=24.19.0 <25", "npm": ">=11.17.0 <12"},
+  "name": "cirne-rotas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.19.0 <25",
+    "npm": ">=11.17.0 <12"
+  },
   "packageManager": "npm@11.17.0",
   "overrides": {
     "browserslist": "4.28.9",
-    "@serwist/next": {"browserslist": "4.28.9"}
+    "@serwist/next": {
+      "browserslist": "4.28.9"
+    }
   },
   "scripts": {
     "dev": "npm run dev --workspace @cirne/web",
@@ -13,6 +24,8 @@
     "build": "npm run build --workspace @cirne/web && node scripts/prepare-standalone.mjs",
     "start": "npm run start --workspace @cirne/web",
     "lint": "eslint apps packages scripts tests *.ts *.mjs",
+    "validate:port-denylist": "node scripts/validate-port-denylist.mjs",
+    "security:secrets": "secretlint \"**/*\"",
     "typecheck": "npm run typegen --workspace @cirne/web && tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
     "test": "vitest run --project unit",
     "test:e2e": "playwright test",
@@ -34,9 +47,17 @@
     "ops:visits": "tsx apps/cli/src/visits-cli.ts"
   },
   "devDependencies": {
-    "@types/node": "24.13.4", "@types/react": "19.3.0", "@types/react-dom": "19.3.0",
+    "@secretlint/secretlint-rule-preset-recommend": "13.0.5",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "browserslist": "4.28.9",
-    "eslint": "10.10.0", "typescript-eslint": "8.70.0", "typescript": "6.0.3",
-    "vitest": "5.0.0", "tsx": "4.23.13", "supabase": "2.117.0"
+    "eslint": "10.10.0",
+    "secretlint": "13.0.5",
+    "supabase": "2.117.0",
+    "tsx": "4.23.13",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "5.0.0"
   }
 }

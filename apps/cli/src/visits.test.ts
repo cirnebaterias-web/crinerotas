@@ -10,6 +10,8 @@ describe('visit round-trip CLI', () => {
     let startCalls = 0;
     let stockCalls = 0;
     let stockCanonical: Record<string, unknown> | null = null;
+    let priceCalls = 0;
+    let priceCanonical: Record<string, unknown> | null = null;
     const request = vi.fn<typeof fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname;
       if (path === '/api/v1/me') return Response.json({
@@ -53,6 +55,18 @@ describe('visit round-trip CLI', () => {
           }],
         },
       });
+      if (path === '/api/v1/parameter-sets/current') return Response.json({
+        schemaVersion: 1,
+        parameterSetId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        version: 1,
+        validFrom: '2026-09-17T00:00:00.000Z',
+        values: {
+          competitors: [{ id: 'c1000000-0000-4000-8000-000000000001', category: 'competitor', code: 'synthetic_competitor', label: 'Concorrente Sintético', sortOrder: 1 }],
+          technologies: [{ id: 'c1000000-0000-4000-8000-000000000002', category: 'competitor_price_technology', code: 'synthetic_technology', label: 'Tecnologia Sintética', sortOrder: 1 }],
+          conditions: [{ id: 'c1000000-0000-4000-8000-000000000003', category: 'competitor_price_condition', code: 'synthetic_condition', label: 'Condição Sintética', sortOrder: 1 }],
+          unavailableReasons: [],
+        },
+      });
       if (path.endsWith('/sections/stock')) {
         stockCalls += 1;
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -72,6 +86,27 @@ describe('visit round-trip CLI', () => {
           serverSavedAt: '2026-09-17T12:05:01.000Z',
         };
         return Response.json(stockCanonical);
+      }
+      if (path.endsWith('/sections/competitor-prices')) {
+        priceCalls += 1;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (priceCalls === 3) return Response.json({
+          error: {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: 'Chave divergente.', recoverable: false,
+            timestamp: '2026-09-17T12:06:02.000Z', requestId: crypto.randomUUID(),
+          },
+        }, { status: 409 });
+        priceCanonical ??= {
+          schemaVersion: 1,
+          reportId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          visitId: '88888888-8888-4888-8888-888888888888',
+          offlineId: body.offlineId,
+          availability: 'available',
+          quotationIds: ['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'],
+          unavailableReasonId: null,
+          serverSavedAt: '2026-09-17T12:06:01.000Z',
+        };
+        return Response.json(priceCanonical);
       }
       startCalls += 1;
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -119,9 +154,13 @@ describe('visit round-trip CLI', () => {
       stockSaved: true,
       stockReplayMatched: true,
       stockDivergentRejected: true,
+      pricesSaved: true,
+      pricesReplayMatched: true,
+      pricesDivergentRejected: true,
     });
     expect(JSON.stringify(result)).not.toMatch(/token|payload|location|eventId|idempotency/i);
     expect(startCalls).toBe(3);
     expect(stockCalls).toBe(3);
+    expect(priceCalls).toBe(3);
   });
 });

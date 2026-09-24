@@ -1,28 +1,33 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { StockInput } from '@cirne/contracts';
+import type { CompetitorPricesInput, StockInput } from '@cirne/contracts';
 import { Brand } from '@/features/auth/brand';
 import { OfflineFoundationService } from '@/lib/offline/service';
 import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { initialVisitView, VisitStartController } from './visit-start-controller';
+import { VisitCompetitorPricesStep } from './prices/visit-competitor-prices-step';
 import { VisitStockStep } from './stock/visit-stock-step';
+
+type VisitScreenStep = 'start' | 'stock' | 'prices' | 'actions';
 
 export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const controllerRef = useRef<VisitStartController | null>(null);
   const nextStepTitleRef = useRef<HTMLHeadingElement>(null);
   const [view, setView] = useState(initialVisitView);
-  const [step, setStep] = useState<'start' | 'stock' | 'prices'>('start');
+  const [step, setStep] = useState<VisitScreenStep>('start');
   const { draft, state, message: syncMessage } = view;
 
   useEffect(() => {
-    if (state === 'ready' && step === 'prices') nextStepTitleRef.current?.focus();
+    if (state === 'ready' && step === 'actions') nextStepTitleRef.current?.focus();
   }, [state, step]);
 
   useEffect(() => {
     const readStep = () => {
       const requested = new URLSearchParams(window.location.search).get('step');
-      setStep(requested === 'stock' || requested === 'prices' ? requested : 'start');
+      setStep(requested === 'stock' || requested === 'prices' || requested === 'actions'
+        ? requested
+        : 'start');
     };
     readStep();
     const service = new OfflineFoundationService();
@@ -50,7 +55,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     };
   }, [offlineId]);
 
-  const navigateStep = (next: 'start' | 'stock' | 'prices') => {
+  const navigateStep = (next: VisitScreenStep) => {
     const url = new URL(window.location.href);
     if (next === 'start') url.searchParams.delete('step');
     else url.searchParams.set('step', next);
@@ -59,11 +64,19 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   };
 
   useEffect(() => {
-    if (state !== 'ready' || !draft || step !== 'prices' || draft.stock) return;
+    if (state !== 'ready' || !draft || (step !== 'prices' && step !== 'actions') || draft.stock) return;
     const url = new URL(window.location.href);
     url.searchParams.set('step', 'stock');
     window.history.replaceState({}, '', url);
     setStep('stock');
+  }, [draft, state, step]);
+
+  useEffect(() => {
+    if (state !== 'ready' || !draft || step !== 'actions' || !draft.stock || draft.prices) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('step', 'prices');
+    window.history.replaceState({}, '', url);
+    setStep('prices');
   }, [draft, state, step]);
 
   const saveStock = async (values: StockInput) => {
@@ -71,6 +84,13 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     if (!controller) throw new Error('A visita ainda não está pronta para edição.');
     await controller.saveStock(values);
     navigateStep('prices');
+  };
+
+  const savePrices = async (values: CompetitorPricesInput) => {
+    const controller = controllerRef.current;
+    if (!controller) throw new Error('A visita ainda não está pronta para edição.');
+    await controller.savePrices(values);
+    navigateStep('actions');
   };
 
   const showStockStep = step === 'stock' || (step === 'prices' && !draft?.stock);
@@ -108,7 +128,9 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
             onClick={() => void controllerRef.current?.resume()}
           >Tentar sincronizar novamente</button>}
         </section>
-        {draft.stock && <p className="seller-step-progress" role="status">1 de 4 etapas preenchidas</p>}
+        {(draft.stock || draft.prices) && <p className="seller-step-progress" role="status">
+          {draft.prices ? '2' : '1'} de 4 etapas preenchidas
+        </p>}
         {step === 'start' && <>
           <button className="seller-button seller-primary seller-stock-entry" onClick={() => navigateStep('stock')}>
             {draft.stock ? 'Revisar estoque' : 'Preencher estoque'}
@@ -119,12 +141,28 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           draft={draft}
           onSave={saveStock}
         />}
-        {step === 'prices' && draft.stock && <section className="seller-next-step" aria-labelledby="next-step-title">
+        {step === 'prices' && draft.stock && <section className="seller-next-step" aria-labelledby="stock-saved-title">
           <p className="seller-kicker">ESTOQUE</p>
-          <h2 id="next-step-title" ref={nextStepTitleRef} tabIndex={-1}>Salvo no aparelho</h2>
+          <h2 id="stock-saved-title">Salvo no aparelho</h2>
           <p>Heliar: <strong>{draft.stock?.heliarQuantity ?? 0}</strong> · Moura: <strong>{draft.stock?.mouraQuantity ?? 0}</strong></p>
-          <p className="seller-notice">A etapa de Preços será liberada na próxima story.</p>
           <button className="seller-button seller-secondary" onClick={() => navigateStep('stock')}>Editar estoque</button>
+        </section>}
+        {step === 'prices' && draft.stock && <VisitCompetitorPricesStep
+          key={draft.prices?.eventId ?? 'new-prices'}
+          draft={draft}
+          parameters={view.priceParameters ?? null}
+          onSave={savePrices}
+        />}
+        {step === 'actions' && draft.prices && <section className="seller-next-step" aria-labelledby="next-step-title">
+          <p className="seller-kicker">PREÇOS</p>
+          <h2 id="next-step-title" ref={nextStepTitleRef} tabIndex={-1}>
+            {draft.prices.persistenceState === 'synced' ? 'Sincronizados' : 'Salvos no aparelho'}
+          </h2>
+          <p>{draft.prices.availability === 'available'
+            ? `${draft.prices.quotations.length} cotação(ões) registrada(s).`
+            : 'Preço não disponível com motivo registrado.'}</p>
+          <p className="seller-notice">A etapa de Ações da concorrência pertence ao próximo incremento.</p>
+          <button className="seller-button seller-secondary" onClick={() => navigateStep('prices')}>Editar preços</button>
         </section>}
         <a className="seller-button seller-secondary" href="/route">Retornar à rota</a>
       </div>}

@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { VisitRepository, VisitStockRepository } from './service';
-import { saveVisitStock, startVisit, VisitServiceFailure } from './service';
+import type {
+  VisitCompetitorPricesRepository,
+  CompetitorPriceParametersRepository,
+  VisitRepository,
+  VisitStockRepository,
+} from './service';
+import {
+  saveVisitCompetitorPrices,
+  getCurrentCompetitorPriceParameters,
+  saveVisitStock,
+  startVisit,
+  VisitServiceFailure,
+} from './service';
 
 const deviceId = '22222222-2222-4222-8222-222222222222';
 const idempotencyKey = '77777777-7777-4777-8777-777777777777';
@@ -102,5 +113,62 @@ describe('saveVisitStock', () => {
     await expect(saveVisitStock(command.offlineId, deviceId, idempotencyKey, {
       ...stock, mouraQuantity: -1,
     }, repository)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+});
+
+describe('saveVisitCompetitorPrices', () => {
+  it('accepts the unavailable flow and rejects a divergent canonical response', async () => {
+    const unavailableReasonId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const prices = {
+      schemaVersion: 1 as const,
+      offlineId: command.offlineId,
+      availability: 'unavailable' as const,
+      unavailableReasonId,
+      deviceSavedAt: '2026-09-17T12:06:00.000Z',
+    };
+    const result = {
+      schemaVersion: 1 as const,
+      reportId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      visitId: canonical.visitId,
+      offlineId: command.offlineId,
+      availability: 'unavailable' as const,
+      quotationIds: [],
+      unavailableReasonId,
+      serverSavedAt: '2026-09-17T12:06:01.000Z',
+    };
+    const repository: VisitCompetitorPricesRepository = {
+      saveCompetitorPrices: vi.fn().mockResolvedValue(result),
+    };
+    await expect(saveVisitCompetitorPrices(
+      command.offlineId, deviceId, idempotencyKey, prices, repository,
+    )).resolves.toEqual(result);
+    await expect(saveVisitCompetitorPrices(command.offlineId, deviceId, idempotencyKey, prices, {
+      saveCompetitorPrices: vi.fn().mockResolvedValue({ ...result, quotationIds: [crypto.randomUUID()] }),
+    })).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+    await expect(saveVisitCompetitorPrices(command.offlineId, deviceId, idempotencyKey, {
+      ...prices, unavailableReasonId: 'invalid',
+    }, repository)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+});
+
+describe('getCurrentCompetitorPriceParameters', () => {
+  it('accepts a published parameter set valid at the requested instant', async () => {
+    const parameters = {
+      schemaVersion: 1 as const,
+      parameterSetId: canonical.parameterSetId,
+      version: 1,
+      validFrom: '2026-09-17T00:00:00.000Z',
+      values: { competitors: [], technologies: [], conditions: [], unavailableReasons: [] },
+    };
+    const repository: CompetitorPriceParametersRepository = {
+      getCurrentCompetitorPriceParameters: vi.fn().mockResolvedValue(parameters),
+    };
+    await expect(getCurrentCompetitorPriceParameters(
+      '2026-09-17T12:00:00.000Z', repository,
+    )).resolves.toEqual(parameters);
+    await expect(getCurrentCompetitorPriceParameters('invalid', repository))
+      .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(getCurrentCompetitorPriceParameters('2026-09-16T12:00:00.000Z', repository))
+      .rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
   });
 });

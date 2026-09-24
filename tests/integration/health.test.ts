@@ -655,17 +655,63 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
 
 it('runs the real visit API through the CLI with canonical idempotent confirmation', async () => {
   const seller = actorManifest.actors.seller_a;
+  const administrator = actorManifest.actors.administrator;
   if (!seller) throw new Error('Synthetic seller missing');
-  const result = await runWithClosedInput(process.execPath, [
-    '--import', 'tsx', 'apps/cli/src/visits-cli.ts', '--url', origin, '--json',
-  ], {
-    cwd: root,
-    env: {
-      PATH: process.env.PATH,
-      SystemRoot: process.env.SystemRoot,
-      CIRNE_ACCESS_TOKEN: seller.accessToken,
-    },
-  });
+  if (!administrator || !/^[0-9a-f-]{36}$/i.test(administrator.id)) {
+    throw new Error('Synthetic administrator missing');
+  }
+  const catalogSql = `begin;
+    grant cirne_visit_executor to postgres with set true granted by current_user;
+    set local role cirne_visit_executor;
+    do $catalog$
+    begin
+      if not exists (select 1 from api.parameter_sets where id = '90000000-0000-4000-8000-000000000002') then
+        insert into api.parameter_sets (id, version, status, valid_from)
+        values ('90000000-0000-4000-8000-000000000002', 2, 'draft', '2026-01-02T00:00:00Z');
+        insert into api.parameter_values (id, parameter_set_id, category, code, label, sort_order) values
+          ('c2000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000002', 'competitor', 'synthetic_competitor', 'Concorrente Sintético', 1),
+          ('c2000000-0000-4000-8000-000000000002', '90000000-0000-4000-8000-000000000002', 'competitor_price_technology', 'synthetic_technology', 'Tecnologia Sintética', 1),
+          ('c2000000-0000-4000-8000-000000000003', '90000000-0000-4000-8000-000000000002', 'competitor_price_condition', 'synthetic_condition', 'Condição Sintética', 1),
+          ('c2000000-0000-4000-8000-000000000004', '90000000-0000-4000-8000-000000000002', 'competitor_price_unavailable_reason', 'synthetic_unavailable', 'Motivo Sintético', 1);
+      end if;
+      update api.parameter_sets set status = 'retired' where status = 'published';
+      update api.parameter_sets set status = 'published', published_at = clock_timestamp(),
+        published_by = '${administrator.id}' where id = '90000000-0000-4000-8000-000000000002';
+    end
+    $catalog$;
+    reset role;
+    revoke cirne_visit_executor from postgres granted by current_user;
+    commit;`;
+  const catalogResetSql = `begin;
+    grant cirne_visit_executor to postgres with set true granted by current_user;
+    set local role cirne_visit_executor;
+    update api.parameter_sets set status = 'retired'
+      where id = '90000000-0000-4000-8000-000000000002' and status = 'published';
+    update api.parameter_sets set status = 'published'
+      where id = '90000000-0000-4000-8000-000000000001';
+    reset role;
+    revoke cirne_visit_executor from postgres granted by current_user;
+    commit;`;
+  await exec(dockerProgram, [...dockerPrefix, 'exec', 'supabase_db_cirne-rotas-dev',
+    'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', catalogSql],
+  { windowsHide: true, timeout: 25_000 });
+  let result: Awaited<ReturnType<typeof runWithClosedInput>>;
+  try {
+    result = await runWithClosedInput(process.execPath, [
+      '--import', 'tsx', 'apps/cli/src/visits-cli.ts', '--url', origin, '--json',
+    ], {
+      cwd: root,
+      env: {
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        CIRNE_ACCESS_TOKEN: seller.accessToken,
+      },
+    });
+  } finally {
+    await exec(dockerProgram, [...dockerPrefix, 'exec', 'supabase_db_cirne-rotas-dev',
+      'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', catalogResetSql],
+    { windowsHide: true, timeout: 25_000 });
+  }
   expect(JSON.parse(result.stdout)).toMatchObject({
     status: 'ok',
     visitStatus: 'in_progress',

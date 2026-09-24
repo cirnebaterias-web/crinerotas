@@ -1,7 +1,10 @@
 import {
   visitErrorCodeSchema,
+  competitorPricesResultSchema,
+  competitorPriceParameterSetSchema,
   visitStartResultSchema,
   stockSnapshotResultSchema,
+  type SaveCompetitorPricesRequest,
   type StartVisitRequest,
   type SaveStockRequest,
   type VisitErrorCode,
@@ -11,6 +14,8 @@ import {
   publicVisitMessage,
   VisitServiceFailure,
   type VisitStartRepository,
+  type CompetitorPriceParametersRepository,
+  type VisitCompetitorPricesRepository,
   type VisitStockRepository,
 } from './service';
 
@@ -32,7 +37,8 @@ function mapDatabaseFailure(message: string) {
   );
 }
 
-export class SupabaseVisitRepository implements VisitStartRepository, VisitStockRepository {
+export class SupabaseVisitRepository implements VisitStartRepository, VisitStockRepository,
+  VisitCompetitorPricesRepository, CompetitorPriceParametersRepository {
   constructor(private readonly client: SupabaseClient) {}
 
   async start(deviceId: string, idempotencyKey: string, command: StartVisitRequest) {
@@ -67,6 +73,44 @@ export class SupabaseVisitRepository implements VisitStartRepository, VisitStock
     const { data, error } = response;
     if (error) throw mapDatabaseFailure(error.message);
     const parsed = stockSnapshotResultSchema.safeParse(data);
+    if (!parsed.success) throw unavailable();
+    return parsed.data;
+  }
+
+  async saveCompetitorPrices(
+    deviceId: string,
+    idempotencyKey: string,
+    command: SaveCompetitorPricesRequest,
+  ) {
+    let response: { data: unknown; error: { message: string } | null };
+    try {
+      response = await this.client.schema('api').rpc('save_visit_competitor_prices', {
+        p_device_id: deviceId,
+        p_idempotency_key: idempotencyKey,
+        p_command: command,
+      }).abortSignal(AbortSignal.timeout(30_000));
+    } catch {
+      throw unavailable();
+    }
+    const { data, error } = response;
+    if (error) throw mapDatabaseFailure(error.message);
+    const parsed = competitorPricesResultSchema.safeParse(data);
+    if (!parsed.success) throw unavailable();
+    return parsed.data;
+  }
+
+  async getCurrentCompetitorPriceParameters(at: string) {
+    let response: { data: unknown; error: { message: string } | null };
+    try {
+      response = await this.client.schema('api').rpc('get_current_competitor_price_parameters', {
+        p_at: at,
+      }).abortSignal(AbortSignal.timeout(30_000));
+    } catch {
+      throw unavailable();
+    }
+    const { data, error } = response;
+    if (error) throw mapDatabaseFailure(error.message);
+    const parsed = competitorPriceParameterSetSchema.safeParse(data);
     if (!parsed.success) throw unavailable();
     return parsed.data;
   }

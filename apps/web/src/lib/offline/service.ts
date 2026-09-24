@@ -1,11 +1,14 @@
 'use client';
 
 import {
+  competitorPriceParameterSetSchema,
+  currentParameterSetPath,
   mePath,
   meResponseSchema,
   type AnyCanonicalLocalRouteBundle,
   type CanonicalRoute,
   type LocalRouteBundle,
+  type CompetitorPricesInput,
   type OfflinePartition,
 } from '@cirne/contracts';
 import {
@@ -21,6 +24,7 @@ import {
   type SaveDraftCommand,
   type SaveVisitStartCommand,
   type SaveVisitStockCommand,
+  type SaveVisitPricesCommand,
 } from './repository';
 import { SyncEngine, type RefreshSession, type SyncRunSummary } from './sync-engine';
 import { FetchSyncTransport } from './sync-transport';
@@ -260,6 +264,46 @@ export class OfflineFoundationService {
     return operation;
   }
 
+  async cacheCompetitorPriceParameters(userId: string, serviceDate: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de carregar parâmetros.');
+    const at = `${serviceDate}T12:00:00.000Z`;
+    const response = await fetch(`${currentParameterSetPath}?at=${encodeURIComponent(at)}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    if (!response.ok) throw new Error('Não foi possível carregar o catálogo de Preços.');
+    const catalog = competitorPriceParameterSetSchema.parse(await response.json());
+    return this.repository.savePriceParameterSet({
+      ...catalog,
+      ...partition,
+      cachedAt: this.now(),
+    });
+  }
+
+  async getVisitPriceParameters(userId: string, offlineId: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) return undefined;
+    const draft = await this.repository.getDraft(partition, offlineId);
+    if (!draft) return undefined;
+    if (draft.parameterSetId) {
+      return this.repository.getPriceParameterSet(partition, draft.parameterSetId);
+    }
+    const routes = await this.repository.listRouteBundles(partition);
+    const route = routes.find((candidate) => candidate.stops.some(
+      (stop) => stop.routeVersionStopId === draft.routeVersionStopId,
+    ));
+    if (!route) return undefined;
+    return this.repository.findPriceParameterSetAt(
+      partition,
+      `${route.serviceDate}T12:00:00.000Z`,
+    );
+  }
+
   private async persistCanonicalRoute(userId: string, route: CanonicalRoute): Promise<CanonicalRouteCacheResult> {
     await this.repository.open();
     const partition = { userId, deviceId: this.getDeviceId() };
@@ -385,6 +429,25 @@ export class OfflineFoundationService {
       ids: { eventId: this.createId(), idempotencyKey: this.createId() },
     };
     return this.repository.saveVisitStockAndEnqueue(command);
+  }
+
+  async saveVisitPrices(input: {
+    userId: string;
+    offlineId: string;
+    values: CompetitorPricesInput;
+  }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de editar.');
+    const command: SaveVisitPricesCommand = {
+      partition,
+      offlineId: input.offlineId,
+      values: input.values,
+      deviceSavedAt: this.now(),
+      ids: { eventId: this.createId(), idempotencyKey: this.createId() },
+    };
+    return this.repository.saveVisitPricesAndEnqueue(command);
   }
 
   async refresh(partition: OfflinePartition) {

@@ -4,6 +4,10 @@ import type { CanonicalRoute, MeResponse } from '@cirne/contracts';
 const sellerId = '33333333-3333-4333-8333-333333333331';
 const routeStopId = '33333333-3333-4333-8333-333333333334';
 const canonicalVisitId = '33333333-3333-4333-8333-333333333399';
+const competitorId = 'c1000000-0000-4000-8000-000000000001';
+const technologyId = 'c1000000-0000-4000-8000-000000000002';
+const conditionId = 'c1000000-0000-4000-8000-000000000003';
+const unavailableReasonId = 'c1000000-0000-4000-8000-000000000004';
 const identity: MeResponse = {
   id: sellerId,
   displayName: 'Vendedor sintético de visitas',
@@ -58,11 +62,25 @@ const revisedRoute: CanonicalRoute = {
   }],
 };
 
+const priceParameters = {
+  schemaVersion: 1 as const,
+  parameterSetId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  version: 1,
+  validFrom: '2026-09-17T00:00:00.000Z',
+  values: {
+    competitors: [{ id: competitorId, category: 'competitor' as const, code: 'synthetic_competitor', label: 'Concorrente Sintético', sortOrder: 1 }],
+    technologies: [{ id: technologyId, category: 'competitor_price_technology' as const, code: 'synthetic_technology', label: 'Tecnologia Sintética', sortOrder: 1 }],
+    conditions: [{ id: conditionId, category: 'competitor_price_condition' as const, code: 'synthetic_condition', label: 'Condição Sintética', sortOrder: 1 }],
+    unavailableReasons: [{ id: unavailableReasonId, category: 'competitor_price_unavailable_reason' as const, code: 'synthetic_unavailable', label: 'Motivo Sintético', sortOrder: 1 }],
+  },
+};
+
 async function mockVisitSeller(
   page: Page,
   failure: 'none' | 'lost-response' | 'stock-lost-response' | 'conflict' = 'none',
+  catalog: 'complete' | 'empty' = 'complete',
 ) {
-  await page.addInitScript(({ identityFixture, routeFixture, revisedFixture, visitId, failureMode }) => {
+  await page.addInitScript(({ identityFixture, routeFixture, revisedFixture, visitId, failureMode, parameterFixture, catalogMode }) => {
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (input, init) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
@@ -74,6 +92,12 @@ async function mockVisitSeller(
       if (url.pathname === '/api/v1/me/routes/today') {
         return json({ schemaVersion: 3, availability: 'available',
           route: sessionStorage.getItem('visit-route-revised') === 'true' ? revisedFixture : routeFixture });
+      }
+      if (url.pathname === '/api/v1/parameter-sets/current') {
+        return json(catalogMode === 'complete' ? parameterFixture : {
+          ...parameterFixture,
+          values: { competitors: [], technologies: [], conditions: [], unavailableReasons: [] },
+        });
       }
       if (url.pathname === '/api/v1/sync/batches') {
         const batch = JSON.parse(String(init?.body)) as {
@@ -111,12 +135,21 @@ async function mockVisitSeller(
             status: 'confirmed',
             canonicalId: visitId,
             confirmedAt: '2026-09-17T12:01:01.000Z',
+            parameterSetId: parameterFixture.parameterSetId,
           })),
         });
       }
       return originalFetch(input, init);
     };
-  }, { identityFixture: identity, routeFixture: route, revisedFixture: revisedRoute, visitId: canonicalVisitId, failureMode: failure });
+  }, {
+    identityFixture: identity,
+    routeFixture: route,
+    revisedFixture: revisedRoute,
+    visitId: canonicalVisitId,
+    failureMode: failure,
+    parameterFixture: priceParameters,
+    catalogMode: catalog,
+  });
 }
 
 async function offlineCounts(page: Page) {
@@ -259,8 +292,8 @@ test('keeps stock validation and step transitions usable by keyboard on mobile',
   await page.keyboard.type('Conferido por teclado');
   await page.keyboard.press('Tab');
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('heading', { name: 'Salvo no aparelho', exact: true })).toBeFocused();
-  await page.keyboard.press('Tab');
+  await expect(page.getByRole('heading', { name: 'Preços da concorrência' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
   await expect(page.getByRole('button', { name: 'Editar estoque' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Estoque observado' })).toBeFocused();
@@ -331,6 +364,163 @@ test('keeps stock values on screen when the atomic local commit fails', async ({
   expect(state.events).toHaveLength(0);
   expect(state.drafts).toMatchObject([{ currentStep: 'start' }]);
   expect(state.drafts[0]).not.toHaveProperty('stock');
+});
+
+test('saves repeatable competitor prices offline, restores them and confirms them on reconnection', async ({ page, context }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await page.getByRole('button', { name: 'Iniciar visita' }).click();
+  await expect(page.getByText('Início confirmado pelo servidor.')).toBeVisible();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Preencher estoque' }).click();
+  await page.getByLabel('Quantidade observada — Heliar').fill('0');
+  await page.getByLabel('Quantidade observada — Moura').fill('2');
+  await page.getByRole('button', { name: 'Salvar estoque e continuar' }).click();
+  await expect(page.getByRole('heading', { name: 'Preços da concorrência' })).toBeFocused();
+
+  await page.getByLabel('Marca ou concorrente').selectOption(competitorId);
+  await page.getByLabel('Modelo ou amperagem').fill('60 Ah');
+  await page.getByLabel('Tecnologia').selectOption(technologyId);
+  await page.getByLabel('Preço em BRL').fill('399,90');
+  await page.getByLabel('Condição').selectOption(conditionId);
+  await page.getByLabel('Observação da cotação (opcional)').fill('Primeira cotação sintética');
+  await expect(page.getByLabel('Observação da cotação (opcional)'))
+    .toHaveAttribute('aria-describedby', /-hint/);
+  await page.getByRole('button', { name: 'Adicionar outra cotação' }).click();
+  await expect(page.getByLabel('Marca ou concorrente').nth(1)).toBeFocused();
+  await page.getByLabel('Marca ou concorrente').nth(1).selectOption(competitorId);
+  await page.getByLabel('Modelo ou amperagem').nth(1).fill('70 Ah');
+  await page.getByLabel('Tecnologia').nth(1).selectOption(technologyId);
+  await page.getByLabel('Preço em BRL').nth(1).fill('459.50');
+  await page.getByLabel('Condição').nth(1).selectOption(conditionId);
+  await page.getByRole('button', { name: 'Adicionar outra cotação' }).click();
+  await page.getByRole('button', { name: 'Remover cotação 3' }).click();
+  await expect(page.getByRole('button', { name: 'Adicionar outra cotação' })).toBeFocused();
+  await expect(page.getByRole('status').filter({ hasText: 'Cotação removida. 2 restante(s).' }))
+    .toHaveText('Cotação removida. 2 restante(s).');
+  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+
+  await expect(page).toHaveURL(/\?step=actions$/);
+  await expect(page.getByRole('heading', { name: 'Salvos no aparelho' })).toBeFocused();
+  await expect(page.getByText('2 de 4 etapas preenchidas')).toBeVisible();
+  const saved = await offlineCounts(page);
+  expect(saved.events).toEqual(expect.arrayContaining([
+    expect.objectContaining({ operation: 'visit.stock.saved.v1', sequence: 2 }),
+    expect.objectContaining({ operation: 'visit.prices.saved.v1', sequence: 3 }),
+  ]));
+  expect(saved.drafts).toMatchObject([{
+    currentStep: 'actions',
+    prices: { availability: 'available', quotations: [{ priceBrl: '399.90' }, { priceBrl: '459.50' }] },
+  }]);
+
+  const actionsUrl = page.url();
+  await page.goto(actionsUrl, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('2 cotação(ões) registrada(s).')).toBeVisible();
+  await page.getByRole('button', { name: 'Editar preços' }).click();
+  await expect(page.getByLabel('Modelo ou amperagem').nth(0)).toHaveValue('60 Ah');
+  await expect(page.getByLabel('Modelo ou amperagem').nth(1)).toHaveValue('70 Ah');
+  await context.setOffline(false);
+  await expect.poll(async () => (await offlineCounts(page)).events.length).toBe(0);
+  expect((await offlineCounts(page)).drafts).toMatchObject([{
+    prices: { availability: 'available', persistenceState: 'synced' },
+    lastConfirmedSequence: 3,
+  }]);
+});
+
+test('rejects a non-positive price and accepts explicit unavailability with a published reason', async ({ page, context }) => {
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await page.getByRole('button', { name: 'Iniciar visita' }).click();
+  await expect(page.getByText('Início confirmado pelo servidor.')).toBeVisible();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Preencher estoque' }).click();
+  await page.getByLabel('Quantidade observada — Heliar').fill('0');
+  await page.getByLabel('Quantidade observada — Moura').fill('0');
+  await page.getByRole('button', { name: 'Salvar estoque e continuar' }).click();
+
+  await page.getByLabel('Marca ou concorrente').selectOption(competitorId);
+  await page.getByLabel('Modelo ou amperagem').fill('50 Ah');
+  await page.getByLabel('Tecnologia').selectOption(technologyId);
+  await page.getByLabel('Preço em BRL').fill('0');
+  await page.getByLabel('Condição').selectOption(conditionId);
+  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await expect(page.getByText('Informe um preço maior que zero, sem arredondamento. Exemplo: 399,90.')).toBeVisible();
+  await expect(page.getByLabel('Preço em BRL')).toBeFocused();
+  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await expect(page.getByLabel('Preço em BRL')).toBeFocused();
+  await expect(page).toHaveURL(/\?step=prices$/);
+
+  await page.getByLabel('Preço não disponível').check();
+  await page.getByLabel('Motivo da indisponibilidade').selectOption(unavailableReasonId);
+  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await expect(page).toHaveURL(/\?step=actions$/);
+  expect((await offlineCounts(page)).drafts).toMatchObject([{
+    prices: { availability: 'unavailable', unavailableReasonId },
+  }]);
+});
+
+test('does not invent a prices response when the approved catalog is unavailable', async ({ page, context }) => {
+  await mockVisitSeller(page, 'none', 'empty');
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await page.getByRole('button', { name: 'Iniciar visita' }).click();
+  await expect(page.getByText('Início confirmado pelo servidor.')).toBeVisible();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Preencher estoque' }).click();
+  await page.getByLabel('Quantidade observada — Heliar').fill('0');
+  await page.getByLabel('Quantidade observada — Moura').fill('0');
+  await page.getByRole('button', { name: 'Salvar estoque e continuar' }).click();
+  await expect(page.getByText('Configuração comercial indisponível.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Salvar preços e continuar' })).toBeDisabled();
+  const state = await offlineCounts(page);
+  expect(state.events).not.toEqual(expect.arrayContaining([
+    expect.objectContaining({ operation: 'visit.prices.saved.v1' }),
+  ]));
+  expect(state.drafts[0]).not.toHaveProperty('prices');
+});
+
+test('keeps competitor price values on screen when the atomic local commit fails', async ({ page, context }) => {
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await page.getByRole('button', { name: 'Iniciar visita' }).click();
+  await expect(page.getByText('Início confirmado pelo servidor.')).toBeVisible();
+  await page.getByRole('button', { name: 'Preencher estoque' }).click();
+  await page.getByLabel('Quantidade observada — Heliar').fill('0');
+  await page.getByLabel('Quantidade observada — Moura').fill('1');
+  await page.getByRole('button', { name: 'Salvar estoque e continuar' }).click();
+  await expect(page).toHaveURL(/\?step=prices$/);
+  await expect.poll(() => page.evaluate(
+    () => Number(sessionStorage.getItem('visit-stock-sync-batches') ?? '0'),
+  )).toBeGreaterThan(0);
+  await expect.poll(async () => (await offlineCounts(page)).events.length).toBe(0);
+  await context.setOffline(true);
+  await page.getByLabel('Marca ou concorrente').selectOption(competitorId);
+  await page.getByLabel('Modelo ou amperagem').fill('80 Ah');
+  await page.getByLabel('Tecnologia').selectOption(technologyId);
+  await page.getByLabel('Preço em BRL').fill('520.00');
+  await page.getByLabel('Condição').selectOption(conditionId);
+  await page.evaluate(() => {
+    const originalAdd = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function failPricesOutboxOnce(value: unknown, key?: IDBValidKey) {
+      if (this.name === 'outboxEvents') {
+        IDBObjectStore.prototype.add = originalAdd;
+        throw new DOMException('Storage full', 'QuotaExceededError');
+      }
+      return key === undefined ? originalAdd.call(this, value) : originalAdd.call(this, value, key);
+    };
+  });
+  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await expect(page).toHaveURL(/\?step=prices$/);
+  await expect(page.locator('.seller-form-error[role="alert"]')).toContainText('Não foi possível salvar no aparelho');
+  await expect(page.getByLabel('Modelo ou amperagem')).toHaveValue('80 Ah');
+  await expect(page.getByLabel('Preço em BRL')).toHaveValue('520.00');
+  const state = await offlineCounts(page);
+  expect(state.events).toHaveLength(0);
+  expect(state.drafts[0]).not.toHaveProperty('prices');
 });
 
 test('does not navigate or claim success when the atomic local commit fails', async ({ page }) => {

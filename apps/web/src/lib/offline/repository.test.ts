@@ -8,7 +8,13 @@ import {
   toSyncCommand,
 } from '@cirne/domain';
 import { OfflineDatabase, offlineV2Stores, offlineV7Stores } from './database';
-import { OfflineRepository, type SaveDraftCommand, type SaveVisitStartCommand, type SaveVisitStockCommand } from './repository';
+import {
+  OfflineRepository,
+  type SaveDraftCommand,
+  type SaveVisitPricesCommand,
+  type SaveVisitStartCommand,
+  type SaveVisitStockCommand,
+} from './repository';
 import { SyncEventPersistenceError } from './sync-persistence-error';
 import { SyncEngine } from './sync-engine';
 import { processSyncBatch, SyncEventFailure } from '../../server/sync/service';
@@ -22,6 +28,7 @@ const partitionB = {
   deviceId: partitionA.deviceId,
 };
 const stopId = '44444444-4444-4444-8444-444444444441';
+const parameterSetId = '90000000-0000-4000-8000-000000000001';
 const names: string[] = [];
 
 function makeRepository() {
@@ -135,7 +142,7 @@ describe('OfflineRepository', () => {
     expect(await repository.listDrafts(partitionB)).toEqual([]);
   });
 
-  it.each([2, 7])('preserves route, session, draft and outbox during the schema v%s to v8 upgrade', async (version) => {
+  it.each([2, 7])('preserves route, session, draft and outbox during the schema v%s to v9 upgrade', async (version) => {
     const name = `offline-migration-${crypto.randomUUID()}`;
     names.push(name);
     const legacy = new Dexie(name, { indexedDB, IDBKeyRange });
@@ -184,6 +191,28 @@ describe('OfflineRepository', () => {
     expect(started.event).toMatchObject({ aggregateType: 'visit', aggregateId: previousEvent.aggregateId, sequence: 1 });
     expect(await repository.listOutbox(partitionA)).toHaveLength(2);
     repository.close();
+  });
+
+  it('caches parameter values by partition and resolves the set valid for the route date', async () => {
+    const { repository } = makeRepository();
+    await repository.open();
+    const catalog = {
+      schemaVersion: 1 as const,
+      ...partitionA,
+      parameterSetId: '90000000-0000-4000-8000-000000000001',
+      version: 1,
+      validFrom: '2026-09-01T00:00:00.000Z',
+      cachedAt: '2026-09-17T10:00:00.000Z',
+      values: {
+        competitors: [{ id: '31000000-0000-4000-8000-000000000001', category: 'competitor' as const, code: 'synthetic_competitor', label: 'Concorrente Sintético', sortOrder: 1 }],
+        technologies: [], conditions: [], unavailableReasons: [],
+      },
+    };
+    await repository.savePriceParameterSet(catalog);
+    await expect(repository.getPriceParameterSet(partitionA, catalog.parameterSetId)).resolves.toEqual(catalog);
+    await expect(repository.findPriceParameterSetAt(partitionA, '2026-09-17T12:00:00.000Z')).resolves.toEqual(catalog);
+    await expect(repository.findPriceParameterSetAt(partitionA, '2026-08-31T23:59:59.000Z')).resolves.toBeUndefined();
+    await expect(repository.getPriceParameterSet(partitionB, catalog.parameterSetId)).resolves.toBeUndefined();
   });
 
   it('atomically replaces a route with its canonical snapshot without clearing durable work', async () => {
@@ -404,11 +433,12 @@ describe('OfflineRepository', () => {
     const confirmation = {
       eventId: saved.event!.eventId, status: 'confirmed' as const,
       canonicalId: '88888888-8888-4888-8888-888888888888', confirmedAt: '2026-09-17T12:01:01.000Z',
+      parameterSetId,
     };
     await repository.applySyncConfirmation(partitionA, confirmation);
     const expectedStart = {
       canonicalVisitId: confirmation.canonicalId, serverStartedAt: confirmation.confirmedAt,
-      deviceStartedAt: saved.draft.deviceStartedAt,
+      deviceStartedAt: saved.draft.deviceStartedAt, parameterSetId,
     };
     expect(await repository.getDraft(partitionA, saved.draft.offlineId)).toMatchObject({
       ...expectedStart, persistenceState: 'saved_on_device',
@@ -433,7 +463,26 @@ describe('OfflineRepository', () => {
     await expect(repository.applySyncConfirmation(partitionA, {
       eventId: saved.event!.eventId, status: 'confirmed',
       canonicalId: '88888888-8888-4888-8888-888888888888', confirmedAt: '2026-09-17T12:01:01.000Z',
+      parameterSetId,
     })).rejects.toMatchObject({ name: 'QuotaExceededError' });
+    expect(await repository.getDraft(partitionA, saved.draft.offlineId)).toEqual(saved.draft);
+    expect(await repository.listOutbox(partitionA)).toEqual([saved.event]);
+  });
+
+  it('keeps a pending visit start when its confirmation omits the bound parameter set', async () => {
+    const { repository } = makeRepository();
+    await seedCanonical(repository);
+    const saved = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+
+    await expect(repository.applySyncConfirmation(partitionA, {
+      eventId: saved.event!.eventId,
+      status: 'confirmed',
+      canonicalId: '88888888-8888-4888-8888-888888888888',
+      confirmedAt: '2026-09-17T12:01:01.000Z',
+    })).rejects.toMatchObject({
+      name: SyncEventPersistenceError.name,
+      message: 'Confirmação de início sem conjunto de parâmetros.',
+    });
     expect(await repository.getDraft(partitionA, saved.draft.offlineId)).toEqual(saved.draft);
     expect(await repository.listOutbox(partitionA)).toEqual([saved.event]);
   });
@@ -464,9 +513,11 @@ describe('OfflineRepository', () => {
       status: 'confirmed',
       canonicalId: '88888888-8888-4888-8888-888888888888',
       confirmedAt: '2026-09-17T12:01:01.000Z',
+      parameterSetId,
     });
     expect(await repository.getDraft(partitionA, saved.draft.offlineId)).toMatchObject({
       canonicalVisitId: '88888888-8888-4888-8888-888888888888',
+      parameterSetId,
       serverStartedAt: '2026-09-17T12:01:01.000Z',
       persistenceState: 'synced',
     });
@@ -536,7 +587,8 @@ describe('OfflineRepository', () => {
         confirmedSequences.set(key, event.sequence);
         return { eventId: event.eventId, status: 'confirmed',
           canonicalId: event.aggregateType === 'visit' ? canonicalId : event.aggregateId,
-          confirmedAt: '2026-09-17T12:05:00.000Z' };
+          confirmedAt: '2026-09-17T12:05:00.000Z',
+          ...(event.operation === 'visit.started.v1' ? { parameterSetId } : {}) };
       } },
     ) });
     if (confirmedFirst) expect(await engine.synchronize(partitionA)).toMatchObject({ confirmed: 5 });
@@ -620,6 +672,7 @@ describe('OfflineRepository', () => {
     await repository.applySyncConfirmation(partitionA, {
       eventId: started.event!.eventId, status: 'confirmed', canonicalId,
       confirmedAt: '2026-09-17T12:01:01.000Z',
+      parameterSetId,
     });
     const stock = { partition: partitionA, offlineId: started.draft.offlineId,
       heliarQuantity: 0, mouraQuantity: 7, deviceSavedAt: '2026-09-17T12:02:00.000Z',
@@ -664,6 +717,7 @@ describe('OfflineRepository', () => {
       status: 'confirmed',
       canonicalId: '88888888-8888-4888-8888-888888888888',
       confirmedAt: '2026-09-17T12:01:01.000Z',
+      parameterSetId,
     });
     const stockCommand: SaveVisitStockCommand = {
       partition: partitionA,
@@ -714,5 +768,46 @@ describe('OfflineRepository', () => {
     expect(edited.event.eventId).not.toBe(saved.event.eventId);
     expect(edited.event.idempotencyKey).not.toBe(saved.event.idempotencyKey);
     expect(await repository.listOutbox(partitionA)).toEqual([edited.event]);
+  });
+
+  it('commits prices atomically after stock and restores an explicit unavailable response', async () => {
+    const { db, repository } = makeRepository();
+    await seedCanonical(repository);
+    const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+    const stock = await repository.saveVisitStockAndEnqueue({
+      partition: partitionA, offlineId: started.draft.offlineId,
+      heliarQuantity: 0, mouraQuantity: 1, deviceSavedAt: '2026-09-21T11:55:00.000Z',
+      ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() },
+    });
+    const pricesCommand: SaveVisitPricesCommand = {
+      partition: partitionA,
+      offlineId: stock.draft.offlineId,
+      values: { availability: 'unavailable', unavailableReasonId: '88888888-8888-4888-8888-888888888888' },
+      deviceSavedAt: '2026-09-21T12:00:00.000Z',
+      ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() },
+    };
+    const saved = await repository.saveVisitPricesAndEnqueue(pricesCommand);
+    expect(saved.event).toMatchObject({ operation: 'visit.prices.saved.v1', sequence: 3 });
+    expect(saved.draft).toMatchObject({
+      currentStep: 'actions',
+      prices: { availability: 'unavailable', persistenceState: 'saved_on_device' },
+    });
+
+    vi.spyOn(db.outboxEvents, 'add').mockRejectedValueOnce(new DOMException('Storage full', 'QuotaExceededError'));
+    await expect(repository.saveVisitPricesAndEnqueue({
+      ...pricesCommand,
+      ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() },
+    })).rejects.toMatchObject({ name: 'QuotaExceededError' });
+    expect(await repository.getDraft(partitionA, stock.draft.offlineId)).toEqual(saved.draft);
+
+    await repository.applySyncConfirmation(partitionA, {
+      eventId: saved.event.eventId,
+      status: 'confirmed',
+      canonicalId: '99999999-9999-4999-8999-999999999999',
+      confirmedAt: '2026-09-21T12:00:01.000Z',
+    });
+    expect(await repository.getDraft(partitionA, stock.draft.offlineId)).toMatchObject({
+      prices: { availability: 'unavailable', persistenceState: 'synced', serverSavedAt: '2026-09-21T12:00:01.000Z' },
+    });
   });
 });

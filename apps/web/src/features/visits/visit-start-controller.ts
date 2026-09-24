@@ -1,8 +1,13 @@
-import type { LocalVisitDraft } from '@cirne/contracts';
+import type {
+  CompetitorPricesInput,
+  LocalCompetitorPriceParameterSet,
+  LocalVisitDraft,
+} from '@cirne/contracts';
 import type { OfflineFoundationService, OfflineSnapshot } from '@/lib/offline/service';
 
 type VisitService = Pick<OfflineFoundationService,
-  'initialize' | 'refresh' | 'synchronize' | 'saveVisitStock' | 'close'>;
+  'initialize' | 'refresh' | 'synchronize' | 'saveVisitStock' | 'saveVisitPrices' |
+  'getVisitPriceParameters' | 'close'>;
 
 export interface VisitStartView {
   state: 'loading' | 'ready' | 'blocked' | 'missing';
@@ -10,10 +15,12 @@ export interface VisitStartView {
   message: string;
   busy: boolean;
   requiresLogin: boolean;
+  priceParameters?: LocalCompetitorPriceParameterSet | null;
 }
 
 export const initialVisitView: VisitStartView = {
   state: 'loading', draft: null, message: '', busy: false, requiresLogin: false,
+  priceParameters: null,
 };
 
 /** Coordinates retries without creating a new intention or bypassing the outbox lease/backoff. */
@@ -21,6 +28,8 @@ export class VisitStartController {
   private active = true;
   private running: Promise<void> | null = null;
   private stockSaving: Promise<LocalVisitDraft> | null = null;
+  private pricesSaving: Promise<LocalVisitDraft> | null = null;
+  private priceParameters: LocalCompetitorPriceParameterSet | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private userId: string | undefined;
 
@@ -41,7 +50,7 @@ export class VisitStartController {
       this.emit({ ...initialVisitView, state: 'blocked' });
     }).finally(() => {
       this.running = null;
-      if (!this.active && !this.stockSaving) this.service.close();
+      if (!this.active && !this.stockSaving && !this.pricesSaving) this.service.close();
     });
     return this.running;
   };
@@ -57,9 +66,21 @@ export class VisitStartController {
     if (!this.active || !userId) throw new Error('A visita ainda não está pronta para edição.');
     const operation = this.persistStock(userId, values).finally(() => {
       if (this.stockSaving === operation) this.stockSaving = null;
-      if (!this.active && !this.running) this.service.close();
+      if (!this.active && !this.running && !this.pricesSaving) this.service.close();
     });
     this.stockSaving = operation;
+    return operation;
+  }
+
+  savePrices(values: CompetitorPricesInput) {
+    if (this.pricesSaving) return this.pricesSaving;
+    const userId = this.userId;
+    if (!this.active || !userId) throw new Error('A visita ainda não está pronta para edição.');
+    const operation = this.persistPrices(userId, values).finally(() => {
+      if (this.pricesSaving === operation) this.pricesSaving = null;
+      if (!this.active && !this.running && !this.stockSaving) this.service.close();
+    });
+    this.pricesSaving = operation;
     return operation;
   }
 
@@ -78,18 +99,37 @@ export class VisitStartController {
       message: 'Estoque salvo no aparelho.',
       busy: false,
       requiresLogin: false,
+      priceParameters: this.priceParameters,
     });
-    if (this.active && this.online()) this.synchronizeAfterStock();
+    if (this.active && this.online()) this.synchronizeAfterCommit();
     return saved.draft;
   }
 
-  private synchronizeAfterStock() {
+  private async persistPrices(userId: string, values: CompetitorPricesInput) {
+    const saved = await this.service.saveVisitPrices({
+      userId,
+      offlineId: this.offlineId,
+      values,
+    });
+    this.emit({
+      state: 'ready',
+      draft: saved.draft,
+      message: 'Preços salvos no aparelho.',
+      busy: false,
+      requiresLogin: false,
+      priceParameters: this.priceParameters,
+    });
+    if (this.active && this.online()) this.synchronizeAfterCommit();
+    return saved.draft;
+  }
+
+  private synchronizeAfterCommit() {
     const inFlight = this.running;
     if (!inFlight) {
       void this.resume();
       return;
     }
-    // A run that started before the stock commit cannot have reserved the new event.
+    // A run that started before the local commit cannot have reserved the new event.
     // Queue a fresh snapshot after it settles so the online save is not left waiting
     // for an unrelated foreground/reconnect signal.
     void inFlight.then(
@@ -103,7 +143,7 @@ export class VisitStartController {
     this.active = false;
     clearTimeout(this.retryTimer);
     // Let an already-sent confirmation finish its durable local commit before closing Dexie.
-    if (!this.running && !this.stockSaving) this.service.close();
+    if (!this.running && !this.stockSaving && !this.pricesSaving) this.service.close();
   }
 
   private emit(view: VisitStartView) {
@@ -131,12 +171,20 @@ export class VisitStartController {
       this.emit({ ...initialVisitView, state: 'missing' });
       return;
     }
+    this.priceParameters = await this.service.getVisitPriceParameters(
+      snapshot.partition.userId,
+      this.offlineId,
+    ) ?? null;
+    if (!this.active) return;
     this.show(snapshot);
     if (!this.online() || draft.persistenceState === 'synced') return;
     const event = snapshot.outbox.find((candidate) => candidate.aggregateId === this.offlineId);
     if (!event || event.status === 'action_required') return;
     clearTimeout(this.retryTimer);
-    this.emit({ state: 'ready', draft, message: 'Sincronizando em segundo plano…', busy: true, requiresLogin: false });
+    this.emit({
+      state: 'ready', draft, message: 'Sincronizando em segundo plano…', busy: true,
+      requiresLogin: false, priceParameters: this.priceParameters,
+    });
     const summary = await this.service.synchronize(snapshot.partition);
     if (!this.active) return;
     const refreshed = await this.service.refresh(snapshot.partition);
@@ -167,6 +215,9 @@ export class VisitStartController {
       const delay = due ? Math.max(250, Date.parse(due) - this.now()) : 1_000;
       this.retryTimer = setTimeout(() => { void this.resume(); }, delay);
     }
-    this.emit({ state: 'ready', draft, message, busy: false, requiresLogin });
+    this.emit({
+      state: 'ready', draft, message, busy: false, requiresLogin,
+      priceParameters: this.priceParameters,
+    });
   }
 }
