@@ -8,8 +8,9 @@ import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { initialVisitView, VisitStartController } from './visit-start-controller';
 import { VisitCompetitorPricesStep } from './prices/visit-competitor-prices-step';
 import { VisitStockStep } from './stock/visit-stock-step';
+import { VisitCompetitorStockStep } from './stock/visit-competitor-stock-step';
 
-type VisitScreenStep = 'start' | 'stock' | 'prices' | 'actions';
+type VisitScreenStep = 'start' | 'stock' | 'competitor-stock' | 'prices' | 'actions';
 
 export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const controllerRef = useRef<VisitStartController | null>(null);
@@ -25,7 +26,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   useEffect(() => {
     const readStep = () => {
       const requested = new URLSearchParams(window.location.search).get('step');
-      setStep(requested === 'stock' || requested === 'prices' || requested === 'actions'
+      setStep(requested === 'stock' || requested === 'competitor-stock' || requested === 'prices' || requested === 'actions'
         ? requested
         : 'start');
     };
@@ -80,6 +81,13 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   }, [draft, state, step]);
 
   const saveStock = async (values: StockInput) => {
+    const controller = controllerRef.current;
+    if (!controller) throw new Error('A visita ainda não está pronta para edição.');
+    await controller.saveStock(values);
+    navigateStep('competitor-stock');
+  };
+
+  const saveCompetitorStock = async (values: StockInput) => {
     const controller = controllerRef.current;
     if (!controller) throw new Error('A visita ainda não está pronta para edição.');
     await controller.saveStock(values);
@@ -140,6 +148,11 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           key={draft.stock?.eventId ?? 'new-stock'}
           draft={draft}
           onSave={saveStock}
+        />}
+        {step === 'competitor-stock' && draft && <VisitCompetitorStockStep
+          key={draft.stock?.eventId ?? 'competitor-stock'}
+          draft={draft}
+          onSave={saveCompetitorStock}
         />}
         {step === 'prices' && draft.stock && <section className="seller-next-step" aria-labelledby="stock-saved-title">
           <p className="seller-kicker">ESTOQUE</p>

@@ -223,6 +223,8 @@ export function normalizeStockInput(input: StockInput): StockInput {
   return {
     heliarQuantity: parsed.data.heliarQuantity,
     mouraQuantity: parsed.data.mouraQuantity,
+    ...(parsed.data.ownLines ? { ownLines: parsed.data.ownLines } : {}),
+    ...(parsed.data.competitorLines ? { competitorLines: parsed.data.competitorLines } : {}),
     ...(observation ? { observation } : {}),
   };
 }

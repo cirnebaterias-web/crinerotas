@@ -1,0 +1,19 @@
+'use client';
+import { useState, type FormEvent } from 'react';
+import { stockInputSchema, type LocalVisitDraft, type StockInput, type CompetitorStockLine } from '@cirne/contracts';
+
+const BRANDS = ['Moura', 'Zetta', 'Bosh', 'Tudor', 'Pioneiro', 'Outra'] as const;
+type Row = { brand: string; amperage: string; technology: string; quantity: string; otherBrand: string };
+const emptyRow = (): Row => ({ brand: '', amperage: '', technology: '', quantity: '', otherBrand: '' });
+
+export function VisitCompetitorStockStep({ draft, onSave }: { draft: LocalVisitDraft; onSave: (values: StockInput) => Promise<void> }) {
+  const [rows, setRows] = useState<Row[]>(() => (draft.stock?.competitorLines ?? []).map((line) => ({ brand: line.brand, amperage: String(line.amperage), technology: line.technology, quantity: String(line.quantity), otherBrand: line.otherBrand ?? '' })) || [emptyRow()]);
+  const [error, setError] = useState(''); const [saving, setSaving] = useState(false);
+  const update = (index: number, patch: Partial<Row>) => setRows((current) => current.map((row, i) => i === index ? { ...row, ...patch } : row));
+  const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try {
+    const competitorLines: CompetitorStockLine[] = rows.flatMap((row) => { if (!row.brand && !row.amperage && !row.quantity) return []; const line = { brand: row.brand as CompetitorStockLine['brand'], amperage: Number(row.amperage), technology: row.technology, quantity: Number(row.quantity), ...(row.brand === 'Outra' ? { otherBrand: row.otherBrand } : {}) }; return [line]; });
+    const parsed = stockInputSchema.parse({ heliarQuantity: draft.stock?.heliarQuantity ?? 0, mouraQuantity: competitorLines.filter((line) => line.brand === 'Moura').reduce((sum, line) => sum + line.quantity, 0), ownLines: draft.stock?.ownLines ?? [], competitorLines, ...(draft.stock?.observation ? { observation: draft.stock.observation } : {}) });
+    setSaving(true); setError(''); await onSave(parsed);
+  } catch (cause) { setError(cause instanceof Error ? cause.message : 'Revise as linhas preenchidas.'); } finally { setSaving(false); } };
+  return <section className="seller-stock-card" aria-labelledby="competitor-stock-title"><p className="seller-kicker">ESTOQUE DA CONCORRÊNCIA</p><h2 id="competitor-stock-title">Concorrentes</h2><p className="seller-muted">Registre amperagem, tecnologia e quantidade. Não é necessário informar o modelo.</p><form className="seller-stock-form" onSubmit={submit} noValidate>{rows.map((row, index) => <div className="seller-stock-row" key={index}><label>Marca<select value={row.brand} onChange={(event) => update(index, { brand: event.target.value })}><option value="">Selecione</option>{BRANDS.map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select></label>{row.brand === 'Outra' && <label>Nome da marca<input value={row.otherBrand} onChange={(event) => update(index, { otherBrand: event.target.value })} /></label>}<label>Amperagem (Ah)<input type="number" min="1" value={row.amperage} onChange={(event) => update(index, { amperage: event.target.value })} /></label><label>Tecnologia<input value={row.technology} placeholder="SLI, AGM, EFB…" onChange={(event) => update(index, { technology: event.target.value })} /></label><label>Quantidade<input type="number" min="0" value={row.quantity} onChange={(event) => update(index, { quantity: event.target.value })} /></label></div>)}<button className="seller-button seller-secondary" type="button" onClick={() => setRows((current) => [...current, emptyRow()])}>+ Adicionar outra linha</button>{error && <p className="seller-form-error" role="alert">{error}</p>}<button className="seller-button seller-primary seller-stock-submit" disabled={saving} type="submit">{saving ? 'Salvando no aparelho…' : 'Salvar estoque da concorrência'}</button></form></section>;
+}

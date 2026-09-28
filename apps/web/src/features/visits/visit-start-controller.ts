@@ -2,6 +2,7 @@ import type {
   CompetitorPricesInput,
   LocalCompetitorPriceParameterSet,
   LocalVisitDraft,
+  StockInput,
 } from '@cirne/contracts';
 import type { OfflineFoundationService, OfflineSnapshot } from '@/lib/offline/service';
 
@@ -60,7 +61,7 @@ export class VisitStartController {
     this.dispose();
   };
 
-  saveStock(values: { heliarQuantity: number; mouraQuantity: number; observation?: string }) {
+  saveStock(values: StockInput) {
     if (this.stockSaving) return this.stockSaving;
     const userId = this.userId;
     if (!this.active || !userId) throw new Error('A visita ainda não está pronta para edição.');
@@ -86,7 +87,7 @@ export class VisitStartController {
 
   private async persistStock(
     userId: string,
-    values: { heliarQuantity: number; mouraQuantity: number; observation?: string },
+    values: StockInput,
   ) {
     const saved = await this.service.saveVisitStock({
       userId,

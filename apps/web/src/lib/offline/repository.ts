@@ -15,6 +15,8 @@ import {
   type SyncErrorCode,
   type SyncResult,
   type CompetitorPricesInput,
+  type OwnStockLine,
+  type CompetitorStockLine,
 } from '@cirne/contracts';
 import {
   createDraftMutation,
@@ -64,6 +66,8 @@ export interface SaveVisitStockCommand {
   heliarQuantity: number;
   mouraQuantity: number;
   observation?: string;
+  ownLines?: OwnStockLine[];
+  competitorLines?: CompetitorStockLine[];
   deviceSavedAt: string;
   ids: VisitStockMutationIds;
 }
@@ -530,6 +534,8 @@ export class OfflineRepository {
         values: {
           heliarQuantity: command.heliarQuantity,
           mouraQuantity: command.mouraQuantity,
+          ...(command.ownLines ? { ownLines: command.ownLines } : {}),
+          ...(command.competitorLines ? { competitorLines: command.competitorLines } : {}),
           ...(command.observation === undefined ? {} : { observation: command.observation }),
         },
         deviceSavedAt: command.deviceSavedAt,

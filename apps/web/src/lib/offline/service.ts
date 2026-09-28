@@ -9,6 +9,8 @@ import {
   type CanonicalRoute,
   type LocalRouteBundle,
   type CompetitorPricesInput,
+  type OwnStockLine,
+  type CompetitorStockLine,
   type OfflinePartition,
 } from '@cirne/contracts';
 import {
@@ -431,6 +433,8 @@ export class OfflineFoundationService {
     heliarQuantity: number;
     mouraQuantity: number;
     observation?: string;
+    ownLines?: OwnStockLine[];
+    competitorLines?: CompetitorStockLine[];
   }) {
     await this.repository.open();
     const partition = { userId: input.userId, deviceId: this.getDeviceId() };
@@ -442,6 +446,8 @@ export class OfflineFoundationService {
       heliarQuantity: input.heliarQuantity,
       mouraQuantity: input.mouraQuantity,
       ...(input.observation === undefined ? {} : { observation: input.observation }),
+      ...(input.ownLines ? { ownLines: input.ownLines } : {}),
+      ...(input.competitorLines ? { competitorLines: input.competitorLines } : {}),
       deviceSavedAt: this.now(),
       ids: { eventId: this.createId(), idempotencyKey: this.createId() },
     };

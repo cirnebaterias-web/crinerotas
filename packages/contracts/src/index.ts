@@ -329,9 +329,31 @@ const stockObservationSchema = z.preprocess(
   z.string().max(500).optional(),
 );
 
+export const ownStockBrandSchema = z.enum(['Heliar', 'América', 'Durex', 'ACDelco']);
+export const ownStockLineSchema = z.object({
+  brand: ownStockBrandSchema,
+  model: z.string().trim().min(1).max(120),
+  quantity: z.number().int().nonnegative(),
+}).strict();
+export type OwnStockLine = z.infer<typeof ownStockLineSchema>;
+
+export const competitorStockBrandSchema = z.enum(['Moura', 'Zetta', 'Bosh', 'Tudor', 'Pioneiro', 'Outra']);
+export const competitorStockLineSchema = z.object({
+  brand: competitorStockBrandSchema,
+  amperage: z.number().int().positive().max(999),
+  technology: z.string().trim().min(1).max(60),
+  quantity: z.number().int().nonnegative(),
+  otherBrand: z.string().trim().min(1).max(80).optional(),
+}).strict().refine((line) => line.brand !== 'Outra' || Boolean(line.otherBrand), {
+  message: 'Informe o nome da marca.', path: ['otherBrand'],
+});
+export type CompetitorStockLine = z.infer<typeof competitorStockLineSchema>;
+
 export const stockInputSchema = z.object({
   heliarQuantity: z.number().int().nonnegative(),
   mouraQuantity: z.number().int().nonnegative(),
+  ownLines: z.array(ownStockLineSchema).max(200).optional(),
+  competitorLines: z.array(competitorStockLineSchema).max(200).optional(),
   observation: stockObservationSchema,
 }).strict();
 export type StockInput = z.infer<typeof stockInputSchema>;
