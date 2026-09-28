@@ -44,6 +44,12 @@ jobs:
           npm install --global npm@11.17.0 --no-audit --no-fund
           npm ci
 
+      - name: Validate port denylist
+        run: npm run validate:port-denylist
+
+      - name: Scan for secrets
+        run: npm run security:secrets
+
       - name: Lint
         run: npm run lint
 

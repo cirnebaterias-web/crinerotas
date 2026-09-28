@@ -269,18 +269,7 @@ export class OfflineFoundationService {
     const partition = { userId, deviceId: this.getDeviceId() };
     const access = await this.requireLocalAccess(partition);
     if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de carregar parâmetros.');
-    const at = `${serviceDate}T12:00:00.000Z`;
-    const response = await fetch(`${currentParameterSetPath}?at=${encodeURIComponent(at)}`, {
-      credentials: 'same-origin',
-      cache: 'no-store',
-    });
-    if (!response.ok) throw new Error('Não foi possível carregar o catálogo de Preços.');
-    const catalog = competitorPriceParameterSetSchema.parse(await response.json());
-    return this.repository.savePriceParameterSet({
-      ...catalog,
-      ...partition,
-      cachedAt: this.now(),
-    });
+    return this.fetchAndCachePriceParameterSet(partition, `${serviceDate}T12:00:00.000Z`);
   }
 
   async getVisitPriceParameters(userId: string, offlineId: string) {
@@ -291,7 +280,13 @@ export class OfflineFoundationService {
     const draft = await this.repository.getDraft(partition, offlineId);
     if (!draft) return undefined;
     if (draft.parameterSetId) {
-      return this.repository.getPriceParameterSet(partition, draft.parameterSetId);
+      const cached = await this.repository.getPriceParameterSet(partition, draft.parameterSetId);
+      if (cached || !draft.deviceStartedAt || !navigator.onLine) return cached;
+      return this.fetchAndCachePriceParameterSet(
+        partition,
+        draft.deviceStartedAt,
+        draft.parameterSetId,
+      ).catch(() => undefined);
     }
     const routes = await this.repository.listRouteBundles(partition);
     const route = routes.find((candidate) => candidate.stops.some(
@@ -302,6 +297,28 @@ export class OfflineFoundationService {
       partition,
       `${route.serviceDate}T12:00:00.000Z`,
     );
+  }
+
+  private async fetchAndCachePriceParameterSet(
+    partition: OfflinePartition,
+    at: string,
+    expectedParameterSetId?: string,
+  ) {
+    const response = await fetch(`${currentParameterSetPath}?at=${encodeURIComponent(at)}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error('Não foi possível carregar o catálogo de Preços.');
+    const catalog = competitorPriceParameterSetSchema.parse(await response.json());
+    if (expectedParameterSetId && catalog.parameterSetId !== expectedParameterSetId) {
+      throw new Error('O catálogo retornado não corresponde ao conjunto confirmado da visita.');
+    }
+    return this.repository.savePriceParameterSet({
+      ...catalog,
+      ...partition,
+      cachedAt: this.now(),
+    });
   }
 
   private async persistCanonicalRoute(userId: string, route: CanonicalRoute): Promise<CanonicalRouteCacheResult> {

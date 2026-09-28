@@ -145,6 +145,30 @@ describe('saveVisitCompetitorPrices', () => {
     await expect(saveVisitCompetitorPrices(command.offlineId, deviceId, idempotencyKey, prices, {
       saveCompetitorPrices: vi.fn().mockResolvedValue({ ...result, quotationIds: [crypto.randomUUID()] }),
     })).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+    await expect(saveVisitCompetitorPrices(command.offlineId, deviceId, idempotencyKey, prices, {
+      saveCompetitorPrices: vi.fn().mockResolvedValue({ ...result, unavailableReasonId: crypto.randomUUID() }),
+    })).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+    const availablePrices = {
+      schemaVersion: 1 as const,
+      offlineId: command.offlineId,
+      availability: 'available' as const,
+      quotations: [{
+        competitorId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        modelOrAmperage: '60 Ah',
+        technologyId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        priceBrl: '499.90',
+        conditionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      }],
+      deviceSavedAt: '2026-09-17T12:06:00.000Z',
+    };
+    await expect(saveVisitCompetitorPrices(command.offlineId, deviceId, idempotencyKey, availablePrices, {
+      saveCompetitorPrices: vi.fn().mockResolvedValue({
+        ...result,
+        availability: 'available',
+        quotationIds: [crypto.randomUUID(), crypto.randomUUID()],
+        unavailableReasonId: null,
+      }),
+    })).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
     await expect(saveVisitCompetitorPrices(command.offlineId, deviceId, idempotencyKey, {
       ...prices, unavailableReasonId: 'invalid',
     }, repository)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });

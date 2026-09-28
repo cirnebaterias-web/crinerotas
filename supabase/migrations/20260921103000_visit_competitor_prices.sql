@@ -280,6 +280,7 @@ begin
   end;
   if v_offline_id is null or v_offline_id <> (p_command ->> 'aggregateId')::uuid
      or v_device_saved_at is null or v_device_saved_at <> (p_command ->> 'occurredAt')::timestamptz
+     or jsonb_typeof(v_payload -> 'availability') is distinct from 'string'
      or v_availability not in ('available', 'unavailable') then
     raise exception using errcode = 'P0001', message = 'VALIDATION_FAILED';
   end if;

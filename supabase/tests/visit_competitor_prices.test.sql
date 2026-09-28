@@ -1,6 +1,6 @@
 begin;
 
-select plan(47);
+select plan(48);
 
 select has_table('api', 'parameter_values', 'parameter value catalog exists');
 select has_table('api', 'competitor_price_reports', 'competitor price report table exists');
@@ -136,6 +136,11 @@ select api.save_visit_stock(
   '77000000-0000-4000-8000-000000000102',
   '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","heliarQuantity":0,"mouraQuantity":0,"deviceSavedAt":"2099-09-21T12:01:00.000Z"}'::jsonb
 );
+select throws_ok(
+  $$select api.save_visit_competitor_prices('22000000-0000-4000-8000-000000000099',
+    '77000000-0000-4000-8000-000000000109',
+    '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":null,"unavailableReasonId":"31000000-0000-4000-8000-000000000004","deviceSavedAt":"2099-09-21T12:01:30.000Z"}'::jsonb)$$,
+  'P0001', 'VALIDATION_FAILED', 'JSON null availability is rejected by the public contract');
 select api.save_visit_competitor_prices(
   '22000000-0000-4000-8000-000000000099',
   '77000000-0000-4000-8000-000000000103',

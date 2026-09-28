@@ -40,10 +40,10 @@ export function RouteScreen() {
     if (!service) return;
     const currentCache = ++cacheGeneration.current;
     setOfflineCache('saving');
-    void service.cacheCanonicalRoute(userId, route).then(async (result) => {
+    void service.cacheCanonicalRoute(userId, route).then((result) => {
       // AB-02 may legitimately leave the price catalog unpublished. The route
       // remains usable offline while the Prices step reports that configuration.
-      await service.cacheCompetitorPriceParameters(userId, route.serviceDate).catch(() => null);
+      void service.cacheCompetitorPriceParameters(userId, route.serviceDate).catch(() => null);
       return result;
     }).then(async ({ availableOffline, bundle, compositionUpdated }) => {
         if (current === generation.current && currentCache === cacheGeneration.current) {
