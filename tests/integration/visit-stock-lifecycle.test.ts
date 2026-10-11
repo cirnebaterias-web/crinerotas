@@ -25,7 +25,7 @@ function sql(database: string, input: string, user = 'postgres') {
     '-U', user, '-d', database], input);
 }
 
-it('rolls stock back without history, reapplies it as non-superuser, and installs owner-scoped ACLs', async () => {
+it('refuses an old stock rollback while newer sync capabilities depend on it', async () => {
   // Clone schema only into a uniquely named test database. Never roll back the working database.
   const database = `cirne_stock_lifecycle_${crypto.randomUUID().replaceAll('-', '')}`;
   if (!/^cirne_stock_lifecycle_[0-9a-f]{32}$/.test(database)) throw new Error('Invalid test database name');
@@ -42,10 +42,8 @@ it('rolls stock back without history, reapplies it as non-superuser, and install
     expect((await sql(database, 'select count(*) from api.stock_snapshots;')).trim()).toBe('0');
     expect((await sql(database, "select rolsuper from pg_roles where rolname = current_user;")).trim()).toBe('f');
     const rollback = await readFile('supabase/rollbacks/20260917223000_visit_stock.rollback.sql', 'utf8');
-    await sql(database, rollback);
-    expect((await sql(database, "select to_regclass('api.stock_snapshots') is null;")).trim()).toBe('t');
-    const migration = await readFile('supabase/migrations/20260917223000_visit_stock.sql', 'utf8');
-    await sql(database, migration);
+    await expect(sql(database, rollback)).rejects.toThrow('Rollback refused: newer sync capabilities depend on visit stock');
+    expect((await sql(database, "select to_regclass('api.stock_snapshots') is not null;")).trim()).toBe('t');
     expect((await sql(database, `select
       not has_function_privilege('anon', 'private.get_visit_stock_result(uuid)', 'EXECUTE')
       and not has_function_privilege('authenticated', 'private.apply_visit_stock_saved(uuid,jsonb)', 'EXECUTE')

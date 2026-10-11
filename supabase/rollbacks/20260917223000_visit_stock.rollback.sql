@@ -31,6 +31,10 @@ begin
      or to_regprocedure('api.save_visit_stock(uuid,uuid,jsonb)') is null then
     raise exception 'Visit stock rollback expects the capability to be installed';
   end if;
+  if (select pg_catalog.pg_get_userbyid(p.proowner) from pg_catalog.pg_proc p
+      where p.oid = 'private.sync_event(uuid,jsonb)'::regprocedure) <> 'cirne_sync_executor' then
+    raise exception 'Rollback refused: newer sync capabilities depend on visit stock';
+  end if;
   execute pg_catalog.format('grant cirne_visit_executor to %I with set true granted by current_user', current_user);
   execute pg_catalog.format('grant cirne_sync_executor to %I with set true granted by current_user', current_user);
 end

@@ -1,6 +1,6 @@
 begin;
 
-select plan(45);
+select plan(78);
 
 select has_table('api', 'stock_snapshots', 'stock snapshot table exists');
 select has_function('api', 'save_visit_stock', array['uuid', 'uuid', 'jsonb'], 'direct stock wrapper exists');
@@ -17,6 +17,8 @@ select ok(not has_function_privilege('authenticated', 'private.apply_visit_stock
 select ok(has_function_privilege('cirne_sync_executor', 'private.get_visit_stock_result(uuid)', 'EXECUTE'), 'sync executor can read canonical stock');
 select ok(has_function_privilege('cirne_sync_executor', 'private.apply_visit_stock_saved(uuid,jsonb)', 'EXECUTE'), 'sync executor can apply stock');
 
+-- Prerequisite for the standard pgTAP runner: npm run identity:provision.
+-- The four actors can also be inserted in the same transaction for isolated local verification.
 select id as seller_a_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a' \gset
 select id as seller_b_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_b' \gset
 select id as manager_a_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'manager_a' \gset
@@ -235,6 +237,203 @@ select is((select count(*)::integer from private.sync_events where operation = '
   and aggregate_id = '55000000-0000-4000-8000-000000000098'), 2, 'only successful stock intentions are confirmed');
 select is((select sequence from private.sync_events where operation = 'visit.stock.saved.v1'
   and aggregate_id = '55000000-0000-4000-8000-000000000098' order by sequence desc limit 1), 3, 'stock edits preserve aggregate sequence');
+
+-- The legacy request above remains readable after the additive line-details migration.
+select is((:'first_stock')::jsonb -> 'ownLines', '[]'::jsonb,
+  'legacy stock response exposes an empty own-line list');
+select ok(not ((:'first_stock')::jsonb ? 'competitorLines'),
+  'legacy stock response leaves competitor collection pending');
+select ok(not ((:'first_stock')::jsonb ? 'completedOwnBrands'),
+  'legacy stock response does not claim completed brand screens');
+select ok(not has_function_privilege('authenticated', 'private.validate_visit_stock_details(jsonb)', 'EXECUTE'),
+  'authenticated cannot call the private line validator');
+select ok(not has_function_privilege('anon', 'private.validate_visit_stock_details(jsonb)', 'EXECUTE'),
+  'anon cannot call the private line validator');
+
+select jsonb_build_object(
+  'schemaVersion', 1,
+  'offlineId', '55000000-0000-4000-8000-000000000098',
+  'heliarQuantity', 0,
+  'mouraQuantity', 2,
+  'ownLines', jsonb_build_array(
+    jsonb_build_object('brand', 'Heliar', 'model', 'Modelo sintético A', 'quantity', 0),
+    jsonb_build_object('brand', 'Heliar', 'model', 'Modelo sintético B', 'quantity', 3),
+    jsonb_build_object('brand', 'América', 'model', 'Outro modelo informado', 'quantity', 1)
+  ),
+  'completedOwnBrands', jsonb_build_array('Heliar', 'América', 'Durex', 'ACDelco'),
+  'competitorLines', jsonb_build_array(
+    jsonb_build_object('brand', 'Moura', 'amperage', 60, 'technology', 'Tecnologia sintética', 'quantity', 0),
+    jsonb_build_object('brand', 'Moura', 'amperage', 70, 'technology', 'Tecnologia sintética', 'quantity', 2),
+    jsonb_build_object('brand', 'Outra', 'otherBrand', 'Marca informada', 'amperage', 80,
+      'technology', 'Outra tecnologia', 'quantity', 1)
+  ),
+  'deviceSavedAt', '2098-09-17T12:10:00.000Z'
+) as detailed_payload \gset
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :'seller_a_id', true);
+select api.save_visit_stock(
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000111',
+  :'detailed_payload'::jsonb
+) as detailed_stock \gset
+select is(api.save_visit_stock(
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000111',
+  :'detailed_payload'::jsonb
+), (:'detailed_stock')::jsonb, 'detailed stock replay returns the original result');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000111',
+  (:'detailed_payload')::jsonb || jsonb_build_object('ownLines', '[]'::jsonb)
+), 'P0001', 'IDEMPOTENCY_KEY_REUSED', 'reused key cannot change detailed lines');
+
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('ownLines', '[{"brand":"Heliar","quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'own line requires a model');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('ownLines', '[{"brand":"Desconhecida","model":"Modelo","quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'own line rejects unknown brands');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('ownLines', '[{"brand":"Heliar","model":"Modelo","quantity":-1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'own line rejects negative quantity');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('ownLines', '[{"brand":"Heliar","model":"Modelo","quantity":1.5}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'own line rejects fractional quantity');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('ownLines', '[{"brand":"Heliar","model":"   ","quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'own line rejects a blank model');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('competitorLines', '[{"brand":"Moura","amperage":60,"quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'competitor line requires technology');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('competitorLines', '[{"brand":"Moura","technology":"Tecnologia","quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'competitor line requires amperage');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('competitorLines', '[{"brand":"Moura","amperage":0,"technology":"Tecnologia","quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'competitor line rejects zero amperage');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('competitorLines', '[{"brand":"Moura","amperage":60,"technology":"Tecnologia","quantity":-1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'competitor line rejects negative quantity');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('competitorLines', '[{"brand":"Desconhecida","amperage":60,"technology":"Tecnologia","quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'competitor line rejects unknown brands');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('competitorLines', '[{"brand":"Outra","amperage":80,"technology":"Tecnologia","quantity":1}]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'Outra brand requires its name');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('completedOwnBrands', '["Heliar","Heliar"]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'completed brands cannot repeat a brand');
+select throws_ok(format(
+  'select api.save_visit_stock(%L::uuid, %L::uuid, %L::jsonb)',
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000112',
+  (:'detailed_payload')::jsonb || jsonb_build_object('completedOwnBrands', '["Outra"]'::jsonb)
+), 'P0001', 'VALIDATION_FAILED', 'completed brands reject unknown brand');
+reset role;
+
+select is((:'detailed_stock')::jsonb -> 'ownLines', (:'detailed_payload')::jsonb -> 'ownLines',
+  'all own lines and zero quantity return in order');
+select is((:'detailed_stock')::jsonb -> 'completedOwnBrands', (:'detailed_payload')::jsonb -> 'completedOwnBrands',
+  'completed own-brand order returns intact');
+select is((:'detailed_stock')::jsonb -> 'competitorLines', (:'detailed_payload')::jsonb -> 'competitorLines',
+  'all competitor lines and Outra return in order');
+select is((select details from api.stock_snapshots
+  where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid),
+  jsonb_build_object(
+    'ownLines', (:'detailed_payload')::jsonb -> 'ownLines',
+    'completedOwnBrands', (:'detailed_payload')::jsonb -> 'completedOwnBrands',
+    'competitorLines', (:'detailed_payload')::jsonb -> 'competitorLines'
+  ), 'the snapshot stores the exact detailed lines and brand progress');
+select is((select count(*)::integer from api.stock_snapshots
+  where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid), 1,
+  'detailed save updates the existing snapshot');
+select is((select count(*)::integer from private.sync_events
+  where operation = 'visit.stock.saved.v1' and aggregate_id = '55000000-0000-4000-8000-000000000098'),
+  3, 'invalid details and replay add no sync intention');
+select is((select count(*)::integer from private.audit_events
+  where action = 'visit.stock.saved.v1' and target_id = ((:'started')::jsonb ->> 'visitId')::uuid),
+  3, 'only successful detailed save adds an audit fact');
+select is((select after_data -> 'completedOwnBrands' from private.audit_events
+  where action = 'visit.stock.saved.v1' and target_id = ((:'started')::jsonb ->> 'visitId')::uuid
+  order by occurred_at desc limit 1),
+  (:'detailed_payload')::jsonb -> 'completedOwnBrands',
+  'detailed audit records brand completion');
+
+-- Absence means the competitor step is pending; [] means it was completed with no stock.
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :'seller_a_id', true);
+select api.save_visit_stock(
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000113',
+  (:'detailed_payload')::jsonb - 'competitorLines'
+    || jsonb_build_object(
+      'completedOwnBrands', jsonb_build_array('Heliar'),
+      'ownLines', jsonb_build_array(jsonb_build_object(
+        'brand', 'Heliar', 'model', 'Modelo sintético A', 'quantity', 0)),
+      'deviceSavedAt', '2098-09-17T12:11:00.000Z')
+) as partial_stock \gset
+reset role;
+select ok(not ((:'partial_stock')::jsonb ? 'competitorLines'),
+  'partial own-brand save returns no competitor collection');
+select ok(not (select details ? 'competitorLines' from api.stock_snapshots
+  where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid),
+  'partial own-brand save stores competitor collection as pending');
+select is((:'partial_stock')::jsonb -> 'completedOwnBrands', '["Heliar"]'::jsonb,
+  'partial own-brand progress returns intact');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :'seller_a_id', true);
+select api.save_visit_stock(
+  '22000000-0000-4000-8000-000000000098',
+  '77000000-0000-4000-8000-000000000114',
+  (:'detailed_payload')::jsonb
+    || jsonb_build_object('competitorLines', '[]'::jsonb,
+      'deviceSavedAt', '2098-09-17T12:12:00.000Z')
+) as empty_competitor_stock \gset
+reset role;
+select is((:'empty_competitor_stock')::jsonb -> 'competitorLines', '[]'::jsonb,
+  'empty competitor collection returns as an explicit completed step');
+select is((select details -> 'competitorLines' from api.stock_snapshots
+  where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid), '[]'::jsonb,
+  'empty competitor collection is stored distinctly from pending');
 
 select * from finish();
 rollback;

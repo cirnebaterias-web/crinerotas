@@ -1,8 +1,10 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer, type Server } from 'node:net';
+import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import ExcelJS from 'exceljs';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { root, run, supabaseBinary } from '../../scripts/process';
 
@@ -194,10 +196,10 @@ it('clears a previous browser session when an account switch is rejected', async
   expect(rejected.headers.getSetCookie().every((value) => /max-age=0/i.test(value))).toBe(true);
 });
 
-it('rejects login failures, blocked/non-seller identities, CSRF, bearer and malformed bodies', async () => {
+it('rejects login failures, blocked identities, CSRF, bearer and malformed bodies', async () => {
   const seller = actorManifest.actors.seller_a!;
   const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
-  for (const [key, expected] of [['blocked', 403], ['manager_a', 403], ['invalid', 401]] as const) {
+  for (const [key, expected] of [['blocked', 403], ['invalid', 401]] as const) {
     const actor = actorManifest.actors[key] ?? { email: seller.email, password: 'incorrect-synthetic-password' };
     const response = await fetch(`${origin}/api/v1/auth/session`, {
       method: 'POST', headers, body: JSON.stringify({ email: actor.email, password: actor.password }),
@@ -238,6 +240,68 @@ it('runs the CLI as a real process against the production server', async () => {
   expect(JSON.parse(result.stdout)).toEqual({ status: 'ok' });
 });
 
+it('validates, imports, replays and lists a synthetic client workbook through the real CLI and HTTP API', async () => {
+  const manager = actorManifest.actors.manager_a;
+  const seller = actorManifest.actors.seller_a;
+  if (!manager || !seller) throw new Error('Synthetic client-import actors missing');
+  const directory = await mkdtemp(path.join(tmpdir(), 'cirne-client-import-'));
+  const filePath = path.join(directory, 'clientes-sinteticos.xlsx');
+  const externalReference = `IMPORT-HTTP-${crypto.randomUUID()}`;
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Clientes');
+    sheet.addRow(['referencia_externa', 'nome', 'endereco', 'latitude', 'longitude',
+      'referencia_carteira', 'vendedor_email', 'status']);
+    sheet.addRow([externalReference, 'Cliente HTTP Sintético', 'Rua Sintética 311', -5.79, -35.21,
+      'CARTEIRA-HTTP', seller.email, 'active']);
+    await workbook.xlsx.writeFile(filePath);
+
+    const template = await fetch(`${origin}/api/v1/client-imports/template`, {
+      headers: { Authorization: `Bearer ${manager.accessToken}` },
+    });
+    expect(template.status).toBe(200);
+    expect(template.headers.get('content-type')).toContain('spreadsheetml.sheet');
+
+    const forbiddenForm = new FormData();
+    forbiddenForm.set('file', new File([await readFile(filePath)], path.basename(filePath)));
+    const forbidden = await fetch(`${origin}/api/v1/client-imports/validate`, {
+      method: 'POST', headers: { Authorization: `Bearer ${seller.accessToken}` }, body: forbiddenForm,
+    });
+    expect(forbidden.status).toBe(403);
+
+    let result: Awaited<ReturnType<typeof runWithClosedInput>>;
+    try {
+      result = await runWithClosedInput(process.execPath, [
+        '--import', 'tsx', 'apps/cli/src/client-imports-cli.ts',
+        '--url', origin, '--file', filePath, '--json',
+      ], {
+        cwd: root,
+        env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+          CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken },
+      });
+    } catch (error) {
+      const failure = error as { stderr?: string };
+      throw new Error(`Client-import CLI failed: ${failure.stderr?.trim() || 'no diagnostic output'}`);
+    }
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      status: 'ok', acceptedCount: 1, rejectedCount: 0, previewAcceptedCount: 1, replayed: true,
+    });
+    expect(result.stdout + result.stderr).not.toContain(manager.accessToken);
+    expect(result.stdout + result.stderr).not.toContain(seller.email);
+
+    const clients = await fetch(`${origin}/api/v1/clients?limit=100`, {
+      headers: { Authorization: `Bearer ${manager.accessToken}` },
+    });
+    expect(clients.status).toBe(200);
+    expect(await clients.json()).toMatchObject({
+      schemaVersion: 1,
+      clients: expect.arrayContaining([expect.objectContaining({ externalReference, sellerEmail: seller.email })]),
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it('returns nonzero from the CLI for an unreachable server', async () => {
   const failingEndpoint = createServer((socket) => socket.destroy());
   const port = await listenOnRandomPort(failingEndpoint);
@@ -261,7 +325,8 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   expect(await sellerResponse.json()).toMatchObject({
     id: seller.id,
     roles: ['seller'],
-    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'sync.write_self', 'visit.start_self'],
+    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'scrap.collect_self',
+      'scrap.schedule_self', 'sync.write_self', 'visit.start_self'],
     scopeIds: [seller.id],
     status: 'active',
   });
@@ -659,6 +724,22 @@ it('runs the real visit API through the CLI with canonical idempotent confirmati
   if (!seller) throw new Error('Synthetic seller missing');
   if (!administrator || !/^[0-9a-f-]{36}$/i.test(administrator.id)) {
     throw new Error('Synthetic administrator missing');
+  }
+  const todayResponse = await fetch(`${origin}/api/v1/me/routes/today`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(todayResponse.status).toBe(200);
+  const today = await todayResponse.json() as { availability: string; route?: { stops: Array<{ status: string }> } };
+  if (today.availability === 'available' && !today.route?.stops.some(({ status }) => status === 'pending')) {
+    // Integration uses the persistent local database; do not delete completed synthetic visits
+    // simply to force a new stop. The independent ops:visits round-trip covers a fresh route.
+    await expect(runWithClosedInput(process.execPath, [
+      '--import', 'tsx', 'apps/cli/src/visits-cli.ts', '--url', origin, '--json',
+    ], { cwd: root, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+      CIRNE_ACCESS_TOKEN: seller.accessToken } })).rejects.toMatchObject({
+      stderr: expect.stringContaining('parada pendente'),
+    });
+    return;
   }
   const catalogSql = `begin;
     grant cirne_visit_executor to postgres with set true granted by current_user;

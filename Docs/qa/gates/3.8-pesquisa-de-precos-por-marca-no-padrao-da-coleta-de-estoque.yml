@@ -1,0 +1,26 @@
+schema: 1
+story: '3.8'
+story_title: 'Pesquisa de preços por marca no padrão da coleta de estoque'
+gate: PASS
+status_reason: 'Os doze critérios foram revalidados; a identidade do produto foi endurecida com productCode e persistência histórica no banco.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'story-file-sha256:de4fd2231138f7cae539deeb150946529175b1dd6ede51d637b9bcd24231d9ad'
+updated: '2026-10-11T17:29:15Z'
+expires: '2026-10-25T17:29:15Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 948
+  current_run: { unit_passed: 323, pgtap_passed: 549, integration_passed: 19, e2e_passed: 57, lint: PASS, typecheck: PASS, production_build: PASS }
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], ac_gaps: [] }
+nfr_validation:
+  security: { status: PASS, notes: 'Parâmetros publicados e escopo da visita preservados.' }
+  performance: { status: PASS, notes: 'Limite de 25 cotações e busca local preservados.' }
+  reliability: { status: PASS, notes: 'Offline, restauração, replay e persistência de productCode cobertos.' }
+  maintainability: { status: PASS, notes: 'Correspondência de catálogo possui testes de regressão dedicados.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Publicar listas comerciais reais somente após aprovação formal dos parâmetros.'
+      refs: ['Docs/stories/3.8.story.md']

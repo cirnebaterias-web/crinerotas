@@ -4,7 +4,7 @@ import type { CookieOptions } from '@supabase/ssr';
 import { authSessionPath, loginRequestSchema } from '@cirne/contracts';
 import { readIdentityConfig } from '@cirne/config/server';
 import { authCookiePrefix, createCallerScopedClient, sessionCookieOptions } from '@/server/identity';
-import { signInSeller } from '@/server/auth/session';
+import { signInOperator } from '@/server/auth/session';
 import {
   enforceRouteCookieCsrf, logRouteRequest, mapRouteRequestError, readRouteJson,
   routeErrorResponse, routeResponseHeaders, RouteRequestError,
@@ -57,7 +57,7 @@ async function handle(request: Request) {
     const parsed = loginRequestSchema.safeParse(await readRouteJson(request));
     if (!parsed.success) throw new RouteRequestError(400, 'VALIDATION_FAILED', 'Informe um e-mail válido e sua senha.', false);
     clearRejectedLogin = clearIncomingSession;
-    const identity = await signInSeller(client, parsed.data);
+    const identity = await signInOperator(client, parsed.data);
     for (const [name, { value, options }] of pending) store.set(name, value, { ...options, ...sessionCookieOptions() });
     return Response.json(identity, { status, headers });
   } catch (error) {

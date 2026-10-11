@@ -6,7 +6,7 @@ import { root, run, supabaseBinary, type Run } from './process';
 import { syntheticClientIds, syntheticParameterSetId } from '@cirne/domain';
 
 export const actorKeys = ['administrator', 'seller_a', 'seller_b', 'manager_a', 'blocked',
-  'seller_e2e', 'manager_e2e', 'seller_regression', 'manager_regression'] as const;
+  'seller_e2e', 'manager_e2e', 'seller_regression', 'manager_regression', 'logistics_a'] as const;
 export type ActorKey = (typeof actorKeys)[number];
 export { syntheticClientIds };
 
@@ -38,11 +38,43 @@ type AuthSession = {
 };
 
 const manifestPath = path.join(root, '.local', 'identity-actors.json');
+const verifierPath = path.join(root, '.local', 'supabase-verifier.json');
 const roleIds = {
   seller: '00000000-0000-4000-8000-000000000001',
   manager: '00000000-0000-4000-8000-000000000002',
   administrator: '00000000-0000-4000-8000-000000000003',
+  logistics: '00000000-0000-4000-8000-000000000004',
 } as const;
+
+const syntheticPriceParameters = [
+  ...['Heliar', 'América', 'Durex', 'ACDelco', 'Moura', 'Zetta', 'Bosh', 'Tudor', 'Pioneiro']
+    .map((label, index) => ({
+      id: `32000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      parameter_set_id: syntheticParameterSetId,
+      category: 'competitor',
+      code: `synthetic_price_brand_${index + 1}`,
+      label,
+      sort_order: index + 1,
+    })),
+  ...['SLI', 'EFB', 'AGM'].map((label, index) => ({
+    id: `32000000-0000-4000-8100-${String(index + 1).padStart(12, '0')}`,
+    parameter_set_id: syntheticParameterSetId,
+    category: 'competitor_price_technology',
+    code: `synthetic_price_technology_${index + 1}`,
+    label,
+    sort_order: index + 1,
+  })),
+  {
+    id: '32000000-0000-4000-8200-000000000001', parameter_set_id: syntheticParameterSetId,
+    category: 'competitor_price_condition', code: 'synthetic_retail_sale',
+    label: 'Venda no varejo — sintético', sort_order: 1,
+  },
+  {
+    id: '32000000-0000-4000-8300-000000000001', parameter_set_id: syntheticParameterSetId,
+    category: 'competitor_price_unavailable_reason', code: 'synthetic_not_informed',
+    label: 'Preço não informado — sintético', sort_order: 1,
+  },
+] as const;
 
 const assignments: Record<ActorKey, keyof typeof roleIds> = {
   administrator: 'administrator',
@@ -54,6 +86,7 @@ const assignments: Record<ActorKey, keyof typeof roleIds> = {
   manager_e2e: 'manager',
   seller_regression: 'seller',
   manager_regression: 'manager',
+  logistics_a: 'logistics',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -117,7 +150,7 @@ export function parseManifest(raw: string): ActorManifest {
   }
   const storedActors = value.actors;
   // Preserve manual-preview credentials while adding isolated automated-browser actors.
-  for (const key of ['seller_e2e', 'manager_e2e', 'seller_regression', 'manager_regression'] as const) {
+  for (const key of ['seller_e2e', 'manager_e2e', 'seller_regression', 'manager_regression', 'logistics_a'] as const) {
     if (!(key in storedActors)) storedActors[key] = createStoredActor(key);
   }
   if (actorKeys.some((key) => !validateStoredActor(storedActors[key]))) {
@@ -275,6 +308,7 @@ export async function provisionSyntheticActors(options: {
       key === 'manager_regression' ? 'Gestor Regressão Sintético' :
       key === 'seller_regression' ? 'Vendedor Regressão Sintético' :
       key === 'manager_e2e' ? 'Gestor E2E Sintético' :
+      key === 'logistics_a' ? 'Logística A Sintética' :
       key === 'seller_e2e' ? 'Vendedor E2E Sintético' :
       key === 'manager_a' ? 'Gestor A Sintético' :
       key === 'seller_a' ? 'Vendedor A Sintético' :
@@ -313,6 +347,30 @@ export async function provisionSyntheticActors(options: {
     }
   }
 
+  await restWrite(fetcher, status, 'commercial_actions?on_conflict=id', {
+    id: '39000000-0000-4000-8000-000000000001',
+    title: 'Energia para vender mais — sintética',
+    description: 'Apresente ao lojista as condições da campanha Heliar vigente e confirme os principais benefícios comerciais.',
+    valid_from: '2026-01-01',
+    valid_until: '2027-12-31',
+    banner_url: 'https://placehold.co/800x800/007f43/ffffff?text=Heliar',
+    active: true,
+    created_by: actors.manager_a.id,
+    updated_by: actors.manager_a.id,
+  }, 'resolution=merge-duplicates,return=minimal');
+
+  await restWrite(fetcher, status, 'parameter_sets?on_conflict=id', {
+    id: syntheticParameterSetId,
+    version: 1,
+    status: 'draft',
+    valid_from: '2026-01-01T00:00:00.000Z',
+    published_at: null,
+    published_by: null,
+  }, 'resolution=merge-duplicates,return=minimal');
+
+  await restWrite(fetcher, status, 'parameter_values?on_conflict=id', syntheticPriceParameters,
+    'resolution=merge-duplicates,return=minimal');
+
   await restWrite(fetcher, status, 'parameter_sets?on_conflict=id', {
     id: syntheticParameterSetId,
     version: 1,
@@ -332,7 +390,29 @@ export async function provisionSyntheticActors(options: {
     archived_at: null,
   })), 'resolution=merge-duplicates,return=minimal');
 
+  // Test personas share the explicitly synthetic portfolio, but every link is
+  // still materialized so standalone scheduling exercises the production rule.
+  for (const seller of ['seller_a', 'seller_e2e', 'seller_regression'] as const) {
+    for (const clientId of syntheticClientIds) {
+      const scopeExists = await activeRelationExists(fetcher, status, 'client_seller_scopes', {
+        client_id: `eq.${clientId}`,
+        seller_id: `eq.${actors[seller].id}`,
+      });
+      if (!scopeExists) {
+        await restWrite(fetcher, status, 'client_seller_scopes', {
+          client_id: clientId,
+          seller_id: actors[seller].id,
+          assigned_by: administratorId,
+        });
+      }
+    }
+  }
+
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  // The privileged key stays outside apps/web/.env.local and is used only by
+  // the server-side byte verifier against the isolated local Supabase instance.
+  await writeFile(verifierPath, `${JSON.stringify({ apiUrl: status.API_URL, secretKey: status.SECRET_KEY })}\n`,
+    { encoding: 'utf8', mode: 0o600 });
   return actors;
 }

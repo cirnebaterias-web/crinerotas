@@ -2,6 +2,10 @@
 
 import {
   competitorPriceParameterSetSchema,
+  commercialActionListSchema,
+  commercialActionsPath,
+  scrapPointListSchema,
+  scrapPointsPath,
   currentParameterSetPath,
   mePath,
   meResponseSchema,
@@ -9,7 +13,17 @@ import {
   type CanonicalRoute,
   type LocalRouteBundle,
   type CompetitorPricesInput,
+  type CommercialActionsInput,
+  type VisitScrapInput,
+  type ScrapPoint,
+  type CommercialAction,
   type OwnStockLine,
+  type StockInput,
+  type LocalAttachment,
+  localAttachmentMetadataSchema,
+  localVisitEvidenceSchema,
+  type LocalVisitEvidence,
+  type VisitEvidenceIssue,
   type CompetitorStockLine,
   type OfflinePartition,
 } from '@cirne/contracts';
@@ -27,13 +41,22 @@ import {
   type SaveVisitStartCommand,
   type SaveVisitStockCommand,
   type SaveVisitPricesCommand,
+  type SaveVisitCommercialActionsCommand,
+  type SaveVisitScrapCommand,
 } from './repository';
 import { SyncEngine, type RefreshSession, type SyncRunSummary } from './sync-engine';
 import { FetchSyncTransport } from './sync-transport';
+import { EvidenceSyncCoordinator, FetchEvidenceSyncTransport } from './evidence-sync';
+import { FetchScrapEvidenceTransport, ScrapEvidenceSyncCoordinator } from './scrap-evidence-sync';
 import {
   isCurrentOfflineRevisionResponse,
   offlineRevisionRequestType,
 } from './cache-policy';
+
+export interface OfflineSyncRunSummary extends SyncRunSummary {
+  evidenceDisabled: boolean;
+  scrapEvidenceDisabled: boolean;
+}
 
 const deviceStorageKey = 'cirne-rotas.device-id';
 const userStorageKey = 'cirne-rotas.last-user-id';
@@ -153,9 +176,25 @@ export async function refreshBrowserSession(): Promise<boolean> {
   }
 }
 
+function saoPauloDate(instant: string) {
+  const date = new Date(instant);
+  if (!Number.isFinite(date.getTime())) throw new Error('Data local inválida.');
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const value = (type: 'year' | 'month' | 'day') => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+function currentCommercialActions(actions: CommercialAction[], today: string) {
+  return actions.filter((action) => action.active && action.validFrom <= today && action.validUntil >= today);
+}
+
 export class OfflineFoundationService {
   private readonly repository: OfflineRepository;
   private readonly syncEngine: SyncEngine;
+  private readonly evidenceSync: EvidenceSyncCoordinator;
+  private readonly scrapEvidenceSync: ScrapEvidenceSyncCoordinator;
   private currentDeviceId: string | null = null;
   private revocationBarrier: Promise<void> | null = null;
   private readonly persistenceOperations = new Set<Promise<CanonicalRouteCacheResult>>();
@@ -170,6 +209,8 @@ export class OfflineFoundationService {
   ) {
     this.repository = new OfflineRepository(database);
     this.syncEngine = new SyncEngine(this.repository, new FetchSyncTransport(), refreshSession);
+    this.evidenceSync = new EvidenceSyncCoordinator(this.repository, new FetchEvidenceSyncTransport());
+    this.scrapEvidenceSync = new ScrapEvidenceSyncCoordinator(this.repository, new FetchScrapEvidenceTransport());
   }
 
   async initialize(): Promise<OfflineShellResult> {
@@ -427,6 +468,94 @@ export class OfflineFoundationService {
     return this.repository.findDraftForStop(partition, routeVersionStopId);
   }
 
+  async listVisitAttachments(userId: string, visitOfflineId: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de acessar fotos.');
+    return this.repository.listVisitAttachments(partition, visitOfflineId);
+  }
+
+  async saveVisitAttachment(input: Omit<LocalAttachment, 'userId' | 'deviceId'> & { userId: string }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de salvar fotos.');
+    const { blob, ...metadataInput } = input;
+    const metadata = localAttachmentMetadataSchema.parse({
+      ...metadataInput,
+      deviceId: partition.deviceId,
+    });
+    return this.repository.saveVisitAttachment(partition, { ...metadata, blob });
+  }
+
+  async deleteVisitAttachment(userId: string, visitOfflineId: string, offlineId: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de remover fotos.');
+    return this.repository.deleteVisitAttachment(partition, visitOfflineId, offlineId);
+  }
+
+  async saveVisitEvidence(input: {
+    userId: string;
+    visitOfflineId: string;
+    kind: 'checkin' | 'checkout';
+    capturedAt: string;
+    location?: { latitude: string; longitude: string; accuracyM: string; distanceM?: string };
+    issues: VisitEvidenceIssue[];
+    justification?: string;
+    photo?: { blob: Blob; contentType: 'image/jpeg'; width: number; height: number; checksum: string };
+  }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de salvar a evidência.');
+    const attachmentId = input.photo ? this.createId() : undefined;
+    const expiresAt = new Date(new Date(input.capturedAt).getTime() + 180 * 24 * 60 * 60 * 1000).toISOString();
+    const evidence: LocalVisitEvidence = localVisitEvidenceSchema.parse({
+      schemaVersion: 1,
+      ...partition,
+      offlineId: this.createId(),
+      visitOfflineId: input.visitOfflineId,
+      kind: input.kind,
+      ...(attachmentId ? { attachmentOfflineId: attachmentId } : {}),
+      capturedAt: input.capturedAt,
+      ...(input.location ?? {}),
+      radiusM: 100,
+      desiredAccuracyM: 50,
+      issues: input.issues,
+      ...(input.justification?.trim() ? { justification: input.justification.trim() } : {}),
+      status: 'pending',
+      expiresAt,
+    });
+    const attachment: LocalAttachment | undefined = input.photo && attachmentId ? {
+      schemaVersion: 1,
+      ...partition,
+      offlineId: attachmentId,
+      visitOfflineId: input.visitOfflineId,
+      purpose: input.kind === 'checkin' ? 'visit_checkin' : 'visit_checkout',
+      fileName: `${input.kind}-fachada.jpg`,
+      contentType: input.photo.contentType,
+      byteSize: input.photo.blob.size,
+      width: input.photo.width,
+      height: input.photo.height,
+      checksum: input.photo.checksum,
+      capturedAt: input.capturedAt,
+      status: 'pending',
+      blob: input.photo.blob,
+    } : undefined;
+    return this.repository.saveVisitEvidence(partition, evidence, attachment);
+  }
+
+  async listVisitEvidence(userId: string, visitOfflineId: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de acessar evidências.');
+    return this.repository.listVisitEvidence(partition, visitOfflineId);
+  }
+
   async saveVisitStock(input: {
     userId: string;
     offlineId: string;
@@ -434,6 +563,7 @@ export class OfflineFoundationService {
     mouraQuantity: number;
     observation?: string;
     ownLines?: OwnStockLine[];
+    completedOwnBrands?: StockInput['completedOwnBrands'];
     competitorLines?: CompetitorStockLine[];
   }) {
     await this.repository.open();
@@ -447,6 +577,7 @@ export class OfflineFoundationService {
       mouraQuantity: input.mouraQuantity,
       ...(input.observation === undefined ? {} : { observation: input.observation }),
       ...(input.ownLines ? { ownLines: input.ownLines } : {}),
+      ...(input.completedOwnBrands ? { completedOwnBrands: input.completedOwnBrands } : {}),
       ...(input.competitorLines ? { competitorLines: input.competitorLines } : {}),
       deviceSavedAt: this.now(),
       ids: { eventId: this.createId(), idempotencyKey: this.createId() },
@@ -473,11 +604,96 @@ export class OfflineFoundationService {
     return this.repository.saveVisitPricesAndEnqueue(command);
   }
 
+  async listCommercialActions(userId: string): Promise<CommercialAction[] | null> {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de consultar ações.');
+    if (navigator.onLine) {
+      try {
+        const response = await fetch(commercialActionsPath, {
+          credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+        });
+        if (response.status === 401 || response.status === 403) return null;
+        if (response.ok) {
+          const catalog = commercialActionListSchema.parse(await response.json());
+          if (this.accessRevoked) return null;
+          const cachedAt = this.now();
+          await this.repository.cacheCommercialActions(partition, catalog, cachedAt);
+          return currentCommercialActions(catalog.actions, saoPauloDate(cachedAt));
+        }
+      } catch { /* Use only the last validated catalog for this partition and day. */ }
+    }
+    if (this.accessRevoked) return null;
+    const cached = await this.repository.getCommercialActions(partition);
+    const today = saoPauloDate(this.now());
+    if (!cached || saoPauloDate(cached.cachedAt) !== today) return null;
+    return currentCommercialActions(cached.actions, today);
+  }
+
+  async listScrapPoints(userId: string): Promise<ScrapPoint[]> {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de consultar pontos.');
+    if (navigator.onLine) {
+      try {
+        const response = await fetch(scrapPointsPath, {
+          credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+        });
+        if (response.ok) {
+          const points = scrapPointListSchema.parse(await response.json()).points;
+          await this.repository.cacheScrapPoints(partition, points, this.now());
+          return points.filter((point) => point.active);
+        }
+      } catch { /* Keep the last validated list while offline. */ }
+    }
+    return this.repository.listScrapPoints(partition);
+  }
+
+  async saveVisitCommercialActions(input: {
+    userId: string;
+    offlineId: string;
+    values: CommercialActionsInput;
+  }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de editar.');
+    const command: SaveVisitCommercialActionsCommand = {
+      partition,
+      offlineId: input.offlineId,
+      values: input.values,
+      deviceSavedAt: this.now(),
+      ids: { eventId: this.createId(), idempotencyKey: this.createId() },
+    };
+    return this.repository.saveVisitCommercialActionsAndEnqueue(command);
+  }
+
+  async saveVisitScrap(input: {
+    userId: string;
+    offlineId: string;
+    values: VisitScrapInput;
+  }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de editar.');
+    const command: SaveVisitScrapCommand = {
+      partition,
+      offlineId: input.offlineId,
+      values: input.values,
+      deviceSavedAt: this.now(),
+      ids: { eventId: this.createId(), idempotencyKey: this.createId() },
+    };
+    return this.repository.saveVisitScrapAndEnqueue(command);
+  }
+
   async refresh(partition: OfflinePartition) {
     return this.loadAuthorizedPartition(partition, false);
   }
 
-  async synchronize(partition: OfflinePartition): Promise<SyncRunSummary> {
+  async synchronize(partition: OfflinePartition): Promise<OfflineSyncRunSummary> {
     const access = await this.requireLocalAccess(partition);
     if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de sincronizar.');
     if (!navigator.onLine) return {
@@ -486,8 +702,31 @@ export class OfflineFoundationService {
       recoverable: 0,
       actionRequired: 0,
       authenticationRequired: false,
+      evidenceDisabled: false,
+      scrapEvidenceDisabled: false,
     };
-    return this.syncEngine.synchronize(partition);
+    const outbox = await this.syncEngine.synchronize(partition);
+    const scrap = await this.scrapEvidenceSync.synchronize(partition).catch(() => ({
+      attempted: 1, confirmed: 0, recoverable: 1, actionRequired: 0,
+      disabled: false, authenticationRequired: false,
+    }));
+    const evidence = await this.evidenceSync.synchronize(partition).catch(() => ({
+      attempted: 1,
+      confirmed: 0,
+      recoverable: 1,
+      actionRequired: 0,
+      disabled: false,
+      authenticationRequired: false,
+    }));
+    return {
+      attempted: outbox.attempted + scrap.attempted + evidence.attempted,
+      confirmed: outbox.confirmed + scrap.confirmed + evidence.confirmed,
+      recoverable: outbox.recoverable + scrap.recoverable + evidence.recoverable,
+      actionRequired: outbox.actionRequired + scrap.actionRequired + evidence.actionRequired,
+      authenticationRequired: outbox.authenticationRequired || scrap.authenticationRequired || evidence.authenticationRequired,
+      evidenceDisabled: evidence.disabled,
+      scrapEvidenceDisabled: scrap.disabled,
+    };
   }
 
   close() {
@@ -543,6 +782,7 @@ export class OfflineFoundationService {
           : 'A janela local de 24 horas expirou. Os pendentes foram preservados; revalide online.',
       };
     }
+    await this.repository.purgeExpiredVisitEvidence(partition, this.now());
     const [routes, drafts, outbox, workerReady, storagePersisted] = await Promise.all([
       this.repository.listRouteBundles(partition),
       this.repository.listDrafts(partition),

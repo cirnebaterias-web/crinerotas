@@ -1,7 +1,7 @@
 import Dexie from 'dexie';
 import { IDBKeyRange, indexedDB } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { currentParameterSetPath, mePath, type CanonicalRoute } from '@cirne/contracts';
+import { commercialActionsPath, currentParameterSetPath, mePath, type CanonicalRoute, type CommercialAction } from '@cirne/contracts';
 import { createSyntheticRouteBundle, createValidatedLocalSession } from '@cirne/domain';
 import { OfflineDatabase } from './database';
 import { OfflineRepository } from './repository';
@@ -71,7 +71,7 @@ function createLocalStorage(entries: Record<string, string>) {
   };
 }
 
-async function setup(hostname = 'example.invalid') {
+async function setup(hostname = 'example.invalid', now = () => '2026-09-11T12:00:00.000Z') {
   const name = `offline-service-${crypto.randomUUID()}`;
   databaseNames.push(name);
   const database = new OfflineDatabase(name, { indexedDB, IDBKeyRange });
@@ -92,7 +92,7 @@ async function setup(hostname = 'example.invalid') {
     clearTimeout,
   });
   vi.stubGlobal('navigator', { onLine: true });
-  const service = new OfflineFoundationService(database, () => at);
+  const service = new OfflineFoundationService(database, now);
   services.push(service);
   return {
     database,
@@ -110,6 +110,64 @@ afterEach(async () => {
   await Promise.all(databaseNames.splice(0).map((name) => (
     new Dexie(name, { indexedDB, IDBKeyRange }).delete()
   )));
+});
+
+describe('commercial action catalog availability', () => {
+  const action: CommercialAction = {
+    id: '90000000-0000-4000-8000-000000000001', title: 'Campanha sintética',
+    description: 'Descrição sintética', validFrom: '2026-09-11', validUntil: '2026-09-11', active: true,
+  };
+
+  it('persists a validated empty response and distinguishes it from no offline catalog', async () => {
+    const { service } = await setup();
+    vi.stubGlobal('navigator', { onLine: false });
+    expect(await service.listCommercialActions(partition.userId)).toBeNull();
+    vi.stubGlobal('navigator', { onLine: true });
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ schemaVersion: 1, actions: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await service.listCommercialActions(partition.userId)).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(commercialActionsPath, expect.objectContaining({ credentials: 'same-origin', cache: 'no-store' }));
+    vi.stubGlobal('navigator', { onLine: false });
+    expect(await service.listCommercialActions(partition.userId)).toEqual([]);
+  });
+
+  it('falls back across UTC midnight on the same Sao Paulo day and rejects the next local day', async () => {
+    let now = '2026-09-11T23:30:00.000Z';
+    const { service } = await setup('example.invalid', () => now);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ schemaVersion: 1, actions: [action] })));
+    expect(await service.listCommercialActions(partition.userId)).toEqual([action]);
+    vi.stubGlobal('navigator', { onLine: false });
+    now = '2026-09-12T01:30:00.000Z';
+    expect(await service.listCommercialActions(partition.userId)).toEqual([action]);
+    now = '2026-09-12T03:00:00.000Z';
+    expect(await service.listCommercialActions(partition.userId)).toBeNull();
+  });
+
+  it.each([401, 403])('returns unavailable for HTTP %s even with a current cached catalog', async (status) => {
+    const { service, repository } = await setup();
+    await repository.cacheCommercialActions(partition, { schemaVersion: 1, actions: [action] }, '2026-09-11T12:00:00.000Z');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status })));
+    expect(await service.listCommercialActions(partition.userId)).toBeNull();
+  });
+
+  it('filters expired, future and inactive campaigns from the offline catalog', async () => {
+    const { service, repository } = await setup();
+    await repository.cacheCommercialActions(partition, { schemaVersion: 1, actions: [
+      action,
+      { ...action, id: crypto.randomUUID(), validFrom: '2026-09-01', validUntil: '2026-09-10' },
+      { ...action, id: crypto.randomUUID(), validFrom: '2026-09-12', validUntil: '2026-09-13' },
+      { ...action, id: crypto.randomUUID(), active: false },
+    ] }, '2026-09-11T12:00:00.000Z');
+    vi.stubGlobal('navigator', { onLine: false });
+    expect(await service.listCommercialActions(partition.userId)).toEqual([action]);
+  });
+
+  it('uses the current validated cache after a network error', async () => {
+    const { service, repository } = await setup();
+    await repository.cacheCommercialActions(partition, { schemaVersion: 1, actions: [action] }, '2026-09-11T12:00:00.000Z');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unavailable')));
+    expect(await service.listCommercialActions(partition.userId)).toEqual([action]);
+  });
 });
 
 describe('OfflineFoundationService online authorization', () => {
@@ -519,5 +577,22 @@ describe('refreshBrowserSession', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
 
     await expect(refreshBrowserSession()).resolves.toBe(false);
+  });
+});
+
+describe('OfflineFoundationService evidence synchronization', () => {
+  it('keeps the outbox result and reports an unexpected evidence failure as recoverable', async () => {
+    const { service } = await setup();
+    const syncEngine = Reflect.get(service, 'syncEngine') as { synchronize: (value: unknown) => Promise<unknown> };
+    const evidenceSync = Reflect.get(service, 'evidenceSync') as { synchronize: (value: unknown) => Promise<unknown> };
+    vi.spyOn(syncEngine, 'synchronize').mockResolvedValue({
+      attempted: 2, confirmed: 1, recoverable: 1, actionRequired: 0, authenticationRequired: false,
+    });
+    vi.spyOn(evidenceSync, 'synchronize').mockRejectedValue(new Error('unexpected evidence failure'));
+
+    await expect(service.synchronize(partition)).resolves.toEqual({
+      attempted: 3, confirmed: 1, recoverable: 2, actionRequired: 0, authenticationRequired: false,
+      evidenceDisabled: false, scrapEvidenceDisabled: false,
+    });
   });
 });

@@ -62,10 +62,12 @@ test.describe('seller visual MVP', () => {
     await expect(page.getByLabel('Senha', { exact: true })).toHaveAttribute('type', 'text');
     await page.getByRole('button', { name: 'Ocultar' }).click();
     await page.route('**/api/v1/auth/session', (route) => route.fulfill({ status: 401, json: {} }));
-    await page.getByRole('button', { name: 'Entrar e ver minha rota' }).click();
+    await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'Confira seu e-mail' })).toBeVisible();
     await page.unroute('**/api/v1/auth/session');
-    await page.getByRole('button', { name: 'Entrar e ver minha rota' }).click();
+    await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+    await expect(page).toHaveURL(/\/home$/);
+    await page.getByRole('link', { name: /^Rota/ }).click();
     await expect(page).toHaveURL(/\/route$/);
     await expect(page.getByRole('heading', { name: 'Autopeças Central' })).toBeVisible();
     expect(await page.evaluate(() => Object.values(localStorage).join(' '))).not.toContain('synthetic-password');
@@ -92,7 +94,7 @@ test.describe('seller visual MVP', () => {
       expect(commands).toEqual([{ schemaVersion: 1, expectedVersion: 1, pendingStopIds: [id(12), id(10)] }]);
       await expect(page.locator('.seller-stop-card').nth(0)).toContainText('Baterias do Norte');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const targets = await page.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+      const targets = await page.locator('.seller-app').getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
       expect(targets.every((height) => height >= 44)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`route-${viewport.width}.png`), fullPage: true });
     });

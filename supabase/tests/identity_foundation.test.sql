@@ -70,10 +70,12 @@ select ok(has_function_privilege('authenticated', 'api.get_my_identity()', 'EXEC
 select ok(not has_function_privilege('authenticated', 'private.resolve_current_identity()', 'EXECUTE'), 'authenticated cannot execute the private resolver');
 select ok(not has_function_privilege('anon', 'api.get_my_identity()', 'EXECUTE'), 'anon cannot execute the identity wrapper');
 
-select is((select count(*)::integer from api.roles), 3, 'only confirmed roles are seeded');
-select is((select count(*)::integer from api.role_permissions), 11, 'only minimal identity, sync, route and visit capabilities are seeded');
-select is((select count(*)::integer from api.user_profiles), 9, 'nine synthetic profiles were provisioned');
-select is((select count(*)::integer from api.user_role_assignments where revoked_at is null), 9, 'each synthetic actor has one active role');
+select is((select count(*)::integer from api.roles), 4, 'confirmed roles include the dedicated logistics profile');
+select is((select count(*)::integer from api.role_permissions), 26, 'explicit identity, client import, sync, route, visit and scrap capabilities are seeded');
+select is((select count(*)::integer from api.user_profiles p join auth.users u on u.id=p.id
+  where u.raw_user_meta_data->>'actorKey' is distinct from 'logistics_a'), 9, 'nine foundational synthetic profiles were provisioned');
+select is((select count(*)::integer from api.user_role_assignments a join auth.users u on u.id=a.user_id
+  where a.revoked_at is null and u.raw_user_meta_data->>'actorKey' is distinct from 'logistics_a'), 9, 'each foundational synthetic actor has one active role');
 select is((select count(*)::integer from api.user_seller_scopes where revoked_at is null), 3, 'API, manual preview and browser regression actors have separate scopes');
 select is((select array_agg((manager.raw_user_meta_data ->> 'actorKey') || ':' ||
     (seller.raw_user_meta_data ->> 'actorKey') order by manager.raw_user_meta_data ->> 'actorKey')
@@ -93,7 +95,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
 select is(api.get_my_identity() ->> 'id', :'seller_a_id', 'seller A resolves only its own identity');
 select is(api.get_my_identity() -> 'roles', '["seller"]'::jsonb, 'seller A receives its active role');
-select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "route.read_self", "route.reorder_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller A receives minimal capabilities');
+select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "route.read_self", "route.reorder_self", "scrap.collect_self", "scrap.schedule_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller A receives explicit self capabilities without logistics receipt');
 select is(api.get_my_identity() -> 'scopeIds', jsonb_build_array(:'seller_a_id'::uuid), 'seller A scope is itself');
 select is((select count(*)::integer from api.user_profiles), 1, 'direct profile read is restricted to the caller');
 select is((select count(*)::integer from api.user_profiles where id = :'seller_b_id'::uuid), 0, 'seller A cannot read seller B profile');

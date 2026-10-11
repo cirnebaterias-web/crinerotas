@@ -200,6 +200,17 @@ export async function runRouteRoundTrip(
     .sort((left, right) => right.plannedOrder - left.plannedOrder ||
       right.routeVersionStopId.localeCompare(left.routeVersionStopId))
     .map(({ routeVersionStopId }) => routeVersionStopId);
+  if (pendingStopIds.length === 0) {
+    return {
+      status: 'ok', routeId: loadedRoute.routeId, routeVersion: loadedRoute.versionNumber,
+      executionVersion: loadedRoute.executionVersion, routeStatus: loadedRoute.status,
+      stopCount: loadedRoute.stops.length,
+      checks: {
+        created: createdNow, published: publishedNow, loadedBySeller: true,
+        composition, reasonConfirmed: true, reordered: 'already_canonical',
+      },
+    };
+  }
   const reorderCommand = reorderRouteExecutionRequestSchema.parse({
     schemaVersion: 1,
     expectedVersion: loadedRoute.executionVersion,

@@ -15,19 +15,34 @@ import {
   type SyncErrorCode,
   type SyncResult,
   type CompetitorPricesInput,
+  type CommercialActionsInput,
+  type VisitScrapInput,
+  type ScrapPoint,
   type OwnStockLine,
+  type StockInput,
   type CompetitorStockLine,
+  type LocalAttachment,
+  type LocalAttachmentMetadata,
+  localAttachmentMetadataSchema,
+  localVisitEvidenceSchema,
+  commercialActionListSchema,
+  type LocalVisitEvidence,
+  type CommercialActionList,
 } from '@cirne/contracts';
 import {
   createDraftMutation,
   createVisitStartMutation,
   createVisitStockMutation,
   createVisitPricesMutation,
+  createVisitCommercialActionsMutation,
+  createVisitScrapMutation,
   orderOutboxEvents,
   type DraftMutationIds,
   type VisitStartMutationIds,
   type VisitStockMutationIds,
   type VisitPricesMutationIds,
+  type VisitCommercialActionsMutationIds,
+  type VisitScrapMutationIds,
 } from '@cirne/domain';
 import type { OfflineDatabase } from './database';
 import { SyncEventPersistenceError } from './sync-persistence-error';
@@ -67,6 +82,7 @@ export interface SaveVisitStockCommand {
   mouraQuantity: number;
   observation?: string;
   ownLines?: OwnStockLine[];
+  completedOwnBrands?: StockInput['completedOwnBrands'];
   competitorLines?: CompetitorStockLine[];
   deviceSavedAt: string;
   ids: VisitStockMutationIds;
@@ -78,6 +94,22 @@ export interface SaveVisitPricesCommand {
   values: CompetitorPricesInput;
   deviceSavedAt: string;
   ids: VisitPricesMutationIds;
+}
+
+export interface SaveVisitCommercialActionsCommand {
+  partition: OfflinePartition;
+  offlineId: string;
+  values: CommercialActionsInput;
+  deviceSavedAt: string;
+  ids: VisitCommercialActionsMutationIds;
+}
+
+export interface SaveVisitScrapCommand {
+  partition: OfflinePartition;
+  offlineId: string;
+  values: VisitScrapInput;
+  deviceSavedAt: string;
+  ids: VisitScrapMutationIds;
 }
 
 type FailedOutboxStatus = Extract<OfflineOutboxEvent['status'], 'recoverable_error' | 'action_required'>;
@@ -194,6 +226,294 @@ export class OfflineRepository {
   async getDraft(partitionInput: OfflinePartition, offlineId: string) {
     const partition = offlinePartitionSchema.parse(partitionInput);
     return this.db.visitDrafts.get([partition.userId, partition.deviceId, offlineId]);
+  }
+
+  async listVisitAttachments(partitionInput: OfflinePartition, visitOfflineId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.attachments.where('[userId+deviceId+visitOfflineId]').equals([
+      partition.userId, partition.deviceId, visitOfflineId,
+    ]).sortBy('capturedAt');
+  }
+
+  async cacheScrapPoints(partitionInput: OfflinePartition, points: ScrapPoint[], cachedAt: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.transaction('rw', this.db.scrapPoints, async () => {
+      await this.db.scrapPoints.where('[userId+deviceId]').equals([
+        partition.userId, partition.deviceId,
+      ]).delete();
+      await this.db.scrapPoints.bulkPut(points.map((point) => ({ ...partition, ...point, cachedAt })));
+    });
+  }
+
+  async listScrapPoints(partitionInput: OfflinePartition) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return (await this.db.scrapPoints.where('[userId+deviceId]').equals([
+      partition.userId, partition.deviceId,
+    ]).toArray()).filter((point) => point.active).map(({ id, name, address, active, version }) =>
+      ({ id, name, address, active, version }));
+  }
+
+  async cacheCommercialActions(partitionInput: OfflinePartition, listInput: CommercialActionList, cachedAt: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const list = commercialActionListSchema.parse(listInput);
+    if (!Number.isFinite(Date.parse(cachedAt))) throw new Error('Data do catálogo comercial inválida.');
+    await this.db.commercialActionCatalogs.put({ ...partition, ...list, cachedAt });
+    return list;
+  }
+
+  async getCommercialActions(partitionInput: OfflinePartition) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const cached = await this.db.commercialActionCatalogs.get([partition.userId, partition.deviceId]);
+    if (!cached || !Number.isFinite(Date.parse(cached.cachedAt))) return null;
+    const list = commercialActionListSchema.safeParse({ schemaVersion: cached.schemaVersion, actions: cached.actions });
+    return list.success ? { ...list.data, cachedAt: cached.cachedAt } : null;
+  }
+
+  async saveVisitAttachment(
+    partitionInput: OfflinePartition,
+    input: LocalAttachmentMetadata & { blob: Blob },
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const { blob, ...metadataInput } = input;
+    const metadata = localAttachmentMetadataSchema.parse(metadataInput);
+    assertPartition(partition, metadata);
+    if (!(blob instanceof Blob) || blob.size !== metadata.byteSize ||
+        blob.type !== metadata.contentType) {
+      throw new Error('Arquivo de evidência incompatível com os metadados informados.');
+    }
+    const attachment: LocalAttachment = { ...metadata, blob };
+    return this.db.transaction('rw', this.db.attachments, this.db.visitDrafts, async () => {
+      const draft = await this.db.visitDrafts.get([
+        partition.userId, partition.deviceId, metadata.visitOfflineId,
+      ]);
+      if (!draft) throw new Error('Visita não encontrada nesta partição offline.');
+      const existing = await this.db.attachments.where('[userId+deviceId+visitOfflineId]').equals([
+        partition.userId, partition.deviceId, metadata.visitOfflineId,
+      ]).filter((item) => item.purpose === metadata.purpose &&
+        (metadata.purpose !== 'scrap_receipt' || item.targetOfflineId === metadata.targetOfflineId)).toArray();
+      if (metadata.purpose === 'stock_evidence' &&
+          existing.length >= 3 && !existing.some(({ offlineId }) => offlineId === metadata.offlineId)) {
+        throw new Error('É permitido anexar no máximo 3 fotos do estoque.');
+      }
+      if (metadata.purpose === 'scrap_receipt' &&
+          (existing.length >= 4 && !existing.some(({ offlineId }) => offlineId === metadata.offlineId))) {
+        throw new Error('É permitido anexar no máximo 4 fotos do termo de sucata.');
+      }
+      if (metadata.purpose === 'scrap_receipt' && !metadata.targetOfflineId) {
+        throw new Error('A foto do termo deve identificar a coleta.');
+      }
+      await this.db.attachments.put(attachment);
+      return attachment;
+    });
+  }
+
+  async saveVisitEvidence(
+    partitionInput: OfflinePartition,
+    evidenceInput: LocalVisitEvidence,
+    attachment?: LocalAttachment,
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const evidence = localVisitEvidenceSchema.parse(evidenceInput);
+    assertPartition(partition, evidence);
+    if (attachment) {
+      const { blob, ...metadata } = attachment;
+      localAttachmentMetadataSchema.parse(metadata);
+      assertPartition(partition, attachment);
+      if (!(blob instanceof Blob) || blob.size !== attachment.byteSize || blob.type !== attachment.contentType) {
+        throw new Error('Fotografia da fachada incompatível com os metadados informados.');
+      }
+      if (attachment.visitOfflineId !== evidence.visitOfflineId ||
+          attachment.offlineId !== evidence.attachmentOfflineId ||
+          attachment.purpose !== (evidence.kind === 'checkin' ? 'visit_checkin' : 'visit_checkout')) {
+        throw new Error('Fotografia da fachada não corresponde ao evento da visita.');
+      }
+    }
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.attachments, this.db.visitEvidence, async () => {
+      const key: [string, string, string] = [partition.userId, partition.deviceId, evidence.visitOfflineId];
+      const draft = await this.db.visitDrafts.get(key);
+      if (!draft) throw new Error('Visita não encontrada nesta partição offline.');
+      if (evidence.kind === 'checkout' && !draft.scrap) {
+        throw new Error('Responda a etapa de sucata antes de concluir a visita.');
+      }
+      const previous = await this.db.visitEvidence.where('[userId+deviceId+visitOfflineId+kind]').equals([
+        partition.userId, partition.deviceId, evidence.visitOfflineId, evidence.kind,
+      ]).first();
+      if (evidence.kind === 'checkout' && (draft.localStatus === 'completed' || (previous && previous.status !== 'pending'))) {
+        throw new Error('A visita já foi encerrada neste aparelho.');
+      }
+      if (previous?.attachmentOfflineId && previous.attachmentOfflineId !== evidence.attachmentOfflineId) {
+        await this.db.attachments.delete([partition.userId, partition.deviceId, previous.attachmentOfflineId]);
+      }
+      if (previous && previous.offlineId !== evidence.offlineId) {
+        await this.db.visitEvidence.delete([partition.userId, partition.deviceId, previous.offlineId]);
+      }
+      if (attachment) await this.db.attachments.put(attachment);
+      await this.db.visitEvidence.put(evidence);
+      if (evidence.kind === 'checkout') {
+        const completed = localVisitDraftSchema.parse({
+          ...draft,
+          currentStep: 'complete',
+          localStatus: 'completed',
+          deviceCompletedAt: evidence.capturedAt,
+          updatedAt: evidence.capturedAt,
+        });
+        await this.db.visitDrafts.put(completed);
+        return { evidence, draft: completed };
+      }
+      return { evidence, draft };
+    });
+  }
+
+  async listVisitEvidence(partitionInput: OfflinePartition, visitOfflineId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.visitEvidence.where('[userId+deviceId+visitOfflineId]').equals([
+      partition.userId, partition.deviceId, visitOfflineId,
+    ]).sortBy('capturedAt');
+  }
+
+  async listPendingVisitEvidence(partitionInput: OfflinePartition) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.visitEvidence.where('[userId+deviceId]').equals([
+      partition.userId, partition.deviceId,
+    ]).filter((item) => item.status === 'pending').sortBy('capturedAt');
+  }
+
+  async listPendingCommercialActionAttachments(partitionInput: OfflinePartition) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.attachments.where('[userId+deviceId]').equals([
+      partition.userId, partition.deviceId,
+    ]).filter((item) => item.purpose === 'commercial_action_evidence' && item.status === 'pending')
+      .sortBy('capturedAt');
+  }
+
+  async listPendingScrapAttachments(partitionInput: OfflinePartition) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.attachments.where('[userId+deviceId]').equals([
+      partition.userId, partition.deviceId,
+    ]).filter((item) => item.purpose === 'scrap_receipt' && item.status === 'pending')
+      .sortBy('capturedAt');
+  }
+
+  async getVisitAttachment(partitionInput: OfflinePartition, offlineId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.attachments.get([partition.userId, partition.deviceId, offlineId]);
+  }
+
+  async markVisitAttachmentVerified(
+    partitionInput: OfflinePartition,
+    offlineId: string,
+    remoteAttachmentId: string,
+    serverVerifiedAt: string,
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const key: [string, string, string] = [partition.userId, partition.deviceId, offlineId];
+    const attachment = await this.db.attachments.get(key);
+    if (!attachment) throw new SyncEventPersistenceError('Fotografia local não encontrada após confirmação.');
+    const { blob, ...metadata } = attachment;
+    const updatedMetadata = localAttachmentMetadataSchema.parse({
+      ...metadata, status: 'verified', remoteAttachmentId, serverVerifiedAt,
+    });
+    const updated = { ...updatedMetadata, blob };
+    await this.db.attachments.put(updated);
+    return updated;
+  }
+
+  async markVisitAttachmentActionRequired(partitionInput: OfflinePartition, offlineId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const key: [string, string, string] = [partition.userId, partition.deviceId, offlineId];
+    const attachment = await this.db.attachments.get(key);
+    if (!attachment) return undefined;
+    const { blob, ...metadata } = attachment;
+    const updatedMetadata = localAttachmentMetadataSchema.parse({ ...metadata, status: 'action_required' });
+    const updated = { ...updatedMetadata, blob };
+    await this.db.attachments.put(updated);
+    return updated;
+  }
+
+  async markVisitEvidenceSynced(
+    partitionInput: OfflinePartition,
+    evidenceOfflineId: string,
+    serverSyncedAt: string,
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const evidenceKey: [string, string, string] = [partition.userId, partition.deviceId, evidenceOfflineId];
+    return this.db.transaction('rw', this.db.visitEvidence, this.db.attachments, this.db.visitDrafts,
+      this.db.outboxEvents, async () => {
+      const evidence = await this.db.visitEvidence.get(evidenceKey);
+      if (!evidence) throw new SyncEventPersistenceError('Evidência local não encontrada após confirmação.');
+      const updatedEvidence = localVisitEvidenceSchema.parse({
+        ...evidence, status: 'synced', serverSyncedAt,
+      });
+      await this.db.visitEvidence.put(updatedEvidence);
+      if (evidence.attachmentOfflineId) {
+        const attachmentKey: [string, string, string] = [
+          partition.userId, partition.deviceId, evidence.attachmentOfflineId,
+        ];
+        const attachment = await this.db.attachments.get(attachmentKey);
+        if (!attachment) throw new SyncEventPersistenceError('Fotografia local não encontrada após sincronização.');
+        const { blob, ...metadata } = attachment;
+        const updatedMetadata = localAttachmentMetadataSchema.parse({ ...metadata, status: 'synced' });
+        await this.db.attachments.put({ ...updatedMetadata, blob });
+      }
+      if (evidence.kind === 'checkout') {
+        const draftKey: [string, string, string] = [
+          partition.userId, partition.deviceId, evidence.visitOfflineId,
+        ];
+        const draft = await this.db.visitDrafts.get(draftKey);
+        if (!draft) throw new SyncEventPersistenceError('Visita local não encontrada após conclusão.');
+        const remainingEvents = await this.db.outboxEvents
+          .where('[userId+deviceId+aggregateId+sequence]')
+          .between(
+            [partition.userId, partition.deviceId, evidence.visitOfflineId, Dexie.minKey],
+            [partition.userId, partition.deviceId, evidence.visitOfflineId, Dexie.maxKey],
+          ).count();
+        if (remainingEvents === 0) {
+          await this.db.visitDrafts.put(localVisitDraftSchema.parse({ ...draft, persistenceState: 'synced' }));
+        }
+      }
+      return updatedEvidence;
+    });
+  }
+
+  async markVisitEvidenceActionRequired(partitionInput: OfflinePartition, evidenceOfflineId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const key: [string, string, string] = [partition.userId, partition.deviceId, evidenceOfflineId];
+    const evidence = await this.db.visitEvidence.get(key);
+    if (!evidence) return undefined;
+    const updated = localVisitEvidenceSchema.parse({ ...evidence, status: 'action_required' });
+    await this.db.visitEvidence.put(updated);
+    return updated;
+  }
+
+  async purgeExpiredVisitEvidence(partitionInput: OfflinePartition, now: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.transaction('rw', this.db.visitEvidence, this.db.attachments, async () => {
+      const expired = await this.db.visitEvidence.where('[userId+deviceId]').equals([
+        partition.userId, partition.deviceId,
+      ]).filter((item) => item.expiresAt <= now).toArray();
+      for (const evidence of expired) {
+        if (evidence.attachmentOfflineId) {
+          await this.db.attachments.delete([partition.userId, partition.deviceId, evidence.attachmentOfflineId]);
+        }
+        await this.db.visitEvidence.delete([partition.userId, partition.deviceId, evidence.offlineId]);
+      }
+      return expired.length;
+    });
+  }
+
+  async deleteVisitAttachment(
+    partitionInput: OfflinePartition,
+    visitOfflineId: string,
+    offlineId: string,
+  ) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const key: [string, string, string] = [partition.userId, partition.deviceId, offlineId];
+    return this.db.transaction('rw', this.db.attachments, async () => {
+      const attachment = await this.db.attachments.get(key);
+      if (!attachment || attachment.visitOfflineId !== visitOfflineId) return false;
+      await this.db.attachments.delete(key);
+      return true;
+    });
   }
 
   async findDraftForStop(partitionInput: OfflinePartition, routeVersionStopId: string) {
@@ -337,6 +657,21 @@ export class OfflineRepository {
         ...(event.operation === 'visit.prices.saved.v1' && draft.prices?.eventId === event.eventId ? {
           prices: {
             ...draft.prices,
+            persistenceState: 'synced' as const,
+            serverSavedAt: confirmationInput.confirmedAt,
+          },
+        } : {}),
+        ...(event.operation === 'visit.commercial-actions.saved.v1' &&
+          draft.commercialActions?.eventId === event.eventId ? {
+            commercialActions: {
+              ...draft.commercialActions,
+              persistenceState: 'synced' as const,
+              serverSavedAt: confirmationInput.confirmedAt,
+            },
+          } : {}),
+        ...(event.operation === 'visit.scrap.saved.v1' && draft.scrap?.eventId === event.eventId ? {
+          scrap: {
+            ...draft.scrap,
             persistenceState: 'synced' as const,
             serverSavedAt: confirmationInput.confirmedAt,
           },
@@ -535,6 +870,7 @@ export class OfflineRepository {
           heliarQuantity: command.heliarQuantity,
           mouraQuantity: command.mouraQuantity,
           ...(command.ownLines ? { ownLines: command.ownLines } : {}),
+          ...(command.completedOwnBrands ? { completedOwnBrands: command.completedOwnBrands } : {}),
           ...(command.competitorLines ? { competitorLines: command.competitorLines } : {}),
           ...(command.observation === undefined ? {} : { observation: command.observation }),
         },
@@ -576,6 +912,93 @@ export class OfflineRepository {
         ).last();
       const sequence = Math.max(lastPending?.sequence ?? 0, currentDraft.lastConfirmedSequence ?? 0) + 1;
       const mutation = createVisitPricesMutation({
+        draft: currentDraft,
+        values: command.values,
+        deviceSavedAt: command.deviceSavedAt,
+        sequence,
+        ids: command.ids,
+      });
+      await this.db.visitDrafts.put(mutation.draft);
+      await this.db.outboxEvents.add(mutation.event);
+      return mutation;
+    });
+  }
+
+  async saveVisitCommercialActionsAndEnqueue(command: SaveVisitCommercialActionsCommand): Promise<{
+    draft: LocalVisitDraft;
+    event: OfflineOutboxEvent;
+  }> {
+    const partition = offlinePartitionSchema.parse(command.partition);
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, async () => {
+      const draftKey: [string, string, string] = [partition.userId, partition.deviceId, command.offlineId];
+      const currentDraft = await this.db.visitDrafts.get(draftKey);
+      if (!currentDraft) throw new Error('Visita não encontrada nesta partição offline.');
+      assertPartition(partition, currentDraft);
+
+      const eventCollision = await this.db.outboxEvents.get([
+        partition.userId, partition.deviceId, command.ids.eventId,
+      ]);
+      const keyCollision = await this.db.outboxEvents
+        .where('[userId+deviceId+idempotencyKey]')
+        .equals([partition.userId, partition.deviceId, command.ids.idempotencyKey])
+        .first();
+      if (eventCollision || keyCollision) throw new Error('Identificador de evento local já utilizado.');
+
+      const lastPending = await this.db.outboxEvents
+        .where('[userId+deviceId+aggregateType+aggregateId+sequence]')
+        .between(
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.minKey],
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.maxKey],
+        ).last();
+      const sequence = Math.max(lastPending?.sequence ?? 0, currentDraft.lastConfirmedSequence ?? 0) + 1;
+      const mutation = createVisitCommercialActionsMutation({
+        draft: currentDraft,
+        values: command.values,
+        deviceSavedAt: command.deviceSavedAt,
+        sequence,
+        ids: command.ids,
+      });
+      await this.db.visitDrafts.put(mutation.draft);
+      await this.db.outboxEvents.add(mutation.event);
+      return mutation;
+    });
+  }
+
+  async saveVisitScrapAndEnqueue(command: SaveVisitScrapCommand): Promise<{
+    draft: LocalVisitDraft;
+    event: OfflineOutboxEvent;
+  }> {
+    const partition = offlinePartitionSchema.parse(command.partition);
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, this.db.attachments, async () => {
+      const draftKey: [string, string, string] = [partition.userId, partition.deviceId, command.offlineId];
+      const currentDraft = await this.db.visitDrafts.get(draftKey);
+      if (!currentDraft) throw new Error('Visita não encontrada nesta partição offline.');
+      assertPartition(partition, currentDraft);
+      const eventCollision = await this.db.outboxEvents.get([
+        partition.userId, partition.deviceId, command.ids.eventId,
+      ]);
+      const keyCollision = await this.db.outboxEvents
+        .where('[userId+deviceId+idempotencyKey]')
+        .equals([partition.userId, partition.deviceId, command.ids.idempotencyKey])
+        .first();
+      if (eventCollision || keyCollision) throw new Error('Identificador de evento local já utilizado.');
+      const lastPending = await this.db.outboxEvents
+        .where('[userId+deviceId+aggregateType+aggregateId+sequence]')
+        .between(
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.minKey],
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.maxKey],
+        ).last();
+      const sequence = Math.max(lastPending?.sequence ?? 0, currentDraft.lastConfirmedSequence ?? 0) + 1;
+      if (command.values.availability === 'collected') {
+        for (const offlineId of command.values.collection.attachmentOfflineIds) {
+          const photo = await this.db.attachments.get([partition.userId, partition.deviceId, offlineId]);
+          if (!photo || photo.visitOfflineId !== command.offlineId || photo.purpose !== 'scrap_receipt' ||
+              photo.targetOfflineId !== command.values.collection.offlineId) {
+            throw new Error('Foto do termo de sucata não encontrada nesta visita.');
+          }
+        }
+      }
+      const mutation = createVisitScrapMutation({
         draft: currentDraft,
         values: command.values,
         deviceSavedAt: command.deviceSavedAt,

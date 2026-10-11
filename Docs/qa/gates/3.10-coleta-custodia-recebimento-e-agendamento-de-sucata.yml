@@ -1,0 +1,66 @@
+schema: 1
+story: '3.10'
+story_title: 'Coleta, custódia, recebimento e agendamento de sucata'
+gate: WAIVED
+status_reason: 'A implementação, a carteira autorizada e a restauração integral local foram validadas. A operação externa de backup e retenção por cinco anos permanece obrigatória para go-live e foi explicitamente aceita pelo usuário como pendência operacional.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'working-tree:3adebbe4cdb9ba4c8428518f377206a997db0e21c5003efc835f26b10a1efeb4'
+updated: '2026-10-10T16:36:46-03:00'
+expires: '2026-10-24T16:36:46-03:00'
+top_issues:
+  - id: 'REQ-001'
+    severity: high
+    finding: 'O ensaio integral local comprova restauração de banco, Auth, RLS, funções, metadados e bytes privados, mas não comprova a existência e conservação de cópias externas criptografadas por cinco anos em produção.'
+    suggested_action: 'Antes do go-live, configurar o destino externo criptografado, formalizar a política de retenção e agendar restaurações periódicas com evidência preservada.'
+    suggested_owner: po
+    refs:
+      - 'Docs/stories/3.10.story.md'
+      - 'Docs/qa/evidence/3.10/scrap-full-restore-drill-20261009.md'
+      - 'Docs/runbooks/scrap-backup-restore.md'
+waiver:
+  active: true
+  reason: 'Dependência de infraestrutura produtiva aceita como gate obrigatório de go-live; a story pode encerrar após o ensaio integral local aprovado.'
+  approved_by: 'Usuário/Cirne — autorização para prosseguir em 2026-10-10'
+quality_score: 80
+evidence:
+  review: 'Docs/stories/3.10.story.md#qa-results'
+  restore_drill: 'Docs/qa/evidence/3.10/scrap-full-restore-drill-20261009.md'
+  tests_reviewed: 859
+  risks_identified: 1
+  current_run:
+    unit_passed: 305
+    unit_skipped: 1
+    pgtap_passed: 518
+    integration_passed: 18
+    controlled_e2e_passed: 56
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    full_restore_drill: PASS
+    identity_restored: true
+    rls_restored: true
+    private_bucket_restored: true
+    evidence_objects_verified: 1
+    coderabbit_final_findings: 0
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18]
+    ac_waived: [14]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'A carteira explícita cliente-vendedor falha fechada na busca e na gravação avulsa; RLS, capacidades, checksum e evidências privadas foram validados.'
+  performance:
+    status: PASS
+    notes: 'Consultas e payloads possuem limites explícitos; nenhuma regressão foi observada nos testes aplicáveis.'
+  reliability:
+    status: CONCERNS
+    notes: 'A restauração integral local passou; a continuidade externa produtiva depende da ação obrigatória registrada no waiver.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos compartilhados, comandos idempotentes, migrações incrementais, runbook, ensaio reproduzível e testes multinível oferecem rastreabilidade adequada.'
+recommendations:
+  immediate:
+    - action: 'Tratar backup externo criptografado, retenção e ensaio periódico como bloqueadores de go-live.'
+      refs: ['Docs/runbooks/scrap-backup-restore.md']
+  future: []

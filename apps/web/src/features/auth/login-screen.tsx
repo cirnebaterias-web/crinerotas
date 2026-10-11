@@ -16,11 +16,11 @@ export function LoginScreen() {
     setBusy(true);
     setError('');
     try {
-      await sellerClient.login({ email: String(form.get('email') ?? ''), password: String(form.get('password') ?? '') });
-      window.location.replace('/route');
+      const identity = await sellerClient.login({ email: String(form.get('email') ?? ''), password: String(form.get('password') ?? '') });
+      window.location.replace(identity.capabilities.includes('scrap.read_operations') ? '/management/scrap' : '/home');
     } catch (failure) {
       setError(failure instanceof SellerHttpError && [400, 401, 403].includes(failure.status)
-        ? 'Não foi possível entrar. Confira seu e-mail, senha e acesso de vendedor.'
+        ? 'Não foi possível entrar. Confira seu e-mail, senha e se o acesso está ativo.'
         : 'Não foi possível conectar. Confira sua conexão e tente novamente.');
       setBusy(false);
     }
@@ -38,9 +38,9 @@ export function LoginScreen() {
     </section>
     <section className="seller-login-area" aria-labelledby="login-title">
       <div className="seller-login-form">
-        <span className="seller-tag">ACESSO DO VENDEDOR</span>
+        <span className="seller-tag">ACESSO À OPERAÇÃO</span>
         <h2 id="login-title">Vamos começar?</h2>
-        <p className="seller-muted">Entre com sua conta para ver a rota do dia.</p>
+        <p className="seller-muted">Entre com sua conta de vendedor, gestão ou logística.</p>
         <form onSubmit={submit} aria-busy={busy}>
           <label htmlFor="email">E-mail</label>
           <input id="email" name="email" type="email" autoComplete="username" required maxLength={254} placeholder="seu.email@empresa.com.br" disabled={busy} />
@@ -50,7 +50,7 @@ export function LoginScreen() {
             <button type="button" onClick={() => setShowPassword(!showPassword)} aria-pressed={showPassword} disabled={busy}>{showPassword ? 'Ocultar' : 'Mostrar'}</button>
           </div>
           {error && <p className="seller-notice seller-error" role="alert">{error}</p>}
-          <button className="seller-button seller-primary seller-login-submit" disabled={busy} type="submit">{busy ? 'Entrando…' : 'Entrar e ver minha rota'} <span aria-hidden="true">→</span></button>
+          <button className="seller-button seller-primary seller-login-submit" disabled={busy} type="submit">{busy ? 'Entrando…' : 'Entrar'} <span aria-hidden="true">→</span></button>
         </form>
         <details className="seller-help"><summary>Precisa de ajuda para entrar?</summary><p>Peça ao administrador a liberação do seu acesso ou a redefinição da senha. Esta demonstração não envia e-mails de recuperação.</p></details>
         <p className="seller-online-note"><span aria-hidden="true">◉</span> Conecte-se à internet para entrar e carregar sua rota.</p>

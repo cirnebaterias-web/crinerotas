@@ -7,7 +7,9 @@ test('removed client keeps its original offline visit after real republication a
   await page.goto('/login');
   await page.getByLabel('E-mail', { exact: true }).fill(realRoute.seller.email);
   await page.getByLabel('Senha', { exact: true }).fill(realRoute.seller.password);
-  await page.getByRole('button', { name: 'Entrar e ver minha rota' }).click();
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(page).toHaveURL(/\/home$/);
+  await page.getByRole('link', { name: /^Rota/ }).click();
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
   const response = await request.get('/api/v1/me/routes/today', {
     headers: { Authorization: `Bearer ${realRoute.seller.accessToken}` },
@@ -88,7 +90,9 @@ test('seller keeps the cached route offline and receives the manager revision af
   await page.screenshot({ path: testInfo.outputPath('login-mobile.png'), fullPage: true });
   await page.getByLabel('E-mail', { exact: true }).fill(realRoute.seller.email);
   await page.getByLabel('Senha', { exact: true }).fill(realRoute.seller.password);
-  await page.getByRole('button', { name: 'Entrar e ver minha rota' }).click();
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(page).toHaveURL(/\/home$/);
+  await page.getByRole('link', { name: /^Rota/ }).click();
   await expect(page).toHaveURL(/\/route$/);
   await expect(page.locator('.seller-stop-card')).toHaveCount(2);
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
@@ -178,7 +182,9 @@ test('seller starts offline, reloads the pending visit and confirms it after rec
   await page.goto('/login');
   await page.getByLabel('E-mail', { exact: true }).fill(realRoute.seller.email);
   await page.getByLabel('Senha', { exact: true }).fill(realRoute.seller.password);
-  await page.getByRole('button', { name: 'Entrar e ver minha rota' }).click();
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(page).toHaveURL(/\/home$/);
+  await page.getByRole('link', { name: /^Rota/ }).click();
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
   await context.setOffline(true);
   await page.goto('/route', { waitUntil: 'domcontentloaded' });
@@ -203,7 +209,9 @@ test('seller saves real stock and reopens the canonical visit offline without du
   await page.goto('/login');
   await page.getByLabel('E-mail', { exact: true }).fill(realRoute.seller.email);
   await page.getByLabel('Senha', { exact: true }).fill(realRoute.seller.password);
-  await page.getByRole('button', { name: 'Entrar e ver minha rota' }).click();
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(page).toHaveURL(/\/home$/);
+  await page.getByRole('link', { name: /^Rota/ }).click();
   await expect(page).toHaveURL(/\/route$/);
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
   const start = page.getByRole('button', { name: 'Iniciar visita' }).first();

@@ -38,6 +38,27 @@ function makeRepository() {
   return { db, repository: new OfflineRepository(db) };
 }
 
+describe('commercial action catalog cache', () => {
+  it('distinguishes missing catalogs from validated empty catalogs and isolates users and devices', async () => {
+    const { repository } = makeRepository();
+    expect(await repository.getCommercialActions(partitionA)).toBeNull();
+    await repository.cacheCommercialActions(partitionA, { schemaVersion: 1, actions: [] }, '2026-09-11T12:00:00.000Z');
+    expect(await repository.getCommercialActions(partitionA)).toEqual({
+      schemaVersion: 1, actions: [], cachedAt: '2026-09-11T12:00:00.000Z',
+    });
+    expect(await repository.getCommercialActions(partitionB)).toBeNull();
+    expect(await repository.getCommercialActions({ ...partitionA, deviceId: partitionB.userId })).toBeNull();
+  });
+
+  it.each(['payload', 'timestamp'])('treats an invalid cached %s as unavailable', async (invalid) => {
+    const { db, repository } = makeRepository();
+    await repository.cacheCommercialActions(partitionA, { schemaVersion: 1, actions: [] }, '2026-09-11T12:00:00.000Z');
+    await db.commercialActionCatalogs.update([partitionA.userId, partitionA.deviceId],
+      invalid === 'payload' ? { schemaVersion: 2 as never } : { cachedAt: 'invalid' });
+    expect(await repository.getCommercialActions(partitionA)).toBeNull();
+  });
+});
+
 function command(overrides: Partial<SaveDraftCommand> = {}): SaveDraftCommand {
   return {
     partition: partitionA,
@@ -142,7 +163,7 @@ describe('OfflineRepository', () => {
     expect(await repository.listDrafts(partitionB)).toEqual([]);
   });
 
-  it.each([2, 7])('preserves route, session, draft and outbox during the schema v%s to v9 upgrade', async (version) => {
+  it.each([2, 7])('preserves route, session, draft and outbox during the schema v%s to v10 upgrade', async (version) => {
     const name = `offline-migration-${crypto.randomUUID()}`;
     names.push(name);
     const legacy = new Dexie(name, { indexedDB, IDBKeyRange });
@@ -809,5 +830,137 @@ describe('OfflineRepository', () => {
     expect(await repository.getDraft(partitionA, stock.draft.offlineId)).toMatchObject({
       prices: { availability: 'unavailable', persistenceState: 'synced', serverSavedAt: '2026-09-21T12:00:01.000Z' },
     });
+  });
+
+  it('stores at most three compressed stock photos and isolates them by user', async () => {
+    const { repository } = makeRepository();
+    await seedCanonical(repository);
+    const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+    const makeAttachment = (offlineId: string) => ({
+      schemaVersion: 1 as const,
+      ...partitionA,
+      offlineId,
+      visitOfflineId: started.draft.offlineId,
+      purpose: 'stock_evidence' as const,
+      fileName: 'estoque.jpg',
+      contentType: 'image/jpeg' as const,
+      byteSize: 4,
+      width: 10,
+      height: 10,
+      checksum: 'a'.repeat(64),
+      capturedAt: '2026-09-30T12:00:00.000Z',
+      status: 'pending' as const,
+      blob: new Blob(['foto'], { type: 'image/jpeg' }),
+    });
+    const ids = [
+      '10000000-0000-4000-8000-000000000011',
+      '10000000-0000-4000-8000-000000000012',
+      '10000000-0000-4000-8000-000000000013',
+    ];
+    for (const id of ids) await repository.saveVisitAttachment(partitionA, makeAttachment(id));
+    expect(await repository.listVisitAttachments(partitionA, started.draft.offlineId)).toHaveLength(3);
+    expect(await repository.listVisitAttachments(partitionB, started.draft.offlineId)).toEqual([]);
+    await expect(repository.saveVisitAttachment(
+      partitionA,
+      makeAttachment('10000000-0000-4000-8000-000000000014'),
+    )).rejects.toThrow('no máximo 3');
+    await expect(repository.deleteVisitAttachment(partitionB, started.draft.offlineId, ids[0]!)).resolves.toBe(false);
+    await expect(repository.deleteVisitAttachment(partitionA, started.draft.offlineId, ids[0]!)).resolves.toBe(true);
+    expect(await repository.listVisitAttachments(partitionA, started.draft.offlineId)).toHaveLength(2);
+  });
+
+  it('persists remote evidence confirmations atomically with their local photo', async () => {
+    const { repository } = makeRepository();
+    await seedCanonical(repository);
+    const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+    const photoId = '10000000-0000-4000-8000-000000000021';
+    const evidenceId = '10000000-0000-4000-8000-000000000022';
+    const blob = new Blob(['foto'], { type: 'image/jpeg' });
+    const attachment = {
+      schemaVersion: 1 as const, ...partitionA, offlineId: photoId,
+      visitOfflineId: started.draft.offlineId, purpose: 'visit_checkin' as const,
+      fileName: 'fachada.jpg', contentType: 'image/jpeg' as const, byteSize: blob.size,
+      width: 10, height: 10, checksum: 'b'.repeat(64),
+      capturedAt: '2026-10-05T12:00:00.000Z', status: 'pending' as const, blob,
+    };
+    const evidence = {
+      schemaVersion: 1 as const, ...partitionA, offlineId: evidenceId,
+      visitOfflineId: started.draft.offlineId, kind: 'checkin' as const,
+      attachmentOfflineId: photoId, capturedAt: '2026-10-05T12:00:00.000Z',
+      latitude: '-7.1195', longitude: '-34.8450', accuracyM: '10', distanceM: '15',
+      radiusM: 100 as const, desiredAccuracyM: 50 as const, issues: [],
+      status: 'pending' as const, expiresAt: '2027-04-03T12:00:00.000Z',
+    };
+    await repository.saveVisitEvidence(partitionA, evidence, attachment);
+    expect(await repository.listPendingVisitEvidence(partitionA)).toMatchObject([{ offlineId: evidenceId }]);
+
+    await repository.markVisitAttachmentVerified(
+      partitionA, photoId, '10000000-0000-4000-8000-000000000023', '2026-10-05T12:00:01.000Z',
+    );
+    await repository.markVisitEvidenceSynced(partitionA, evidenceId, '2026-10-05T12:00:02.000Z');
+
+    expect(await repository.getVisitAttachment(partitionA, photoId)).toMatchObject({
+      status: 'synced', remoteAttachmentId: '10000000-0000-4000-8000-000000000023',
+      serverVerifiedAt: '2026-10-05T12:00:01.000Z',
+    });
+    expect(await repository.listVisitEvidence(partitionA, started.draft.offlineId)).toMatchObject([{
+      status: 'synced', serverSyncedAt: '2026-10-05T12:00:02.000Z',
+    }]);
+    expect(await repository.listPendingVisitEvidence(partitionA)).toEqual([]);
+  });
+
+  it('rejects repeated checkout and does not mark a completed draft synced while outbox events remain', async () => {
+    const { db, repository } = makeRepository();
+    await seedCanonical(repository);
+    const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+    await db.visitDrafts.update(
+      [partitionA.userId, partitionA.deviceId, started.draft.offlineId],
+      {
+        scrap: {
+          eventId: '10000000-0000-4000-8000-000000000030',
+          availability: 'none',
+          deviceSavedAt: '2026-10-05T12:05:00.000Z',
+          persistenceState: 'saved_on_device',
+        },
+      },
+    );
+    const checkout = {
+      schemaVersion: 1 as const, ...partitionA,
+      offlineId: '10000000-0000-4000-8000-000000000031',
+      visitOfflineId: started.draft.offlineId,
+      kind: 'checkout' as const,
+      attachmentOfflineId: '10000000-0000-4000-8000-000000000033',
+      capturedAt: '2026-10-05T12:10:00.000Z',
+      latitude: '-7.1195', longitude: '-34.8450', accuracyM: '10', distanceM: '15',
+      radiusM: 100 as const, desiredAccuracyM: 50 as const, issues: [],
+      status: 'pending' as const, expiresAt: '2027-04-03T12:10:00.000Z',
+    };
+    const checkoutBlob = new Blob(['checkout'], { type: 'image/jpeg' });
+    const checkoutAttachment = {
+      schemaVersion: 1 as const, ...partitionA, offlineId: checkout.attachmentOfflineId,
+      visitOfflineId: started.draft.offlineId, purpose: 'visit_checkout' as const,
+      fileName: 'checkout.jpg', contentType: 'image/jpeg' as const, byteSize: checkoutBlob.size,
+      width: 10, height: 10, checksum: 'c'.repeat(64), capturedAt: checkout.capturedAt,
+      status: 'pending' as const, blob: checkoutBlob,
+    };
+
+    await repository.saveVisitEvidence(partitionA, checkout, checkoutAttachment);
+    const repeatedAttachment = {
+      ...checkoutAttachment, offlineId: '10000000-0000-4000-8000-000000000034',
+    };
+    await expect(repository.saveVisitEvidence(partitionA, {
+      ...checkout,
+      offlineId: '10000000-0000-4000-8000-000000000032',
+      attachmentOfflineId: repeatedAttachment.offlineId,
+    }, repeatedAttachment)).rejects.toThrow('já foi encerrada');
+
+    await repository.markVisitEvidenceSynced(
+      partitionA, checkout.offlineId, '2026-10-05T12:11:00.000Z',
+    );
+    const persisted = await db.visitDrafts.get([
+      partitionA.userId, partitionA.deviceId, started.draft.offlineId,
+    ]);
+    expect(persisted).toMatchObject({ localStatus: 'completed', persistenceState: 'saved_on_device' });
+    expect(await repository.listVisitEvidence(partitionA, started.draft.offlineId)).toHaveLength(1);
   });
 });

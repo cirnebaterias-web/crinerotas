@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readIdentityConfig, readServerConfig } from './server';
+import { readEvidenceConfig, readIdentityConfig, readServerConfig } from './server';
 import * as publicConfig from './public';
 
 describe('configuration boundaries', () => {
@@ -41,5 +41,15 @@ describe('configuration boundaries', () => {
     });
     expect(() => readIdentityConfig({ ...env, SUPABASE_PUBLIC_URL: 'https://user:secret@example.com' }))
       .toThrow('SUPABASE_PUBLIC_URL');
+  });
+  it('keeps remote evidence disabled unless explicitly activated', () => {
+    expect(readEvidenceConfig({})).toEqual({
+      EVIDENCE_REMOTE_SYNC_ENABLED: false,
+      EVIDENCE_STORAGE_BUCKET: 'visit-evidence',
+    });
+    expect(readEvidenceConfig({ EVIDENCE_REMOTE_SYNC_ENABLED: 'true' }))
+      .toMatchObject({ EVIDENCE_REMOTE_SYNC_ENABLED: true });
+    expect(() => readEvidenceConfig({ EVIDENCE_REMOTE_SYNC_ENABLED: 'yes' }))
+      .toThrow('EVIDENCE_REMOTE_SYNC_ENABLED');
   });
 });

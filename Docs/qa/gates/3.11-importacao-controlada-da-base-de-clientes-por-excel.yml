@@ -1,0 +1,49 @@
+schema: 1
+story: '3.11'
+story_title: 'Importação controlada da base de clientes por Excel'
+gate: PASS
+status_reason: 'Os 15 critérios de aceite estão cobertos por testes unitários, pgTAP, integração e E2E, sem achados bloqueantes de segurança, confiabilidade ou qualidade. AB-13 permanece como gate operacional para dados reais e não afeta o aceite da implementação sintética.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'story-sha256:32b1ad8a6fe6f79536ed41fb4cab59c7effe0817f960b3b9aa653f3567cac6e9'
+updated: '2026-10-11T01:52:37-03:00'
+expires: '2026-10-25T01:52:37-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  review: 'Docs/stories/3.11.story.md#qa-results'
+  tests_reviewed: 878
+  risks_identified: 0
+  current_run:
+    unit_passed: 315
+    unit_skipped: 1
+    pgtap_passed: 543
+    integration_passed: 19
+    e2e_passed: 1
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    database_reset: PASS
+    dependency_audit: PASS
+    coderabbit_final_findings: 0
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Capacidades, isolamento por carteira, RLS/grants, limites de upload/ZIP, rejeição de fórmulas e ausência de credenciais privilegiadas no navegador foram validados.'
+  performance:
+    status: PASS
+    notes: 'Corpo HTTP, quantidade e expansão de entradas ZIP, linhas processadas e paginação possuem limites explícitos e testados.'
+  reliability:
+    status: PASS
+    notes: 'Aplicação atômica por linha, sucesso parcial, checksum idempotente, auditoria e consulta canônica do lote foram comprovados em banco e integração.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos compartilhados, handlers finos, serviço isolado, migrações incrementais e testes multinível mantêm as fronteiras arquiteturais.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Fechar AB-13 e executar o gate Pre-Deployment antes de importar qualquer arquivo ou dado real.'
+      refs: ['Docs/stories/3.11.story.md']

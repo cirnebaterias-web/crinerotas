@@ -27,6 +27,12 @@ const identitySchema = z.object({
   SUPABASE_PUBLISHABLE_KEY: z.string().trim().min(20).max(512),
 });
 
+const evidenceSchema = z.object({
+  EVIDENCE_REMOTE_SYNC_ENABLED: z.enum(['true', 'false']).default('false')
+    .transform((value) => value === 'true'),
+  EVIDENCE_STORAGE_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9_-]{2,62}$/).default('visit-evidence'),
+});
+
 export function readServerConfig(env: Record<string, string | undefined>) {
   const result = schema.safeParse(env);
   if (!result.success) {
@@ -42,6 +48,15 @@ export function readIdentityConfig(env: Record<string, string | undefined>) {
   if (!result.success) {
     const keys = [...new Set(result.error.issues.map((issue) => issue.path[0]))].join(', ');
     throw new Error(`Configuração de identidade inválida: ${keys}. Confira o exemplo de ambiente.`);
+  }
+  return result.data;
+}
+
+export function readEvidenceConfig(env: Record<string, string | undefined>) {
+  const result = evidenceSchema.safeParse(env);
+  if (!result.success) {
+    const keys = [...new Set(result.error.issues.map((issue) => issue.path[0]))].join(', ');
+    throw new Error(`Configuração de evidências inválida: ${keys}. Confira o exemplo de ambiente.`);
   }
   return result.data;
 }

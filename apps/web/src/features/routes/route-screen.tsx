@@ -9,6 +9,8 @@ import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { isSessionFailure, sellerClient, SellerHttpError } from '@/lib/seller-client';
 import { formatServiceDate, movePending, orderedStops, pendingIds, routeProgress } from './route-model';
 import { NavigationActions } from './navigation-actions';
+import { VisitEvidenceCapture, type VisitEvidenceCaptureValue } from '@/features/visits/visit-evidence-capture';
+import { checkinFailureMessage } from './checkin-failure-message';
 
 const statusLabels = { pending: 'Pendente', in_visit: 'Em visita', completed: 'Visitado', not_visited: 'Não visitado' };
 
@@ -25,6 +27,7 @@ export function RouteScreen() {
   const [compositionMessage, setCompositionMessage] = useState('');
   const [visitDrafts, setVisitDrafts] = useState<Record<string, LocalVisitDraft>>({});
   const [visitBusyStop, setVisitBusyStop] = useState<string | null>(null);
+  const [checkinStop, setCheckinStop] = useState<CanonicalRoute['stops'][number] | null>(null);
   const generation = useRef(0);
   const accessBlocked = useRef(false);
   const cacheGeneration = useRef(0);
@@ -158,25 +161,55 @@ export function RouteScreen() {
 
   async function beginVisit(stop: CanonicalRoute['stops'][number]) {
     if (accessBlocked.current || !identity || !offlineService.current || visitBusyStop) return;
-    const current = generation.current;
     const existing = visitDrafts[stop.routeVersionStopId];
     if (existing) {
-      window.location.assign(`/visit/${existing.offlineId}?step=${existing.currentStep}`);
+      try {
+        const evidence = await offlineService.current.listVisitEvidence(identity.id, existing.offlineId);
+        if (evidence.some((item) => item.kind === 'checkin')) {
+          window.location.assign(`/visit/${existing.offlineId}?step=${existing.currentStep}`);
+        } else {
+          setCheckinStop(stop);
+          setMessage('A visita está salva, mas o check-in precisa ser concluído.');
+        }
+      } catch {
+        setMessage('Não foi possível verificar a evidência salva neste aparelho. Tente novamente.');
+      }
       return;
     }
+    setCheckinStop(stop);
+  }
+
+  async function confirmCheckin(stop: CanonicalRoute['stops'][number], evidence: VisitEvidenceCaptureValue) {
+    if (accessBlocked.current || !identity || !offlineService.current || visitBusyStop) return;
+    const current = generation.current;
     setVisitBusyStop(stop.routeVersionStopId);
     setMessage('');
+    let visitStarted = false;
     try {
-      const result = await offlineService.current.startVisit({
+      let draft = visitDrafts[stop.routeVersionStopId];
+      if (!draft) {
+        const result = await offlineService.current.startVisit({
+          userId: identity.id,
+          routeVersionStopId: stop.routeVersionStopId,
+          ...(evidence.location ? { location: evidence.location } : {}),
+        });
+        draft = result.draft;
+        visitStarted = true;
+        setVisitDrafts((current) => ({ ...current, [stop.routeVersionStopId]: result.draft }));
+      }
+      await offlineService.current.saveVisitEvidence({
         userId: identity.id,
-        routeVersionStopId: stop.routeVersionStopId,
+        visitOfflineId: draft.offlineId,
+        kind: 'checkin',
+        ...evidence,
       });
       if (current !== generation.current || accessBlocked.current) return;
-      setVisitDrafts((current) => ({ ...current, [stop.routeVersionStopId]: result.draft }));
-      window.location.assign(`/visit/${result.draft.offlineId}?step=${result.draft.currentStep}`);
+      setVisitBusyStop(null);
+      setCheckinStop(null);
+      window.location.assign(`/visit/${draft.offlineId}?step=${draft.currentStep}`);
     } catch {
       if (current !== generation.current || accessBlocked.current) return;
-      setMessage('Não foi possível salvar o início da visita neste aparelho. A parada continua inalterada.');
+      setMessage(checkinFailureMessage(visitStarted));
       setVisitBusyStop(null);
     }
   }
@@ -190,7 +223,7 @@ export function RouteScreen() {
 
   return <div className="seller-app seller-route-page">
     <header className="seller-topbar"><div className="seller-topbar-inner"><Brand />
-      <div className="seller-account">{identity && <><span className="seller-avatar" aria-hidden="true">{identity.displayName.slice(0, 1)}</span><span className="seller-account-name">{identity.displayName}<small>Vendedor</small></span></>}
+      <div className="seller-account"><a className="seller-button seller-quiet" href="/home">Início</a>{identity && <><span className="seller-avatar" aria-hidden="true">{identity.displayName.slice(0, 1)}</span><span className="seller-account-name">{identity.displayName}<small>Vendedor</small></span></>}
         <button className="seller-button seller-quiet" onClick={() => void logout()} disabled={busy}>Sair</button>
       </div></div></header>
     <main className="seller-route-main" id="main-content" aria-busy={busy}>
@@ -232,6 +265,7 @@ export function RouteScreen() {
           </div></div>}
           <ol className="seller-stop-list">{stops.map((stop) => {
             const pendingIndex = pending.indexOf(stop.routeVersionStopId);
+            const localVisit = visitDrafts[stop.routeVersionStopId];
             return <li key={stop.routeVersionStopId} className="seller-stop-card" data-status={stop.status}>
               <div className="seller-stop-number" aria-label={`Parada ${stop.executionOrder}`}>{String(stop.executionOrder).padStart(2, '0')}</div>
               <div className="seller-stop-info"><div className="seller-stop-meta"><span className={`seller-stop-status status-${stop.status}`}>{statusLabels[stop.status]}</span><span>Prioridade {stop.priority}</span></div><h3>{stop.client.name}</h3><p>{stop.client.address}</p>
@@ -239,10 +273,11 @@ export function RouteScreen() {
                 <NavigationActions client={stop.client} offline={offline} busy={busy || needsReload} />
                 {!draft && (stop.status === 'pending' || visitDrafts[stop.routeVersionStopId]) && <button
                   className="seller-button seller-visit-action"
-                  disabled={busy || needsReload || visitBusyStop !== null || offlineCache === null || offlineCache === 'saving'}
+                  disabled={busy || needsReload || visitBusyStop !== null || offlineCache === null || offlineCache === 'saving' || localVisit?.localStatus === 'completed'}
                   onClick={() => void beginVisit(stop)}
                 >{visitBusyStop === stop.routeVersionStopId ? 'Salvando no aparelho…'
-                    : visitDrafts[stop.routeVersionStopId] ? 'Continuar visita' : 'Iniciar visita'}</button>}
+                    : localVisit?.localStatus === 'completed' ? 'Visita encerrada'
+                      : localVisit ? 'Continuar visita' : 'Iniciar visita'}</button>}
               </div>
               {draft && stop.status === 'pending' && <div className="seller-move-controls">
                 <button className="seller-button seller-secondary" aria-label={`Subir ${stop.client.name}`} disabled={busy || needsReload || pendingIndex === 0} onClick={() => setDraft(movePending(stops, stop.routeVersionStopId, -1))}>↑</button>
@@ -253,6 +288,15 @@ export function RouteScreen() {
           <SavedVisits route={route} drafts={Object.values(visitDrafts)} />
           {!draft && <button className="seller-button seller-refresh" onClick={() => void load()} disabled={busy || offline}>↻ Atualizar rota</button>}
         </section>
+      </div>}
+      {checkinStop && <div className="seller-evidence-overlay">
+        <VisitEvidenceCapture
+          kind="checkin"
+          client={checkinStop.client}
+          busy={visitBusyStop === checkinStop.routeVersionStopId}
+          onCancel={() => setCheckinStop(null)}
+          onConfirm={(evidence) => confirmCheckin(checkinStop, evidence)}
+        />
       </div>}
       <footer className="seller-footer"><span>CIRNE ROTAS</span><p>Rota e início de visita disponíveis online e offline.</p></footer>
     </main>

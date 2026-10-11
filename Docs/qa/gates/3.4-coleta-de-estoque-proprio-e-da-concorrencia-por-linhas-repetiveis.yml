@@ -1,0 +1,26 @@
+schema: 1
+story: '3.4'
+story_title: 'Coleta de estoque próprio e da concorrência por linhas repetíveis'
+gate: PASS
+status_reason: 'Os oito critérios foram revalidados no fluxo offline, contratos, persistência e banco. A regressão completa passou sem falhas.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'story-file-sha256:99e85fda0d2053da3bb0e477025f111eb12ecb5a11cb751942f348e3d54f2456'
+updated: '2026-10-11T17:29:15Z'
+expires: '2026-10-25T17:29:15Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 948
+  current_run: { unit_passed: 323, pgtap_passed: 549, integration_passed: 19, e2e_passed: 57, lint: PASS, typecheck: PASS, production_build: PASS }
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8], ac_gaps: [] }
+nfr_validation:
+  security: { status: PASS, notes: 'Escopo, RLS e persistência privada revalidados.' }
+  performance: { status: PASS, notes: 'Limites de linhas e build de produção preservados.' }
+  reliability: { status: PASS, notes: 'Persistência offline, restauração e sincronização cobertas.' }
+  maintainability: { status: PASS, notes: 'Contratos e testes permanecem centralizados.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Manter os gates de dispositivo físico e piloto antes do uso de dados reais.'
+      refs: ['Docs/stories/3.4.story.md']

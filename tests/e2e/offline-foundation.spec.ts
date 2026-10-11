@@ -118,7 +118,7 @@ test('does not claim a saved draft after quota failure and safely retries the sa
   await expect(page.getByText('1 evento(s)')).toBeVisible();
 });
 
-test('upgrades an existing browser database from v1 to v9 without deleting durable records', async ({ page }) => {
+test('upgrades an existing browser database from v1 to v14 without deleting durable records', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(async ({ syntheticSellerId, deviceId, routeId, stopId }) => {
     await new Promise<void>((resolve, reject) => {
@@ -194,13 +194,19 @@ test('upgrades an existing browser database from v1 to v9 without deleting durab
     const logicalVersion = database.version / 10;
     const hasSessions = database.objectStoreNames.contains('localSessions');
     const hasPriceParameterSets = database.objectStoreNames.contains('priceParameterSets');
+    const hasScrapSchedules = database.objectStoreNames.contains('scrapSchedules');
+    const hasScrapPoints = database.objectStoreNames.contains('scrapPoints');
+    const hasCommercialActionCatalogs = database.objectStoreNames.contains('commercialActionCatalogs');
     database.close();
-    return { logicalVersion, hasSessions, hasPriceParameterSets, counts };
+    return { logicalVersion, hasSessions, hasPriceParameterSets, hasScrapSchedules, hasScrapPoints, hasCommercialActionCatalogs, counts };
   });
   expect(migrated).toEqual({
-    logicalVersion: 9,
+    logicalVersion: 14,
     hasSessions: true,
     hasPriceParameterSets: true,
+    hasScrapSchedules: true,
+    hasScrapPoints: true,
+    hasCommercialActionCatalogs: true,
     counts: [1, 1, 1],
   });
 });

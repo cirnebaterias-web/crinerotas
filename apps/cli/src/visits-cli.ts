@@ -16,11 +16,17 @@ try {
     options: {
       url: { type: 'string', default: 'http://127.0.0.1:3000' },
       json: { type: 'boolean' },
+      'scrap-collected': { type: 'boolean' },
     },
     strict: true,
   });
   const token = selectIdentityToken(process.env.CIRNE_ACCESS_TOKEN, await readStandardInput());
-  const result = await runVisitRoundTrip(values.url, token);
+  const logisticsToken = process.env.CIRNE_LOGISTICS_ACCESS_TOKEN?.trim() ?? '';
+  if (values['scrap-collected'] && !logisticsToken) {
+    throw new Error('CIRNE_LOGISTICS_ACCESS_TOKEN é obrigatório para --scrap-collected.');
+  }
+  const result = await runVisitRoundTrip(values.url, token, fetch,
+    values['scrap-collected'] ? { scrapMode: 'collected', logisticsAccessToken: logisticsToken } : undefined);
   console.log(json ? JSON.stringify(result) :
     `OK: visita ${result.visitId}, estoque e preços sintéticos reconhecidos sem duplicidade.`);
 } catch (error) {

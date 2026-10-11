@@ -1194,6 +1194,7 @@ Os campos comuns `id`, `created_at` e `updated_at` estão omitidos abaixo.
 | Tabela | Campos específicos | Restrições principais |
 | --- | --- | --- |
 | `api.clients` | `external_reference`, `name`, `address`, `location`, `portfolio_reference`, `status`, `created_from_import_batch_id`, `archived_at` | Referência externa única quando informada; histórico preservado |
+| `api.client_seller_scopes` | `client_id`, `seller_id`, `assigned_by`, `revoked_at` | Vínculo ativo único por cliente/vendedor; autoriza operações avulsas fora da rota e falha fechado sem atribuição |
 | `api.import_batches` | `source_name`, `source_checksum`, `imported_by`, `status`, `accepted_count`, `rejected_count`, `completed_at` | Reenvio do mesmo arquivo detectável pelo checksum |
 | `private.import_batch_rows` | `import_batch_id`, `row_number`, `payload`, `status`, `error_codes` | Único por lote e número da linha; retenção depende de `AB-15` |
 | `api.parameter_sets` | `version`, `status`, `valid_from`, `published_at`, `published_by` | Versão única; conjunto ativo imutável |

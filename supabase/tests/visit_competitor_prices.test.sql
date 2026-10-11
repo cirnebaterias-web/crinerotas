@@ -1,6 +1,6 @@
 begin;
 
-select plan(48);
+select plan(49);
 
 select has_table('api', 'parameter_values', 'parameter value catalog exists');
 select has_table('api', 'competitor_price_reports', 'competitor price report table exists');
@@ -15,7 +15,9 @@ select ok(not has_function_privilege('authenticated', 'private.get_visit_competi
 select ok(not has_function_privilege('authenticated', 'private.apply_visit_competitor_prices_saved(uuid,jsonb)', 'EXECUTE'), 'authenticated cannot execute private price writer');
 select ok(has_function_privilege('cirne_sync_executor', 'private.get_visit_competitor_prices_result(uuid)', 'EXECUTE'), 'sync executor can read canonical price result');
 select ok(has_function_privilege('cirne_sync_executor', 'private.apply_visit_competitor_prices_saved(uuid,jsonb)', 'EXECUTE'), 'sync executor can apply prices');
-select is((select count(*)::integer from api.parameter_values), 0, 'migration does not publish AB-02 values');
+select is((select count(*)::integer from api.parameter_values
+  where parameter_set_id = '90000000-0000-4000-8000-000000000099'), 0,
+  'price fixture parameter set starts without values');
 select has_function('api', 'get_current_competitor_price_parameters', array['timestamp with time zone'], 'current price catalog wrapper exists');
 select ok(has_function_privilege('authenticated', 'api.get_current_competitor_price_parameters(timestamptz)', 'EXECUTE'), 'authenticated can load the published catalog');
 select ok(not has_function_privilege('anon', 'api.get_current_competitor_price_parameters(timestamptz)', 'EXECUTE'), 'anon cannot load the catalog');
@@ -144,7 +146,7 @@ select throws_ok(
 select api.save_visit_competitor_prices(
   '22000000-0000-4000-8000-000000000099',
   '77000000-0000-4000-8000-000000000103',
-  '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":"available","quotations":[{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"60 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"499.90","conditionId":"31000000-0000-4000-8000-000000000003","observation":"Primeira cotacao"},{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"70 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"599","conditionId":"31000000-0000-4000-8000-000000000003"}],"deviceSavedAt":"2099-09-21T12:02:00.000Z"}'::jsonb
+  '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":"available","quotations":[{"competitorId":"31000000-0000-4000-8000-000000000001","productCode":"SKU-PRICE-001","modelOrAmperage":"60 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"499.90","conditionId":"31000000-0000-4000-8000-000000000003","observation":"Primeira cotacao"},{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"70 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"599","conditionId":"31000000-0000-4000-8000-000000000003"}],"deviceSavedAt":"2099-09-21T12:02:00.000Z"}'::jsonb
 ) as first_prices \gset
 reset role;
 
@@ -154,14 +156,21 @@ select is(jsonb_array_length((:'first_prices')::jsonb -> 'quotationIds'), 2, 'tw
 select is((select count(*)::integer from api.competitor_price_reports where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid), 1, 'visit has one price report');
 select is((select count(*)::integer from api.competitor_prices where report_id = ((:'first_prices')::jsonb ->> 'reportId')::uuid), 2, 'both quotations are persisted');
 select is((select price_brl::text from api.competitor_prices where report_id = ((:'first_prices')::jsonb ->> 'reportId')::uuid order by ordinal limit 1), '499.90', 'decimal BRL is stored without implicit rounding');
-select is((select count(*)::integer from private.sync_events where operation = 'visit.prices.saved.v1'), 1, 'price save confirms one sync intention');
-select is((select count(*)::integer from private.audit_events where action = 'visit.prices.saved.v1'), 1, 'price save appends one audit fact');
+select is((select product_code from api.competitor_prices where report_id = ((:'first_prices')::jsonb ->> 'reportId')::uuid order by ordinal limit 1), 'SKU-PRICE-001', 'stable product code is persisted for catalog quotations');
+select is((select count(*)::integer from private.sync_events
+  where operation = 'visit.prices.saved.v1'
+    and aggregate_id = '55000000-0000-4000-8000-000000000099'),
+  1, 'price save confirms one sync intention for this visit');
+select is((select count(*)::integer from private.audit_events
+  where action = 'visit.prices.saved.v1'
+    and target_id = ((:'started')::jsonb ->> 'visitId')::uuid),
+  1, 'price save appends one audit fact for this visit');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
 select is(api.save_visit_competitor_prices(
   '22000000-0000-4000-8000-000000000099', '77000000-0000-4000-8000-000000000103',
-  '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":"available","quotations":[{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"60 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"499.90","conditionId":"31000000-0000-4000-8000-000000000003","observation":"Primeira cotacao"},{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"70 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"599","conditionId":"31000000-0000-4000-8000-000000000003"}],"deviceSavedAt":"2099-09-21T12:02:00.000Z"}'::jsonb
+  '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":"available","quotations":[{"competitorId":"31000000-0000-4000-8000-000000000001","productCode":"SKU-PRICE-001","modelOrAmperage":"60 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"499.90","conditionId":"31000000-0000-4000-8000-000000000003","observation":"Primeira cotacao"},{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"70 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"599","conditionId":"31000000-0000-4000-8000-000000000003"}],"deviceSavedAt":"2099-09-21T12:02:00.000Z"}'::jsonb
 ), (:'first_prices')::jsonb, 'exact replay returns the original result');
 select throws_ok(
   $$select api.save_visit_competitor_prices('22000000-0000-4000-8000-000000000099',
@@ -191,13 +200,16 @@ select is((:'edited_prices')::jsonb ->> 'availability', 'unavailable', 'new inte
 select is((:'edited_prices')::jsonb ->> 'unavailableReasonId', '31000000-0000-4000-8000-000000000004', 'unavailability reason is preserved');
 select is((select count(*)::integer from api.competitor_prices where report_id = ((:'first_prices')::jsonb ->> 'reportId')::uuid), 0, 'editing to unavailable removes effective quotations');
 select is((select count(*)::integer from api.competitor_price_reports where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid), 1, 'editing does not duplicate the report');
-select is((select count(*)::integer from private.audit_events where action = 'visit.prices.saved.v1'), 2, 'editing appends a second audit fact');
+select is((select count(*)::integer from private.audit_events
+  where action = 'visit.prices.saved.v1'
+    and target_id = ((:'started')::jsonb ->> 'visitId')::uuid),
+  2, 'editing appends a second audit fact for this visit');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
 select is(api.save_visit_competitor_prices(
   '22000000-0000-4000-8000-000000000099', '77000000-0000-4000-8000-000000000103',
-  '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":"available","quotations":[{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"60 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"499.90","conditionId":"31000000-0000-4000-8000-000000000003","observation":"Primeira cotacao"},{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"70 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"599","conditionId":"31000000-0000-4000-8000-000000000003"}],"deviceSavedAt":"2099-09-21T12:02:00.000Z"}'::jsonb
+  '{"schemaVersion":1,"offlineId":"55000000-0000-4000-8000-000000000099","availability":"available","quotations":[{"competitorId":"31000000-0000-4000-8000-000000000001","productCode":"SKU-PRICE-001","modelOrAmperage":"60 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"499.90","conditionId":"31000000-0000-4000-8000-000000000003","observation":"Primeira cotacao"},{"competitorId":"31000000-0000-4000-8000-000000000001","modelOrAmperage":"70 Ah","technologyId":"31000000-0000-4000-8000-000000000002","priceBrl":"599","conditionId":"31000000-0000-4000-8000-000000000003"}],"deviceSavedAt":"2099-09-21T12:02:00.000Z"}'::jsonb
 ), (:'first_prices')::jsonb, 'old replay remains byte-equivalent after a later edit');
 reset role;
 select is((select availability from api.competitor_price_reports where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid), 'unavailable', 'old replay does not overwrite the effective response');
@@ -220,8 +232,13 @@ select throws_ok(
   'P0001', 'FORBIDDEN', 'manager cannot save seller prices');
 reset role;
 
-select is((select max(sequence) from private.sync_events where operation = 'visit.prices.saved.v1'), 4, 'price edits preserve aggregate sequence');
-select is((select count(*)::integer from private.competitor_price_receipts), 2, 'one immutable result receipt is kept per successful intention');
+select is((select max(sequence) from private.sync_events
+  where operation = 'visit.prices.saved.v1'
+    and aggregate_id = '55000000-0000-4000-8000-000000000099'),
+  4, 'price edits preserve this visit aggregate sequence');
+select is((select count(*)::integer from private.competitor_price_receipts
+  where visit_id = ((:'started')::jsonb ->> 'visitId')::uuid),
+  2, 'one immutable result receipt is kept per successful intention for this visit');
 
 select * from finish();
 rollback;

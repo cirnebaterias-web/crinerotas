@@ -1,10 +1,12 @@
 import { z } from 'zod';
+export * from './scrap-revisions';
+export * from './client-imports';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
 export type LiveResponse = z.infer<typeof liveResponseSchema>;
 export const livePath = '/api/v1/health/live';
 
-export const roleCodeSchema = z.enum(['seller', 'manager', 'administrator']);
+export const roleCodeSchema = z.enum(['seller', 'manager', 'administrator', 'logistics']);
 export const userStatusSchema = z.enum(['active', 'inactive']);
 export const meResponseSchema = z.object({
   id: z.uuid(),
@@ -266,6 +268,27 @@ export const visitsPath = '/api/v1/visits';
 export const visitStockPath = (offlineId: string) => `${visitsPath}/${offlineId}/sections/stock`;
 export const visitCompetitorPricesPath = (offlineId: string) =>
   `${visitsPath}/${offlineId}/sections/competitor-prices`;
+export const commercialActionsPath = '/api/v1/commercial-actions';
+export const commercialActionPath = (actionId: string) => `${commercialActionsPath}/${actionId}`;
+export const visitCommercialActionsPath = (offlineId: string) =>
+  `${visitsPath}/${offlineId}/sections/commercial-actions`;
+export const scrapPath = '/api/v1/scrap';
+export const scrapClientsPath = `${scrapPath}/clients`;
+export const scrapPointsPath = `${scrapPath}/points`;
+export const scrapPointPath = (pointId: string) => `${scrapPointsPath}/${pointId}`;
+export const scrapSchedulesPath = `${scrapPath}/schedules`;
+export const scrapSchedulePath = (scheduleId: string) => `${scrapSchedulesPath}/${scheduleId}`;
+export const scrapCollectionsPath = `${scrapPath}/collections`;
+export const scrapCollectionReceiptPath = (collectionId: string) => `${scrapCollectionsPath}/${collectionId}/receipt`;
+export const scrapCollectionAttachmentsPath = (collectionId: string) => `${scrapCollectionsPath}/${collectionId}/attachments`;
+export const scrapAttachmentUploadIntentsPath = `${scrapPath}/attachments/upload-intents`;
+export const scrapAttachmentConfirmPath = (offlineId: string) => `${scrapPath}/attachments/${offlineId}/confirm`;
+export const attachmentUploadIntentsPath = '/api/v1/attachments/upload-intents';
+export const attachmentConfirmPath = (offlineId: string) =>
+  `/api/v1/attachments/${offlineId}/confirm`;
+export const visitCompletePath = (offlineId: string) => `${visitsPath}/${offlineId}/complete`;
+export const visitCheckinEvidencePath = (offlineId: string) =>
+  `${visitsPath}/${offlineId}/evidence/checkin`;
 export const currentParameterSetPath = '/api/v1/parameter-sets/current';
 export const visitCsrfToken = 'cirne-visit-v1';
 
@@ -324,6 +347,125 @@ export const visitStartResultSchema = z.object({
 }).strict();
 export type VisitStartResult = z.infer<typeof visitStartResultSchema>;
 
+export const evidencePurposeSchema = z.enum([
+  'visit_checkin', 'visit_checkout', 'commercial_action_evidence',
+]);
+export const evidenceIssueSchema = z.enum([
+  'camera_unavailable',
+  'gps_unavailable',
+  'gps_low_accuracy',
+  'outside_radius',
+  'client_location_missing',
+]);
+export const evidenceLocationSchema = z.object({
+  latitude: canonicalDecimalSchema.refine((value) => Math.abs(Number(value)) <= 90).optional(),
+  longitude: canonicalDecimalSchema.refine((value) => Math.abs(Number(value)) <= 180).optional(),
+  accuracyM: nonNegativeDecimalSchema.optional(),
+  distanceM: nonNegativeDecimalSchema.optional(),
+}).strict().refine((value) => Boolean(value.latitude) === Boolean(value.longitude), {
+  message: 'Latitude e longitude devem ser informadas juntas.',
+});
+export const attachmentUploadIntentRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  offlineId: z.uuid(),
+  visitOfflineId: z.uuid(),
+  purpose: evidencePurposeSchema,
+  contentType: z.enum(['image/jpeg', 'image/webp']),
+  byteSize: z.number().int().positive().max(2 * 1024 * 1024),
+  checksum: z.string().regex(/^[a-f0-9]{64}$/u),
+  capturedAt: z.iso.datetime({ offset: true }),
+  expiresAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type AttachmentUploadIntentRequest = z.infer<typeof attachmentUploadIntentRequestSchema>;
+export const attachmentUploadIntentResultSchema = z.object({
+  schemaVersion: z.literal(1),
+  attachmentId: z.uuid(),
+  offlineId: z.uuid(),
+  storagePath: z.string().regex(/^[a-z0-9/_-]+\.(?:jpe?g|webp)$/u).max(500),
+  signedUrl: z.string().url(),
+  token: z.string().min(1).max(4096),
+  expiresInSeconds: z.literal(600),
+  alreadyVerified: z.boolean(),
+  verifiedAt: z.iso.datetime({ offset: true }).optional(),
+}).strict();
+export type AttachmentUploadIntentResult = z.infer<typeof attachmentUploadIntentResultSchema>;
+const scrapAttachmentIntentBaseSchema = z.object({
+  schemaVersion: z.literal(1),
+  attachmentId: z.uuid(),
+  offlineId: z.uuid(),
+});
+export const scrapAttachmentUploadIntentResultSchema = z.discriminatedUnion('alreadyVerified', [
+  scrapAttachmentIntentBaseSchema.extend({
+    alreadyVerified: z.literal(true),
+    verifiedAt: z.iso.datetime({ offset: true }),
+  }).strict(),
+  scrapAttachmentIntentBaseSchema.extend({
+    alreadyVerified: z.literal(false),
+    signedUrl: z.string().url(),
+    token: z.string().min(1).max(4096),
+    expiresInSeconds: z.literal(600),
+  }).strict(),
+]);
+export type ScrapAttachmentUploadIntentResult = z.infer<typeof scrapAttachmentUploadIntentResultSchema>;
+export const attachmentConfirmRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  checksum: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
+export type AttachmentConfirmRequest = z.infer<typeof attachmentConfirmRequestSchema>;
+export const attachmentConfirmationSchema = z.object({
+  schemaVersion: z.literal(1),
+  attachmentId: z.uuid(),
+  offlineId: z.uuid(),
+  status: z.literal('verified'),
+  verifiedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type AttachmentConfirmation = z.infer<typeof attachmentConfirmationSchema>;
+const visitEvidenceCommandSchema = z.object({
+  offlineId: z.uuid(),
+  attachmentOfflineId: z.uuid().optional(),
+  capturedAt: z.iso.datetime({ offset: true }),
+  location: evidenceLocationSchema,
+  issues: z.array(evidenceIssueSchema).max(5),
+  justification: z.string().trim().min(10).max(500).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.issues.length > 0 && !value.justification) {
+    context.addIssue({ code: 'custom', path: ['justification'], message: 'Justifique a exceção.' });
+  }
+  if (!value.attachmentOfflineId && !value.issues.includes('camera_unavailable')) {
+    context.addIssue({ code: 'custom', path: ['attachmentOfflineId'], message: 'A fotografia é obrigatória.' });
+  }
+});
+export const completeVisitRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  offlineId: z.uuid(),
+  deviceCompletedAt: z.iso.datetime({ offset: true }),
+  evidence: visitEvidenceCommandSchema,
+}).strict();
+export type CompleteVisitRequest = z.infer<typeof completeVisitRequestSchema>;
+export const saveVisitCheckinEvidenceRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  offlineId: z.uuid(),
+  evidence: visitEvidenceCommandSchema,
+}).strict();
+export type SaveVisitCheckinEvidenceRequest = z.infer<typeof saveVisitCheckinEvidenceRequestSchema>;
+export const visitEvidenceResultSchema = z.object({
+  schemaVersion: z.literal(1),
+  visitId: z.uuid(),
+  offlineId: z.uuid(),
+  kind: z.literal('checkin'),
+  serverSavedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type VisitEvidenceResult = z.infer<typeof visitEvidenceResultSchema>;
+export const visitCompletionResultSchema = z.object({
+  schemaVersion: z.literal(1),
+  visitId: z.uuid(),
+  offlineId: z.uuid(),
+  status: z.literal('completed'),
+  deviceCompletedAt: z.iso.datetime({ offset: true }),
+  serverCompletedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type VisitCompletionResult = z.infer<typeof visitCompletionResultSchema>;
+
 const stockObservationSchema = z.preprocess(
   (value) => typeof value === 'string' ? value.replace(/\s+/gu, ' ').trim() || undefined : value,
   z.string().max(500).optional(),
@@ -334,6 +476,11 @@ export const ownStockLineSchema = z.object({
   brand: ownStockBrandSchema,
   model: z.string().trim().min(1).max(120),
   quantity: z.number().int().nonnegative(),
+  productCode: z.string().trim().min(1).max(60).optional(),
+  sku: z.string().trim().min(1).max(80).optional(),
+  unitWeightKg: nonNegativeDecimalSchema.refine((value) => Number(value) > 0).optional(),
+  catalogVersion: z.number().int().positive().optional(),
+  weightSource: z.enum(['catalog', 'fallback_15kg']).optional(),
 }).strict();
 export type OwnStockLine = z.infer<typeof ownStockLineSchema>;
 
@@ -353,6 +500,9 @@ export const stockInputSchema = z.object({
   heliarQuantity: z.number().int().nonnegative(),
   mouraQuantity: z.number().int().nonnegative(),
   ownLines: z.array(ownStockLineSchema).max(200).optional(),
+  completedOwnBrands: z.array(ownStockBrandSchema).max(4)
+    .refine((brands) => new Set(brands).size === brands.length,
+      'Cada marca deve aparecer apenas uma vez.').optional(),
   competitorLines: z.array(competitorStockLineSchema).max(200).optional(),
   observation: stockObservationSchema,
 }).strict();
@@ -384,6 +534,7 @@ const positiveMoneyBrlSchema = z.string()
 
 export const competitorPriceQuotationSchema = z.object({
   competitorId: z.uuid(),
+  productCode: z.string().trim().min(1).max(60).optional(),
   modelOrAmperage: z.string().trim().min(1).max(120),
   technologyId: z.uuid(),
   priceBrl: positiveMoneyBrlSchema,
@@ -435,6 +586,242 @@ export const competitorPricesResultSchema = z.object({
   }
 });
 export type CompetitorPricesResult = z.infer<typeof competitorPricesResultSchema>;
+
+export const competitorCommercialActionTypeSchema = z.enum([
+  'differentiated_price',
+  'seller_or_driver_incentive',
+  'retailer_incentive',
+  'purchase_combo',
+  'other',
+]);
+export type CompetitorCommercialActionType = z.infer<typeof competitorCommercialActionTypeSchema>;
+
+export const commercialActionSchema = z.object({
+  id: z.uuid(),
+  title: z.string().trim().min(1).max(120),
+  description: z.string().trim().min(1).max(1200),
+  validFrom: z.iso.date(),
+  validUntil: z.iso.date(),
+  bannerUrl: z.string().url().max(1000).optional(),
+  active: z.boolean(),
+}).strict().refine((action) => action.validUntil >= action.validFrom, {
+  message: 'O término da ação deve ser igual ou posterior ao início.', path: ['validUntil'],
+});
+export type CommercialAction = z.infer<typeof commercialActionSchema>;
+
+export const commercialActionListSchema = z.object({
+  schemaVersion: z.literal(1),
+  actions: z.array(commercialActionSchema).max(100),
+}).strict();
+export type CommercialActionList = z.infer<typeof commercialActionListSchema>;
+
+export const saveCommercialActionRequestSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  description: z.string().trim().min(1).max(1200),
+  validFrom: z.iso.date(),
+  validUntil: z.iso.date(),
+  bannerUrl: z.string().url().max(1000).optional(),
+  active: z.boolean(),
+}).strict().refine((action) => action.validUntil >= action.validFrom, {
+  message: 'O término da ação deve ser igual ou posterior ao início.', path: ['validUntil'],
+});
+export type SaveCommercialActionRequest = z.infer<typeof saveCommercialActionRequestSchema>;
+
+export const ownCommercialActionAcknowledgementSchema = z.object({
+  actionId: z.uuid(),
+  title: z.string().trim().min(1).max(120),
+  validFrom: z.iso.date(),
+  validUntil: z.iso.date(),
+  presented: z.literal(true),
+}).strict();
+
+export const competitorCommercialActionSchema = z.object({
+  offlineId: z.uuid(),
+  competitorId: z.uuid(),
+  actionType: competitorCommercialActionTypeSchema,
+  otherType: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().min(1).max(1200),
+  validFrom: z.iso.date(),
+  validUntil: z.iso.date(),
+  evidenceAttachmentOfflineId: z.uuid().optional(),
+}).strict().superRefine((action, context) => {
+  if (action.validUntil < action.validFrom) {
+    context.addIssue({ code: 'custom', path: ['validUntil'], message: 'O término deve ser igual ou posterior ao início.' });
+  }
+  if (action.actionType === 'other' && !action.otherType) {
+    context.addIssue({ code: 'custom', path: ['otherType'], message: 'Descreva o outro tipo de ação.' });
+  }
+  if (action.actionType !== 'other' && action.otherType) {
+    context.addIssue({ code: 'custom', path: ['otherType'], message: 'Outro tipo só é aceito na classificação Outros.' });
+  }
+});
+
+export const competitorCommercialActionsInputSchema = z.discriminatedUnion('availability', [
+  z.object({ availability: z.literal('not_identified') }).strict(),
+  z.object({
+    availability: z.literal('identified'),
+    actions: z.array(competitorCommercialActionSchema).min(1).max(10),
+  }).strict(),
+]);
+
+export const commercialActionsInputSchema = z.object({
+  ownAcknowledgements: z.array(ownCommercialActionAcknowledgementSchema).max(50),
+  competitor: competitorCommercialActionsInputSchema,
+}).strict();
+export type CommercialActionsInput = z.infer<typeof commercialActionsInputSchema>;
+
+export const saveVisitCommercialActionsRequestSchema = commercialActionsInputSchema.extend({
+  schemaVersion: z.literal(1),
+  offlineId: z.uuid(),
+  deviceSavedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type SaveVisitCommercialActionsRequest = z.infer<typeof saveVisitCommercialActionsRequestSchema>;
+
+// Scrap collection is a realized handoff; scheduling is a future request and never realized weight.
+const positiveScrapWeightSchema = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/u)
+  .max(32).refine((value) => Number(value) > 0 && Number.isFinite(Number(value)), 'Informe kg maior que zero.');
+export const scrapPeriodSchema = z.enum(['morning', 'afternoon']);
+export const scrapDestinationTypeSchema = z.enum(['concentration_point', 'headquarters']);
+export const scrapCollectionInputSchema = z.object({
+  offlineId: z.uuid(),
+  actualWeightKg: positiveScrapWeightSchema,
+  collectedAt: z.iso.datetime({ offset: true }),
+  receiptNumber: z.string().trim().min(1).max(80),
+  clientSigned: z.literal(true),
+  sellerSigned: z.literal(true),
+  twoCopies: z.literal(true),
+  destinationType: scrapDestinationTypeSchema,
+  concentrationPointId: z.uuid().optional(),
+  attachmentOfflineIds: z.array(z.uuid()).min(1).max(4),
+}).strict().superRefine((value, context) => {
+  if (value.destinationType === 'concentration_point' && !value.concentrationPointId) {
+    context.addIssue({ code: 'custom', path: ['concentrationPointId'], message: 'Selecione o ponto de concentração.' });
+  }
+  if (value.destinationType === 'headquarters' && value.concentrationPointId) {
+    context.addIssue({ code: 'custom', path: ['concentrationPointId'], message: 'A matriz não usa ponto de concentração.' });
+  }
+  if (new Set(value.attachmentOfflineIds).size !== value.attachmentOfflineIds.length) {
+    context.addIssue({ code: 'custom', path: ['attachmentOfflineIds'], message: 'Fotografia repetida no termo.' });
+  }
+});
+export type ScrapCollectionInput = z.infer<typeof scrapCollectionInputSchema>;
+
+export const pickupScheduleInputSchema = z.object({
+  offlineId: z.uuid(),
+  estimatedWeightKg: positiveScrapWeightSchema,
+  desiredDate: z.iso.date(),
+  period: scrapPeriodSchema,
+  observation: z.string().trim().max(1000).optional(),
+  requestedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type PickupScheduleInput = z.infer<typeof pickupScheduleInputSchema>;
+
+export const visitScrapInputSchema = z.discriminatedUnion('availability', [
+  z.object({ availability: z.literal('none') }).strict(),
+  z.object({ availability: z.literal('collected'), collection: scrapCollectionInputSchema }).strict(),
+  z.object({ availability: z.literal('scheduled'), schedule: pickupScheduleInputSchema }).strict(),
+]);
+export type VisitScrapInput = z.infer<typeof visitScrapInputSchema>;
+export const visitScrapSavedPayloadSchema = z.object({
+  schemaVersion: z.literal(1),
+  offlineId: z.uuid(),
+  deviceSavedAt: z.iso.datetime({ offset: true }),
+  availability: z.enum(['none', 'collected', 'scheduled']),
+  collection: scrapCollectionInputSchema.optional(),
+  schedule: pickupScheduleInputSchema.optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.availability === 'collected') !== Boolean(value.collection) ||
+      (value.availability === 'scheduled') !== Boolean(value.schedule)) {
+    context.addIssue({ code: 'custom', path: ['availability'], message: 'Informe somente os dados do tipo selecionado.' });
+  }
+});
+export type VisitScrapSavedPayload = z.infer<typeof visitScrapSavedPayloadSchema>;
+
+export const scrapClientSchema = z.object({
+  id: z.uuid(), name: z.string().trim().min(1).max(160), address: z.string().trim().min(1).max(300),
+}).strict();
+export const scrapClientListSchema = z.object({
+  schemaVersion: z.literal(1), clients: z.array(scrapClientSchema).max(30),
+}).strict();
+export type ScrapClient = z.infer<typeof scrapClientSchema>;
+
+export const scrapPointSchema = z.object({
+  id: z.uuid(), name: z.string().trim().min(1).max(160),
+  address: z.string().trim().min(1).max(300), active: z.boolean(), version: z.number().int().positive(),
+}).strict();
+export const scrapPointListSchema = z.object({
+  schemaVersion: z.literal(1), points: z.array(scrapPointSchema).max(500),
+}).strict();
+export type ScrapPoint = z.infer<typeof scrapPointSchema>;
+export const saveScrapPointRequestSchema = z.object({
+  schemaVersion: z.literal(1), id: z.uuid().optional(),
+  name: z.string().trim().min(1).max(160), address: z.string().trim().min(1).max(300),
+  active: z.boolean(), expectedVersion: z.number().int().positive().optional(),
+}).strict();
+export type SaveScrapPointRequest = z.infer<typeof saveScrapPointRequestSchema>;
+
+export const createPickupScheduleRequestSchema = pickupScheduleInputSchema.extend({
+  schemaVersion: z.literal(1), clientId: z.uuid(), visitOfflineId: z.uuid().optional(),
+}).strict();
+export type CreatePickupScheduleRequest = z.infer<typeof createPickupScheduleRequestSchema>;
+export const revisePickupScheduleRequestSchema = z.object({
+  schemaVersion: z.literal(1), expectedVersion: z.number().int().positive(),
+  estimatedWeightKg: positiveScrapWeightSchema, desiredDate: z.iso.date(), period: scrapPeriodSchema,
+  observation: z.string().trim().max(1000).optional(), reason: z.string().trim().min(1).max(500),
+}).strict();
+export type RevisePickupScheduleRequest = z.infer<typeof revisePickupScheduleRequestSchema>;
+
+export const scrapActorSchema = z.object({ id: z.uuid(), displayName: z.string().trim().min(1).max(120) }).strict();
+export const pickupScheduleSchema = z.object({
+  id: z.uuid(), offlineId: z.uuid(), client: scrapClientSchema, seller: scrapActorSchema,
+  origin: z.enum(['visit', 'standalone']), visitId: z.uuid().nullable(),
+  estimatedWeightKg: positiveScrapWeightSchema, desiredDate: z.iso.date(), period: scrapPeriodSchema,
+  observation: z.string().nullable(), requestedAt: z.iso.datetime({ offset: true }),
+  serverSavedAt: z.iso.datetime({ offset: true }), status: z.literal('pending'),
+  version: z.number().int().positive(),
+}).strict();
+export type PickupSchedule = z.infer<typeof pickupScheduleSchema>;
+
+export const confirmScrapReceiptRequestSchema = z.object({
+  schemaVersion: z.literal(1), expectedVersion: z.number().int().positive(),
+  receivedWeightKg: positiveScrapWeightSchema,
+  receivedLocation: z.string().trim().min(1).max(300),
+  observation: z.string().trim().min(1).max(1000).optional(),
+}).strict();
+export type ConfirmScrapReceiptRequest = z.infer<typeof confirmScrapReceiptRequestSchema>;
+export const scrapReceiptSchema = z.object({
+  collectionId: z.uuid(), receivedWeightKg: positiveScrapWeightSchema,
+  receivedLocation: z.string().trim().min(1).max(300), observation: z.string().nullable(),
+  receivedBy: scrapActorSchema, receivedAt: z.iso.datetime({ offset: true }),
+  version: z.number().int().positive(),
+}).strict();
+export type ScrapReceipt = z.infer<typeof scrapReceiptSchema>;
+export const scrapCollectionSchema = z.object({
+  id: z.uuid(), offlineId: z.uuid(), client: scrapClientSchema, seller: scrapActorSchema,
+  actualWeightKg: positiveScrapWeightSchema, receiptNumber: z.string().trim().min(1).max(80),
+  collectedAt: z.iso.datetime({ offset: true }), serverSavedAt: z.iso.datetime({ offset: true }),
+  destinationType: scrapDestinationTypeSchema,
+  concentrationPoint: scrapClientSchema.nullable(),
+  status: z.enum(['awaiting_receipt', 'received']), version: z.number().int().positive(),
+  attachmentOfflineIds: z.array(z.uuid()).min(1).max(4),
+  attachments: z.array(z.object({ offlineId: z.uuid(), status: z.enum(['reserved', 'verified']) }).strict()).max(4),
+  receipt: scrapReceiptSchema.nullable(), retentionUntil: z.iso.datetime({ offset: true }).nullable(),
+}).strict();
+export type ScrapCollection = z.infer<typeof scrapCollectionSchema>;
+export const scrapOperationsSchema = z.object({
+  schemaVersion: z.literal(1), collections: z.array(scrapCollectionSchema),
+  schedules: z.array(pickupScheduleSchema),
+  totals: z.object({ collectedKg: nonNegativeDecimalSchema, receivedKg: nonNegativeDecimalSchema,
+    scheduledKg: nonNegativeDecimalSchema }).strict(),
+}).strict();
+export type ScrapOperations = z.infer<typeof scrapOperationsSchema>;
+
+export const scrapAttachmentUploadIntentRequestSchema = z.object({
+  schemaVersion: z.literal(1), offlineId: z.uuid(), collectionOfflineId: z.uuid(),
+  contentType: z.enum(['image/jpeg', 'image/webp']), byteSize: z.number().int().positive().max(2 * 1024 * 1024),
+  checksum: z.string().regex(/^[a-f0-9]{64}$/u), capturedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type ScrapAttachmentUploadIntentRequest = z.infer<typeof scrapAttachmentUploadIntentRequestSchema>;
 
 export const parameterValueCategorySchema = z.enum([
   'competitor',
@@ -501,11 +888,19 @@ export const visitPricesSavedPayloadSchema = z.discriminatedUnion('availability'
 ]);
 export type VisitPricesSavedPayload = z.infer<typeof visitPricesSavedPayloadSchema>;
 
+export const visitCommercialActionsSavedPayloadSchema = commercialActionsInputSchema.extend({
+  offlineId: z.uuid(),
+  deviceSavedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type VisitCommercialActionsSavedPayload = z.infer<typeof visitCommercialActionsSavedPayloadSchema>;
+
 export const syncOperationSchema = z.enum([
   'visit.draft.saved',
   'visit.started.v1',
   'visit.stock.saved.v1',
   'visit.prices.saved.v1',
+  'visit.commercial-actions.saved.v1',
+  'visit.scrap.saved.v1',
 ]);
 export const syncAggregateTypeSchema = z.enum(['visit_draft', 'visit']);
 export const syncErrorCodeSchema = z.enum([
@@ -620,11 +1015,45 @@ const visitPricesSavedSyncCommandSchema = syncCommandBaseSchema.extend({
   }
 });
 
+const visitCommercialActionsSavedSyncCommandSchema = syncCommandBaseSchema.extend({
+  operation: z.literal('visit.commercial-actions.saved.v1'),
+  aggregateType: z.literal('visit'),
+  payload: visitCommercialActionsSavedPayloadSchema,
+}).strict().superRefine((command, context) => {
+  if (command.sequence < 4) {
+    context.addIssue({ code: 'custom', path: ['sequence'], message: 'Ações comerciais exigem as etapas anteriores.' });
+  }
+  if (command.aggregateId !== command.payload.offlineId) {
+    context.addIssue({ code: 'custom', path: ['payload', 'offlineId'], message: 'O agregado deve corresponder ao offlineId da visita.' });
+  }
+  if (command.occurredAt !== command.payload.deviceSavedAt) {
+    context.addIssue({ code: 'custom', path: ['occurredAt'], message: 'O horário deve corresponder ao salvamento no aparelho.' });
+  }
+});
+
+const visitScrapSavedSyncCommandSchema = syncCommandBaseSchema.extend({
+  operation: z.literal('visit.scrap.saved.v1'),
+  aggregateType: z.literal('visit'),
+  payload: visitScrapSavedPayloadSchema,
+}).strict().superRefine((command, context) => {
+  if (command.sequence < 5) {
+    context.addIssue({ code: 'custom', path: ['sequence'], message: 'A sucata exige as etapas anteriores.' });
+  }
+  if (command.aggregateId !== command.payload.offlineId) {
+    context.addIssue({ code: 'custom', path: ['payload', 'offlineId'], message: 'O agregado deve corresponder à visita.' });
+  }
+  if (command.occurredAt !== command.payload.deviceSavedAt) {
+    context.addIssue({ code: 'custom', path: ['occurredAt'], message: 'O horário deve corresponder ao salvamento.' });
+  }
+});
+
 export const syncCommandSchema = z.discriminatedUnion('operation', [
   legacyDraftSyncCommandSchema,
   visitStartedSyncCommandSchema,
   visitStockSavedSyncCommandSchema,
   visitPricesSavedSyncCommandSchema,
+  visitCommercialActionsSavedSyncCommandSchema,
+  visitScrapSavedSyncCommandSchema,
 ]);
 export type SyncCommand = z.infer<typeof syncCommandSchema>;
 
@@ -813,7 +1242,7 @@ export const localVisitDraftSchema = z.object({
   userId: z.uuid(),
   deviceId: z.uuid(),
   routeVersionStopId: z.uuid(),
-  currentStep: z.enum(['start', 'stock', 'prices', 'actions']),
+  currentStep: z.enum(['start', 'stock', 'competitor-stock', 'prices', 'actions', 'scrap', 'review', 'complete']),
   acknowledged: z.boolean().optional(),
   deviceStartedAt: z.iso.datetime({ offset: true }).optional(),
   client: routeClientSnapshotSchema.optional(),
@@ -841,11 +1270,93 @@ export const localVisitDraftSchema = z.object({
       persistenceState: z.enum(['saved_on_device', 'synced']),
     }).strict(),
   ]).optional(),
-  localStatus: z.literal('draft'),
+  commercialActions: commercialActionsInputSchema.extend({
+    eventId: z.uuid(),
+    deviceSavedAt: z.iso.datetime({ offset: true }),
+    serverSavedAt: z.iso.datetime({ offset: true }).optional(),
+    persistenceState: z.enum(['saved_on_device', 'synced']),
+  }).strict().optional(),
+  scrap: z.object({
+    deviceSavedAt: z.iso.datetime({ offset: true }),
+    availability: z.enum(['none', 'collected', 'scheduled']),
+    collection: scrapCollectionInputSchema.optional(),
+    schedule: pickupScheduleInputSchema.optional(),
+    eventId: z.uuid(),
+    serverSavedAt: z.iso.datetime({ offset: true }).optional(),
+    persistenceState: z.enum(['saved_on_device', 'synced']),
+  }).strict().superRefine((value, context) => {
+    if ((value.availability === 'collected') !== Boolean(value.collection) ||
+        (value.availability === 'scheduled') !== Boolean(value.schedule)) {
+      context.addIssue({ code: 'custom', path: ['availability'], message: 'Informe somente os dados do tipo selecionado.' });
+    }
+  }).optional(),
+  localStatus: z.enum(['draft', 'completed']),
+  deviceCompletedAt: z.iso.datetime({ offset: true }).optional(),
   persistenceState: z.enum(['saved_on_device', 'synced']),
   updatedAt: z.iso.datetime({ offset: true }),
 }).strict();
 export type LocalVisitDraft = z.infer<typeof localVisitDraftSchema>;
+
+export const localAttachmentMetadataSchema = z.object({
+  schemaVersion: z.literal(1),
+  userId: z.uuid(),
+  deviceId: z.uuid(),
+  offlineId: z.uuid(),
+  visitOfflineId: z.uuid(),
+  purpose: z.enum(['stock_evidence', 'commercial_action_evidence', 'scrap_receipt', 'visit_checkin', 'visit_checkout']),
+  targetOfflineId: z.uuid().optional(),
+  fileName: z.string().trim().min(1).max(160),
+  contentType: z.enum(['image/jpeg', 'image/webp']),
+  byteSize: z.number().int().positive().max(2 * 1024 * 1024),
+  width: z.number().int().positive().max(1600),
+  height: z.number().int().positive().max(1600),
+  checksum: z.string().regex(/^[a-f0-9]{64}$/u),
+  capturedAt: z.iso.datetime({ offset: true }),
+  status: z.enum(['pending', 'verified', 'synced', 'action_required']),
+  remoteAttachmentId: z.uuid().optional(),
+  serverVerifiedAt: z.iso.datetime({ offset: true }).optional(),
+}).strict();
+export type LocalAttachmentMetadata = z.infer<typeof localAttachmentMetadataSchema>;
+export type LocalAttachment = LocalAttachmentMetadata & { blob: Blob };
+
+export const visitEvidenceIssueSchema = evidenceIssueSchema;
+export const localVisitEvidenceSchema = z.object({
+  schemaVersion: z.literal(1),
+  userId: z.uuid(),
+  deviceId: z.uuid(),
+  offlineId: z.uuid(),
+  visitOfflineId: z.uuid(),
+  kind: z.enum(['checkin', 'checkout']),
+  attachmentOfflineId: z.uuid().optional(),
+  capturedAt: z.iso.datetime({ offset: true }),
+  latitude: evidenceLocationSchema.shape.latitude,
+  longitude: evidenceLocationSchema.shape.longitude,
+  accuracyM: evidenceLocationSchema.shape.accuracyM,
+  distanceM: evidenceLocationSchema.shape.distanceM,
+  radiusM: z.literal(100),
+  desiredAccuracyM: z.literal(50),
+  issues: z.array(visitEvidenceIssueSchema).max(5),
+  justification: z.string().trim().min(10).max(500).optional(),
+  status: z.enum(['pending', 'synced', 'action_required']),
+  serverSyncedAt: z.iso.datetime({ offset: true }).optional(),
+  expiresAt: z.iso.datetime({ offset: true }),
+}).strict().superRefine((evidence, context) => {
+  if (Boolean(evidence.latitude) !== Boolean(evidence.longitude)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['latitude'],
+      message: 'Latitude e longitude devem ser informadas juntas.',
+    });
+  }
+  if (evidence.issues.length > 0 && !evidence.justification) {
+    context.addIssue({ code: 'custom', path: ['justification'], message: 'Justifique a exceção para continuar.' });
+  }
+  if (!evidence.attachmentOfflineId && !evidence.issues.includes('camera_unavailable')) {
+    context.addIssue({ code: 'custom', path: ['attachmentOfflineId'], message: 'A fotografia da fachada é obrigatória.' });
+  }
+});
+export type VisitEvidenceIssue = z.infer<typeof visitEvidenceIssueSchema>;
+export type LocalVisitEvidence = z.infer<typeof localVisitEvidenceSchema>;
 
 export const offlineOutboxStatusSchema = z.enum([
   'pending',
@@ -904,10 +1415,26 @@ const visitPricesSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend(
   payload: visitPricesSavedPayloadSchema,
 }).strict();
 
+const visitCommercialActionsSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
+  operation: z.literal('visit.commercial-actions.saved.v1'),
+  aggregateType: z.literal('visit').default('visit'),
+  sequence: z.number().int().min(4),
+  payload: visitCommercialActionsSavedPayloadSchema,
+}).strict();
+
+const visitScrapSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
+  operation: z.literal('visit.scrap.saved.v1'),
+  aggregateType: z.literal('visit').default('visit'),
+  sequence: z.number().int().min(5),
+  payload: visitScrapSavedPayloadSchema,
+}).strict();
+
 export const offlineOutboxEventSchema = z.discriminatedUnion('operation', [
   legacyOfflineOutboxEventSchema,
   visitStartedOfflineOutboxEventSchema,
   visitStockSavedOfflineOutboxEventSchema,
   visitPricesSavedOfflineOutboxEventSchema,
+  visitCommercialActionsSavedOfflineOutboxEventSchema,
+  visitScrapSavedOfflineOutboxEventSchema,
 ]);
 export type OfflineOutboxEvent = z.infer<typeof offlineOutboxEventSchema>;
