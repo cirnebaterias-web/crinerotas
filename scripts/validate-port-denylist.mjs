@@ -1,8 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import portDenylist from '../.aiox-core/core/security/port-denylist.js';
+import { scanProject } from './port-denylist.mjs';
 
-const { scanProject } = portDenylist;
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const result = scanProject({ projectRoot });
