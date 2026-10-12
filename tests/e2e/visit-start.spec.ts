@@ -202,19 +202,20 @@ async function startVisit(page: Page) {
 }
 
 async function completeVisit(page: Page) {
-  if (await page.getByRole('button', { name: 'Salvar ações comerciais' }).isVisible().catch(() => false)) {
-    const acknowledgements = page.getByLabel('Apresentei esta ação ao PDV');
-    for (let index = 0; index < await acknowledgements.count(); index += 1) {
-      await acknowledgements.nth(index).check();
-    }
-    await page.getByRole('button', { name: 'Salvar ações comerciais' }).click();
+  await expect(page).toHaveURL(/\?step=actions$/);
+  const saveActions = page.getByRole('button', { name: 'Salvar ações comerciais' });
+  await expect(saveActions).toBeVisible();
+  const acknowledgements = page.getByLabel('Apresentei esta ação ao PDV');
+  for (let index = 0; index < await acknowledgements.count(); index += 1) {
+    await acknowledgements.nth(index).check();
   }
-  if (await page.getByRole('button', { name: 'Confirmar sem sucata' }).isVisible().catch(() => false)) {
-    await page.getByRole('button', { name: 'Confirmar sem sucata' }).click();
-  } else if (await page.getByRole('radio', { name: 'Sem sucata', exact: true }).isVisible().catch(() => false)) {
+  await saveActions.click();
+  await expect(page).toHaveURL(/\?step=scrap$/);
+  if (await page.getByRole('radio', { name: 'Sem sucata', exact: true }).isVisible()) {
     await page.getByRole('radio', { name: 'Sem sucata', exact: true }).check();
-    await page.getByRole('button', { name: 'Confirmar sem sucata' }).click();
   }
+  await page.getByRole('button', { name: 'Confirmar sem sucata' }).click();
+  await expect(page).toHaveURL(/\?step=review$/);
   await page.getByRole('button', { name: 'Encerrar visita' }).click();
   await expect(page.getByRole('heading', { name: 'Foto da fachada e posição' })).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
