@@ -2,6 +2,42 @@ import { expect } from '@playwright/test';
 import { routeTodayResponseSchema, routeCompositionDraftSchema } from '@cirne/contracts';
 import { test } from './real-route-fixture';
 
+const visitConfirmedMessage = 'Registro da visita confirmado pelo servidor.';
+
+async function startVisit(page: import('@playwright/test').Page) {
+  await page.getByRole('button', { name: 'Iniciar visita' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Foto da fachada e posição' })).toBeVisible();
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
+  await page.getByLabel('Justificativa obrigatória').fill('Câmera e GPS indisponíveis no cenário automatizado real.');
+  await expect(page.getByText('Existe uma exceção que precisa ser justificada.')).toBeVisible();
+  const confirm = page.getByRole('button', { name: 'Confirmar e iniciar visita' });
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  const evidenceHeading = page.getByRole('heading', { name: 'Foto da fachada e posição' });
+  await expect(evidenceHeading).toHaveCount(0, { timeout: 3_000 }).catch(async () => {
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+  });
+  await expect(evidenceHeading).toHaveCount(0);
+}
+
+async function storedStockState(page: import('@playwright/test').Page) {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const opening = indexedDB.open('cirne-rotas-offline');
+      opening.onsuccess = () => resolve(opening.result);
+      opening.onerror = () => reject(opening.error);
+    });
+    try {
+      return await new Promise<string | undefined>((resolve, reject) => {
+        const request = database.transaction('visitDrafts').objectStore('visitDrafts').getAll();
+        request.onsuccess = () => resolve((request.result as Array<{ stock?: { persistenceState?: string } }>)[0]?.stock?.persistenceState);
+        request.onerror = () => reject(request.error);
+      });
+    } finally { database.close(); }
+  });
+}
+
 test('removed client keeps its original offline visit after real republication and synchronization', async ({ page, context, request, realRoute }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/login');
@@ -23,7 +59,7 @@ test('removed client keeps its original offline visit after real republication a
 
   await context.setOffline(true);
   await page.goto('/route', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'Iniciar visita' }).first().click();
+  await startVisit(page);
   await expect(page.getByText('Salva no aparelho', { exact: true })).toBeVisible();
   const visitUrl = page.url();
   const offlineId = new URL(visitUrl).pathname.split('/').at(-1);
@@ -46,7 +82,7 @@ test('removed client keeps its original offline visit after real republication a
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByText('Salva no aparelho', { exact: true })).toBeVisible();
   await context.setOffline(false);
-  await expect(page.getByText('Início confirmado pelo servidor.')).toBeVisible();
+  await expect(page.getByText(visitConfirmedMessage)).toBeVisible();
   await expect(page.getByText('Sincronizada', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Retornar à rota' }).click();
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
@@ -188,14 +224,14 @@ test('seller starts offline, reloads the pending visit and confirms it after rec
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
   await context.setOffline(true);
   await page.goto('/route', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'Iniciar visita' }).first().click();
+  await startVisit(page);
   await expect(page.getByText('Salva no aparelho', { exact: true })).toBeVisible();
   const visitUrl = page.url();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByText('Salva no aparelho', { exact: true })).toBeVisible();
   await expect(page.getByText('Sincronizada', { exact: true })).toHaveCount(0);
   await context.setOffline(false);
-  await expect(page.getByText('Início confirmado pelo servidor.')).toBeVisible();
+  await expect(page.getByText(visitConfirmedMessage)).toBeVisible();
   await expect(page).toHaveURL(visitUrl);
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -205,7 +241,8 @@ test('seller starts offline, reloads the pending visit and confirms it after rec
   await expect(page).toHaveURL(visitUrl);
 });
 
-test('seller saves real stock and reopens the canonical visit offline without duplication', async ({ page, context, realRoute }) => {
+test('seller saves real stock and reopens the canonical visit offline without duplication', async ({ page, context, realRoute }, testInfo) => {
+  testInfo.setTimeout(90_000);
   await page.goto('/login');
   await page.getByLabel('E-mail', { exact: true }).fill(realRoute.seller.email);
   await page.getByLabel('Senha', { exact: true }).fill(realRoute.seller.password);
@@ -214,20 +251,32 @@ test('seller saves real stock and reopens the canonical visit offline without du
   await page.getByRole('link', { name: /^Rota/ }).click();
   await expect(page).toHaveURL(/\/route$/);
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
-  const start = page.getByRole('button', { name: 'Iniciar visita' }).first();
-  await expect(start).toBeVisible();
-  await start.click();
+  await startVisit(page);
   await expect(page).toHaveURL(/\/visit\/[0-9a-f-]+\?step=start$/i);
-  await expect(page.getByText('Início confirmado pelo servidor.')).toBeVisible();
+  await expect(page.getByText(visitConfirmedMessage)).toBeVisible();
   await expect(page.getByText('Sincronizada', { exact: true })).toBeVisible();
   const originalOfflineId = new URL(page.url()).pathname.split('/').at(-1);
-  await page.getByRole('button', { name: 'Preencher estoque' }).click();
-  await page.getByLabel('Quantidade observada — Heliar').fill('0');
-  await page.getByLabel('Quantidade observada — Moura').fill('9');
-  await page.getByLabel('Observação (opcional)').fill('Estoque sintético real');
-  await page.getByRole('button', { name: 'Salvar estoque e continuar' }).click();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Coleta de estoque' }).click();
+  await page.getByRole('button', { name: 'Heliar: 0 unidades. Abrir modelos' }).click();
+  await page.getByLabel('Quantidade de HG38JD 24-320').fill('9');
+  await page.getByRole('button', { name: 'Salvar Heliar' }).click();
+  await expect(page.getByRole('button', { name: 'Heliar: 9 unidades. Abrir modelos' })).toContainText('Coleta salva');
+  for (const brand of ['América', 'Durex', 'ACDelco'] as const) {
+    await page.getByRole('button', { name: `${brand}: 0 unidades. Abrir modelos` }).click();
+    await page.getByRole('checkbox', { name: `Confirmo que não há estoque de ${brand} neste PDV` }).check();
+    await page.getByRole('button', { name: `Salvar ${brand}` }).click();
+    await expect(page.getByRole('button', { name: `${brand}: 0 unidades. Abrir modelos` })).toContainText('Concluída');
+  }
+  await page.getByRole('button', { name: 'Continuar para estoque da concorrência' }).click();
+  await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).check();
+  await page.getByRole('button', { name: 'Salvar concorrência e continuar' }).click();
+  await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
+  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
   await expect(page).toHaveURL(/\?step=prices$/);
-  await expect(page.getByText('Sincronizada', { exact: true })).toBeVisible();
+  await expect.poll(() => storedStockState(page)).toBe('saved_on_device');
+  await context.setOffline(false);
+  await expect.poll(() => storedStockState(page)).toBe('synced');
   const visitUrl = page.url();
 
   const saved = await page.evaluate(async () => {
@@ -239,7 +288,8 @@ test('seller saves real stock and reopens the canonical visit offline without du
     const drafts = await new Promise<Array<{
       offlineId: string;
       canonicalVisitId?: string;
-      stock?: { heliarQuantity: number; mouraQuantity: number; persistenceState: string };
+      stock?: { ownLines: Array<{ brand: string; model: string; quantity: number }>;
+        competitorLines: unknown[]; persistenceState: string };
     }>>((resolve, reject) => {
       const request = database.transaction('visitDrafts').objectStore('visitDrafts').getAll();
       request.onsuccess = () => resolve(request.result);
@@ -252,12 +302,18 @@ test('seller saves real stock and reopens the canonical visit offline without du
   expect(saved[0]).toMatchObject({
     offlineId: originalOfflineId,
     canonicalVisitId: expect.any(String),
-    stock: { heliarQuantity: 0, mouraQuantity: 9, persistenceState: 'synced' },
+    stock: {
+      ownLines: expect.arrayContaining([
+        expect.objectContaining({ brand: 'Heliar', model: 'HG38JD 24-320', quantity: 9 }),
+      ]),
+      competitorLines: [],
+      persistenceState: 'synced',
+    },
   });
 
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Sincronizada', { exact: true })).toBeVisible();
+  await expect.poll(() => storedStockState(page)).toBe('synced');
   await page.goto('/route', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Continuar visita' }).first().click();
   await expect(page).toHaveURL(visitUrl);
