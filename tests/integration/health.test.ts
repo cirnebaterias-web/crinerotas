@@ -744,22 +744,18 @@ it('runs the real visit API through the CLI with canonical idempotent confirmati
   const catalogSql = `begin;
     grant cirne_visit_executor to postgres with set true granted by current_user;
     set local role cirne_visit_executor;
-    do $catalog$
-    begin
-      if not exists (select 1 from api.parameter_sets where id = '90000000-0000-4000-8000-000000000002') then
-        insert into api.parameter_sets (id, version, status, valid_from)
-        values ('90000000-0000-4000-8000-000000000002', 2, 'draft', '2026-01-02T00:00:00Z');
-        insert into api.parameter_values (id, parameter_set_id, category, code, label, sort_order) values
-          ('c2000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000002', 'competitor', 'synthetic_competitor', 'Concorrente Sintético', 1),
-          ('c2000000-0000-4000-8000-000000000002', '90000000-0000-4000-8000-000000000002', 'competitor_price_technology', 'synthetic_technology', 'Tecnologia Sintética', 1),
-          ('c2000000-0000-4000-8000-000000000003', '90000000-0000-4000-8000-000000000002', 'competitor_price_condition', 'synthetic_condition', 'Condição Sintética', 1),
-          ('c2000000-0000-4000-8000-000000000004', '90000000-0000-4000-8000-000000000002', 'competitor_price_unavailable_reason', 'synthetic_unavailable', 'Motivo Sintético', 1);
-      end if;
-      update api.parameter_sets set status = 'retired' where status = 'published';
-      update api.parameter_sets set status = 'published', published_at = clock_timestamp(),
-        published_by = '${administrator.id}' where id = '90000000-0000-4000-8000-000000000002';
-    end
-    $catalog$;
+    insert into api.parameter_sets (id, version, status, valid_from)
+    values ('90000000-0000-4000-8000-000000000002', 2, 'draft', '2026-01-02T00:00:00Z')
+    on conflict (id) do nothing;
+    insert into api.parameter_values (id, parameter_set_id, category, code, label, sort_order) values
+      ('c2000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000002', 'competitor', 'synthetic_competitor', 'Concorrente Sintético', 1),
+      ('c2000000-0000-4000-8000-000000000002', '90000000-0000-4000-8000-000000000002', 'competitor_price_technology', 'synthetic_technology', 'Tecnologia Sintética', 1),
+      ('c2000000-0000-4000-8000-000000000003', '90000000-0000-4000-8000-000000000002', 'competitor_price_condition', 'synthetic_condition', 'Condição Sintética', 1),
+      ('c2000000-0000-4000-8000-000000000004', '90000000-0000-4000-8000-000000000002', 'competitor_price_unavailable_reason', 'synthetic_unavailable', 'Motivo Sintético', 1)
+    on conflict (id) do nothing;
+    update api.parameter_sets set status = 'retired' where status = 'published';
+    update api.parameter_sets set status = 'published', published_at = clock_timestamp(),
+      published_by = '${administrator.id}' where id = '90000000-0000-4000-8000-000000000002';
     reset role;
     revoke cirne_visit_executor from postgres granted by current_user;
     commit;`;

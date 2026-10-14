@@ -3,8 +3,9 @@ import {
   commercialActionListSchema,
   saveCommercialActionRequestSchema,
 } from '@cirne/contracts';
+import { readServerConfig } from '@cirne/config/server';
 import {
-  enforceRouteCookieCsrf, mapRouteRequestError, readRouteJson, resolveRouteRequest,
+  currentServiceDate, enforceRouteCookieCsrf, mapRouteRequestError, readRouteJson, resolveRouteRequest,
   routeErrorResponse, routeResponseHeaders, RouteRequestError,
 } from '@/server/routes/http';
 
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
     let query = client.schema('api').from('commercial_actions').select('*')
       .order('valid_from', { ascending: false }).limit(100);
     if (!identity.roles.includes('manager')) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = currentServiceDate(readServerConfig(process.env).OPERATIONAL_TIME_ZONE);
       query = query.eq('active', true).lte('valid_from', today).gte('valid_until', today);
     }
     const { data, error } = await query;

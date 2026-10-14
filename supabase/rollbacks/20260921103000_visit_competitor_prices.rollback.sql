@@ -31,8 +31,9 @@ begin
      or to_regprocedure('private.sync_event_before_prices(uuid,jsonb)') is null then
     raise exception 'Visit competitor prices capability is not fully installed';
   end if;
-  if (select pg_catalog.pg_get_userbyid(p.proowner) from pg_catalog.pg_proc p
-      where p.oid = 'private.sync_event(uuid,jsonb)'::regprocedure) <> 'cirne_sync_executor' then
+  if to_regprocedure('private.sync_event_before_commercial_actions(uuid,jsonb)') is not null
+     or to_regprocedure('private.apply_visit_competitor_prices_saved_without_product_code(uuid,jsonb)') is not null
+     or to_regprocedure('api.complete_visit(uuid,uuid,jsonb)') is not null then
     raise exception 'Rollback refused: newer sync capabilities depend on competitor prices';
   end if;
   if exists (select 1 from api.competitor_price_reports)

@@ -194,9 +194,9 @@ export function RouteScreen() {
           ...(evidence.location ? { location: evidence.location } : {}),
         });
         draft = result.draft;
-        visitStarted = true;
         setVisitDrafts((current) => ({ ...current, [stop.routeVersionStopId]: result.draft }));
       }
+      visitStarted = true;
       await offlineService.current.saveVisitEvidence({
         userId: identity.id,
         visitOfflineId: draft.offlineId,

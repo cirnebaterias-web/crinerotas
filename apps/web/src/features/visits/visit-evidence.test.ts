@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { distanceMeters, locationAssessment } from './visit-evidence';
+import { coordinateDecimal, distanceMeters, locationAssessment } from './visit-evidence';
 
 describe('visit facade evidence location rules', () => {
   it('accepts an accurate point inside 100 meters', () => {
@@ -41,5 +41,10 @@ describe('visit facade evidence location rules', () => {
       { latitude: 0, longitude: 0 },
       { latitude: 0, longitude: 0.001 },
     )).toBeCloseTo(111.19, 1);
+  });
+
+  it('preserves GPS coordinates to six decimal places', () => {
+    expect(coordinateDecimal(-7.11523749)).toBe('-7.115237');
+    expect(coordinateDecimal(-34.86421951)).toBe('-34.86422');
   });
 });

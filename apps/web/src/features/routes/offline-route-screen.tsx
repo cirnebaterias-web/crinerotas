@@ -10,6 +10,7 @@ import { OfflineFoundationService, type OfflineShellResult } from '@/lib/offline
 import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { formatServiceDate, orderedStops, pendingIds, routeProgress } from './route-model';
 import { NavigationActions } from './navigation-actions';
+import { checkinFailureMessage } from './checkin-failure-message';
 
 const statusLabels = {
   pending: 'Pendente',
@@ -115,6 +116,7 @@ export function OfflineRouteScreen() {
     const service = serviceRef.current;
     setBusy(true);
     setRevocationError(null);
+    let visitStarted = false;
     try {
       let draft = visitDrafts.get(stop.routeVersionStopId);
       if (!draft) {
@@ -125,6 +127,7 @@ export function OfflineRouteScreen() {
         });
         draft = started.draft;
       }
+      visitStarted = true;
       await service.saveVisitEvidence({
         userId: bundle.userId,
         visitOfflineId: draft.offlineId,
@@ -136,7 +139,7 @@ export function OfflineRouteScreen() {
       window.location.assign(`/visit/${draft.offlineId}?step=${draft.currentStep}`);
     } catch {
       if (accessBlocked.current || serviceRef.current !== service) return;
-      setRevocationError('Não foi possível salvar o início da visita. A parada continua inalterada.');
+      setRevocationError(checkinFailureMessage(visitStarted));
       setBusy(false);
     }
   }

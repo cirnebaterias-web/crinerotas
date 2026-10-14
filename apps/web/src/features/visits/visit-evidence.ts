@@ -3,6 +3,10 @@ import type { VisitEvidenceIssue } from '@cirne/contracts';
 export const VISIT_RADIUS_M = 100;
 export const DESIRED_GPS_ACCURACY_M = 50;
 
+export function coordinateDecimal(value: number) {
+  return String(Math.round(value * 1_000_000) / 1_000_000);
+}
+
 export function distanceMeters(
   from: { latitude: number; longitude: number },
   to: { latitude: number; longitude: number },

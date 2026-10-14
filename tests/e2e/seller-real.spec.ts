@@ -14,11 +14,7 @@ async function startVisit(page: import('@playwright/test').Page) {
   await expect(confirm).toBeEnabled();
   await confirm.click();
   const evidenceHeading = page.getByRole('heading', { name: 'Foto da fachada e posição' });
-  await expect(evidenceHeading).toHaveCount(0, { timeout: 3_000 }).catch(async () => {
-    await expect(confirm).toBeEnabled();
-    await confirm.click();
-  });
-  await expect(evidenceHeading).toHaveCount(0);
+  await expect(evidenceHeading).toHaveCount(0, { timeout: 15_000 });
 }
 
 async function storedStockState(page: import('@playwright/test').Page) {

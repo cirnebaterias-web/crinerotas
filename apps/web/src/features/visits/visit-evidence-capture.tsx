@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CanonicalRoute, VisitEvidenceIssue } from '@cirne/contracts';
 import { compressStockPhoto, type CompressedStockPhoto } from './stock/stock-photo-compression';
-import { evidenceIssueLabel, locationAssessment } from './visit-evidence';
+import { coordinateDecimal, evidenceIssueLabel, locationAssessment } from './visit-evidence';
 
 export interface VisitEvidenceCaptureValue {
   capturedAt: string;
@@ -75,8 +75,8 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
       });
       setIssues((current) => [...new Set([...current, ...assessment.issues])]);
       setLocation({
-        latitude: decimal(position.coords.latitude),
-        longitude: decimal(position.coords.longitude),
+        latitude: coordinateDecimal(position.coords.latitude),
+        longitude: coordinateDecimal(position.coords.longitude),
         accuracyM: decimal(position.coords.accuracy),
         ...(assessment.distanceM === undefined ? {} : { distanceM: decimal(assessment.distanceM) }),
       });

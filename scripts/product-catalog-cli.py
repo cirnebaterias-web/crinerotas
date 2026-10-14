@@ -45,16 +45,20 @@ def read_products(source: Path) -> list[dict[str, object]]:
         model = str(row[index["Item original"]] or "").strip()
         sku = str(row[index["SKU/base"]] or "").strip()
         source_brand = str(row[index["Fabricante/Marca"]] or "").strip()
-        if not any((code, model, sku, source_brand)):
+        raw_weight = row[index["Peso kg"]]
+        weight_present = raw_weight is not None and str(raw_weight).strip() != ""
+        if not any((code, description, model, sku, source_brand, weight_present)):
             continue
-        if not code or not model or source_brand not in BRANDS:
-            raise ValueError(f"linha {row_number}: código, descrição ou marca inválidos")
+        if not code or not description or not model or source_brand not in BRANDS:
+            raise ValueError(
+                f"linha {row_number}: código, descrição, item original ou marca inválidos"
+            )
         stable_id = f"{BRANDS[source_brand].lower()}:{code.lower()}"
         normalized_code = code.casefold()
         if normalized_code in seen_codes:
             raise ValueError(f"linha {row_number}: código de fábrica duplicado: {code}")
         seen_codes.add(normalized_code)
-        weight = decimal_text(row[index["Peso kg"]])
+        weight = decimal_text(raw_weight)
         products.append({
             "id": stable_id,
             "factoryCode": code,
