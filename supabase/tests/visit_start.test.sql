@@ -1,6 +1,6 @@
 begin;
 
-select plan(68);
+select plan(72);
 
 -- Existing synthetic visits from API/CLI/E2E runs must not require a destructive reset.
 select count(*)::integer as initial_visits from api.visits \gset
@@ -17,6 +17,10 @@ select ok(has_function_privilege('authenticated', 'api.start_visit(uuid,uuid,jso
 select ok(not has_function_privilege('anon', 'api.start_visit(uuid,uuid,jsonb)', 'EXECUTE'), 'anon cannot start visits');
 select ok(not has_table_privilege('authenticated', 'api.visits', 'SELECT'), 'authenticated cannot read visits directly');
 select ok(not has_table_privilege('authenticated', 'api.location_events', 'SELECT'), 'authenticated cannot read location directly');
+select has_function('api', 'list_expired_visit_evidence', array['integer'], 'service worker can list expired evidence paths');
+select has_function('api', 'purge_expired_visit_evidence', array['integer'], 'expired evidence metadata finalizer exists');
+select ok(not has_function_privilege('authenticated', 'api.list_expired_visit_evidence(integer)', 'EXECUTE'), 'authenticated cannot list expired evidence');
+select ok(has_function_privilege('service_role', 'api.purge_expired_visit_evidence(integer)', 'EXECUTE'), 'service role can finalize expired evidence after Storage API deletion');
 select ok(not has_table_privilege('authenticated', 'api.parameter_sets', 'SELECT'), 'authenticated cannot read parameters directly');
 
 select id as seller_a_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a' \gset

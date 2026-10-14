@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { AnyCanonicalLocalRouteBundle } from '@cirne/contracts';
+import type { AnyCanonicalLocalRouteBundle, CanonicalRoute } from '@cirne/contracts';
 import { restoreCanonicalRoute } from '@cirne/domain';
 import { Brand } from '@/features/auth/brand';
 import { SavedVisits } from '@/features/visits/saved-visits';
+import { VisitEvidenceCapture, type VisitEvidenceCaptureValue } from '@/features/visits/visit-evidence-capture';
 import { OfflineFoundationService, type OfflineShellResult } from '@/lib/offline/service';
 import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { formatServiceDate, orderedStops, pendingIds, routeProgress } from './route-model';
 import { NavigationActions } from './navigation-actions';
+import { checkinFailureMessage } from './checkin-failure-message';
 
 const statusLabels = {
   pending: 'Pendente',
@@ -36,6 +38,7 @@ export function OfflineRouteScreen() {
   const [result, setResult] = useState<OfflineShellResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [revocationError, setRevocationError] = useState<string | null>(null);
+  const [checkinStop, setCheckinStop] = useState<CanonicalRoute['stops'][number] | null>(null);
   const bundle = useMemo(() => newestCanonicalRoute(result), [result]);
   const route = useMemo(() => bundle ? restoreCanonicalRoute(bundle) : null, [bundle]);
   const stops = orderedStops(route?.stops ?? []);
@@ -88,26 +91,55 @@ export function OfflineRouteScreen() {
     }
   }
 
-  async function beginVisit(routeVersionStopId: string) {
+  async function beginVisit(stop: CanonicalRoute['stops'][number]) {
     if (accessBlocked.current || !serviceRef.current || !bundle || busy) return;
-    const service = serviceRef.current;
-    const existing = visitDrafts.get(routeVersionStopId);
+    const existing = visitDrafts.get(stop.routeVersionStopId);
     if (existing) {
-      window.location.assign(`/visit/${existing.offlineId}?step=${existing.currentStep}`);
+      try {
+        const evidence = await serviceRef.current.listVisitEvidence(bundle.userId, existing.offlineId);
+        if (evidence.some((item) => item.kind === 'checkin')) {
+          window.location.assign(`/visit/${existing.offlineId}?step=${existing.currentStep}`);
+        } else {
+          setCheckinStop(stop);
+          setRevocationError('A visita está salva, mas o check-in precisa ser concluído.');
+        }
+      } catch {
+        setRevocationError('Não foi possível verificar a evidência salva neste aparelho. Tente novamente.');
+      }
       return;
     }
+    setCheckinStop(stop);
+  }
+
+  async function confirmCheckin(stop: CanonicalRoute['stops'][number], evidence: VisitEvidenceCaptureValue) {
+    if (accessBlocked.current || !serviceRef.current || !bundle || busy) return;
+    const service = serviceRef.current;
     setBusy(true);
     setRevocationError(null);
+    let visitStarted = false;
     try {
-      const started = await serviceRef.current.startVisit({
+      let draft = visitDrafts.get(stop.routeVersionStopId);
+      if (!draft) {
+        const started = await service.startVisit({
+          userId: bundle.userId,
+          routeVersionStopId: stop.routeVersionStopId,
+          ...(evidence.location ? { location: evidence.location } : {}),
+        });
+        draft = started.draft;
+      }
+      visitStarted = true;
+      await service.saveVisitEvidence({
         userId: bundle.userId,
-        routeVersionStopId,
+        visitOfflineId: draft.offlineId,
+        kind: 'checkin',
+        ...evidence,
       });
       if (accessBlocked.current || serviceRef.current !== service) return;
-      window.location.assign(`/visit/${started.draft.offlineId}?step=${started.draft.currentStep}`);
+      setCheckinStop(null);
+      window.location.assign(`/visit/${draft.offlineId}?step=${draft.currentStep}`);
     } catch {
       if (accessBlocked.current || serviceRef.current !== service) return;
-      setRevocationError('Não foi possível salvar o início da visita. A parada continua inalterada.');
+      setRevocationError(checkinFailureMessage(visitStarted));
       setBusy(false);
     }
   }
@@ -148,13 +180,17 @@ export function OfflineRouteScreen() {
               {(stop.status === 'pending' || visitDrafts.has(stop.routeVersionStopId)) && <button
                 className="seller-button seller-visit-action"
                 disabled={busy}
-                onClick={() => void beginVisit(stop.routeVersionStopId)}
+                onClick={() => void beginVisit(stop)}
               >{visitDrafts.has(stop.routeVersionStopId) ? 'Continuar visita' : 'Iniciar visita'}</button>}
             </div>
           </li>)}</ol>
           <SavedVisits route={route} drafts={result?.kind === 'ready' ? result.drafts : []} />
           <a className="seller-button seller-refresh" href="/route">↻ Tentar atualizar com conexão</a>
         </section>
+      </div>}
+      {checkinStop && <div className="seller-evidence-overlay">
+        <VisitEvidenceCapture kind="checkin" client={checkinStop.client} busy={busy}
+          onCancel={() => setCheckinStop(null)} onConfirm={(evidence) => confirmCheckin(checkinStop, evidence)} />
       </div>}
       <footer className="seller-footer"><span>CIRNE ROTAS</span><p>Cópia local protegida pela última validação deste vendedor neste aparelho.</p></footer>
     </main>

@@ -19,9 +19,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run start',
+    command: 'node scripts/start-web.mjs',
     url: `${baseURL}/api/v1/health/live`,
-    reuseExistingServer: false,
+    reuseExistingServer: process.env.CIRNE_E2E_REUSE_SERVER === '1',
     timeout: 120_000,
     env: {
       ...process.env,

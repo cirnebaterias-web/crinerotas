@@ -21,11 +21,50 @@ import {
   toRouteTodayResponse,
   toSyncCommand,
   assertVisitCanStart,
+  applyVisitStartConfirmation,
   createVisitStartMutation,
   normalizeVisitStart,
   normalizeStockInput,
   createVisitStockMutation,
+  normalizeCompetitorPricesInput,
+  createVisitPricesMutation,
+  createVisitScrapMutation,
 } from './index';
+
+it('commits the scrap answer as visit event five before review', () => {
+  const at = '2026-10-06T12:00:00.000Z';
+  const draft = {
+    schemaVersion: 1 as const,
+    userId: '11111111-1111-4111-8111-111111111111',
+    deviceId: '22222222-2222-4222-8222-222222222222',
+    offlineId: '33333333-3333-4333-8333-333333333333',
+    routeVersionStopId: '44444444-4444-4444-8444-444444444444',
+    currentStep: 'scrap' as const, deviceStartedAt: at,
+    commercialActions: {
+      ownAcknowledgements: [], competitor: { availability: 'not_identified' as const },
+      eventId: '55555555-5555-4555-8555-555555555555', deviceSavedAt: at,
+      persistenceState: 'saved_on_device' as const,
+    },
+    localStatus: 'draft' as const, persistenceState: 'saved_on_device' as const, updatedAt: at,
+  };
+  const mutation = createVisitScrapMutation({
+    draft, values: { availability: 'none' }, deviceSavedAt: at, sequence: 5,
+    ids: { eventId: '66666666-6666-4666-8666-666666666666',
+      idempotencyKey: '77777777-7777-4777-8777-777777777777' },
+  });
+  expect(mutation.draft).toMatchObject({ currentStep: 'review', scrap: {
+    availability: 'none', persistenceState: 'saved_on_device',
+  } });
+  expect(toSyncCommand(mutation.event)).toMatchObject({
+    operation: 'visit.scrap.saved.v1', sequence: 5, aggregateId: draft.offlineId,
+  });
+  expect(() => createVisitScrapMutation({ ...{
+    draft: { ...draft, commercialActions: undefined }, values: { availability: 'none' as const },
+    deviceSavedAt: at, sequence: 5,
+    ids: { eventId: '88888888-8888-4888-8888-888888888888',
+      idempotencyKey: '99999999-9999-4999-8999-999999999999' },
+  } })).toThrow('ações comerciais');
+});
 
 it('normalizes stock and creates the next visit event while preserving zero', () => {
   expect(normalizeStockInput({ heliarQuantity: 0, mouraQuantity: 2, observation: '  conferido   no local  ' }))
@@ -59,6 +98,67 @@ it('normalizes stock and creates the next visit event while preserving zero', ()
   expect(toSyncCommand(mutation.event)).toMatchObject({
     operation: 'visit.stock.saved.v1', aggregateType: 'visit', sequence: 2,
   });
+});
+
+it('resumes the own brands, competitor stock, and prices in the saved order', () => {
+  const draft = {
+    schemaVersion: 1 as const,
+    userId: '11111111-1111-4111-8111-111111111111',
+    deviceId: '22222222-2222-4222-8222-222222222222',
+    offlineId: '55555555-5555-4555-8555-555555555555',
+    routeVersionStopId: '44444444-4444-4444-8444-444444444444',
+    currentStep: 'stock' as const,
+    deviceStartedAt: '2026-09-17T12:00:00.000Z',
+    localStatus: 'draft' as const,
+    persistenceState: 'synced' as const,
+    lastConfirmedSequence: 1,
+    updatedAt: '2026-09-17T12:00:01.000Z',
+  };
+  const save = (values: Parameters<typeof createVisitStockMutation>[0]['values'], sequence: number) =>
+    createVisitStockMutation({ draft, values, deviceSavedAt: '2026-09-17T12:05:00.000Z', sequence,
+      ids: { eventId: `66666666-6666-4666-8666-66666666666${sequence}`,
+        idempotencyKey: `77777777-7777-4777-8777-77777777777${sequence}` } });
+  const ownLines = [{ brand: 'Heliar' as const, model: 'H60', quantity: 0 }];
+  const heliar = save({ heliarQuantity: 0, mouraQuantity: 0, ownLines,
+    completedOwnBrands: ['Heliar'] }, 2);
+  expect(heliar.draft.currentStep).toBe('stock');
+  expect(heliar.event.payload).toMatchObject({ completedOwnBrands: ['Heliar'], ownLines });
+  const allOwn = save({ heliarQuantity: 0, mouraQuantity: 0, ownLines,
+    completedOwnBrands: ['Heliar', 'América', 'Durex', 'ACDelco'] }, 3);
+  expect(allOwn.draft.currentStep).toBe('competitor-stock');
+  const competitor = save({ heliarQuantity: 0, mouraQuantity: 0, ownLines,
+    completedOwnBrands: ['Heliar', 'América', 'Durex', 'ACDelco'], competitorLines: [] }, 4);
+  expect(competitor.draft.currentStep).toBe('prices');
+  expect(competitor.event.payload).toMatchObject({ competitorLines: [] });
+});
+
+it('creates a prices event after stock without inventing catalog values', () => {
+  const draft = createVisitStockMutation({
+    draft: {
+      schemaVersion: 1,
+      userId: '11111111-1111-4111-8111-111111111111',
+      deviceId: '22222222-2222-4222-8222-222222222222',
+      offlineId: '55555555-5555-4555-8555-555555555555',
+      routeVersionStopId: '44444444-4444-4444-8444-444444444444',
+      currentStep: 'stock',
+      deviceStartedAt: '2026-09-21T11:50:00.000Z',
+      localStatus: 'draft', persistenceState: 'synced', lastConfirmedSequence: 1,
+      updatedAt: '2026-09-21T11:50:01.000Z',
+    },
+    values: { heliarQuantity: 0, mouraQuantity: 1 },
+    deviceSavedAt: '2026-09-21T11:55:00.000Z', sequence: 2,
+    ids: { eventId: '66666666-6666-4666-8666-666666666661', idempotencyKey: '77777777-7777-4777-8777-777777777771' },
+  }).draft;
+  const values = normalizeCompetitorPricesInput({
+    availability: 'unavailable',
+    unavailableReasonId: '88888888-8888-4888-8888-888888888888',
+  });
+  const mutation = createVisitPricesMutation({
+    draft, values, deviceSavedAt: '2026-09-21T12:00:00.000Z', sequence: 3,
+    ids: { eventId: '66666666-6666-4666-8666-666666666662', idempotencyKey: '77777777-7777-4777-8777-777777777772' },
+  });
+  expect(mutation.draft).toMatchObject({ currentStep: 'actions', prices: { ...values, persistenceState: 'saved_on_device' } });
+  expect(toSyncCommand(mutation.event)).toMatchObject({ operation: 'visit.prices.saved.v1', sequence: 3, payload: values });
 });
 
 it('normalizes a valid route draft while preserving non-contiguous business order', () => {
@@ -347,4 +447,28 @@ it('creates a visit start draft and the matching versioned outbox event', () => 
     .toMatchObject({ offlineId: mutation.draft.offlineId });
   expect(assertVisitCanStart('pending')).toBeUndefined();
   expect(() => assertVisitCanStart('in_visit')).toThrow('não está disponível');
+});
+
+it('persists the parameter set returned by the canonical visit start', () => {
+  const mutation = createVisitStartMutation({
+    partition,
+    routeVersionStopId: '44444444-4444-4444-8444-444444444441',
+    deviceStartedAt: '2026-09-17T12:00:00.000Z',
+    sequence: 1,
+    ids: {
+      offlineId: '55555555-5555-4555-8555-555555555555',
+      eventId: '66666666-6666-4666-8666-666666666666',
+      idempotencyKey: '77777777-7777-4777-8777-777777777777',
+    },
+  });
+
+  expect(applyVisitStartConfirmation(mutation.draft, {
+    visitId: '88000000-0000-4000-8000-000000000001',
+    parameterSetId: '90000000-0000-4000-8000-000000000001',
+    serverStartedAt: '2026-09-17T12:00:01.000Z',
+  })).toMatchObject({
+    canonicalVisitId: '88000000-0000-4000-8000-000000000001',
+    parameterSetId: '90000000-0000-4000-8000-000000000001',
+    persistenceState: 'synced',
+  });
 });

@@ -1,0 +1,26 @@
+schema: 1
+story: '3.7'
+story_title: 'Evidência obrigatória de fachada e GPS no check-in e checkout'
+gate: PASS
+status_reason: 'Os oito critérios foram revalidados após hardening de checkout, sincronização, retry, retenção e verificação confiável de objetos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'story-file-sha256:6b7b859fe4eb9471d6127461b0f92d1daddba31aa13b91fd1d782d98c3882aaf'
+updated: '2026-10-11T17:29:15Z'
+expires: '2026-10-25T17:29:15Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 948
+  current_run: { unit_passed: 323, pgtap_passed: 549, integration_passed: 19, e2e_passed: 57, lint: PASS, typecheck: PASS, production_build: PASS }
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8], ac_gaps: [] }
+nfr_validation:
+  security: { status: PASS, notes: 'Storage privado, tamanho, MIME, escopo e retenção foram revalidados.' }
+  performance: { status: PASS, notes: 'Captura pontual e limite de 2 MiB preservados.' }
+  reliability: { status: PASS, notes: 'Checkout duplicado, outbox pendente, backoff e operações de anexo foram cobertos.' }
+  maintainability: { status: PASS, notes: 'Falhas de check-in e sincronização possuem testes focados.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Manter o canal remoto desabilitado até os gates de Storage, backup, egress, privacidade e dispositivo físico.'
+      refs: ['Docs/stories/3.7.story.md']

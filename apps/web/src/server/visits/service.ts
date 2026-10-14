@@ -1,8 +1,14 @@
 import {
   startVisitRequestSchema,
+  competitorPricesResultSchema,
+  competitorPriceParameterSetSchema,
+  saveCompetitorPricesRequestSchema,
   saveStockRequestSchema,
   stockSnapshotResultSchema,
   visitStartResultSchema,
+  type CompetitorPriceParameterSet,
+  type CompetitorPricesResult,
+  type SaveCompetitorPricesRequest,
   type StartVisitRequest,
   type SaveStockRequest,
   type StockSnapshotResult,
@@ -28,6 +34,18 @@ export interface VisitStockRepository {
     idempotencyKey: string,
     command: SaveStockRequest,
   ): Promise<StockSnapshotResult>;
+}
+
+export interface VisitCompetitorPricesRepository {
+  saveCompetitorPrices(
+    deviceId: string,
+    idempotencyKey: string,
+    command: SaveCompetitorPricesRequest,
+  ): Promise<CompetitorPricesResult>;
+}
+
+export interface CompetitorPriceParametersRepository {
+  getCurrentCompetitorPriceParameters(at: string): Promise<CompetitorPriceParameterSet>;
 }
 
 export class VisitServiceFailure extends Error {
@@ -80,6 +98,54 @@ export async function saveVisitStock(
       result.data.heliarQuantity !== parsed.data.heliarQuantity ||
       result.data.mouraQuantity !== parsed.data.mouraQuantity ||
       result.data.observation !== parsed.data.observation) {
+    throw new VisitServiceFailure('DEPENDENCY_UNAVAILABLE', publicVisitMessage('DEPENDENCY_UNAVAILABLE'), true);
+  }
+  return result.data;
+}
+
+export async function saveVisitCompetitorPrices(
+  offlineId: string,
+  deviceId: string,
+  idempotencyKey: string,
+  input: SaveCompetitorPricesRequest,
+  repository: VisitCompetitorPricesRepository,
+) {
+  const parsedOfflineId = startVisitRequestSchema.shape.offlineId.safeParse(offlineId);
+  const parsedDevice = startVisitRequestSchema.shape.offlineId.safeParse(deviceId);
+  const parsedKey = startVisitRequestSchema.shape.offlineId.safeParse(idempotencyKey);
+  const parsed = saveCompetitorPricesRequestSchema.safeParse(input);
+  if (!parsedOfflineId.success || !parsedDevice.success || !parsedKey.success || !parsed.success ||
+      parsed.data.offlineId !== parsedOfflineId.data) {
+    throw new VisitServiceFailure('VALIDATION_FAILED', publicVisitMessage('VALIDATION_FAILED'), false);
+  }
+  const result = competitorPricesResultSchema.safeParse(await repository.saveCompetitorPrices(
+    parsedDevice.data,
+    parsedKey.data,
+    parsed.data,
+  ));
+  if (!result.success || result.data.offlineId !== parsed.data.offlineId ||
+      result.data.availability !== parsed.data.availability ||
+      (parsed.data.availability === 'available' &&
+        result.data.quotationIds.length !== parsed.data.quotations.length) ||
+      (parsed.data.availability === 'unavailable' &&
+        result.data.unavailableReasonId !== parsed.data.unavailableReasonId)) {
+    throw new VisitServiceFailure('DEPENDENCY_UNAVAILABLE', publicVisitMessage('DEPENDENCY_UNAVAILABLE'), true);
+  }
+  return result.data;
+}
+
+export async function getCurrentCompetitorPriceParameters(
+  at: string,
+  repository: CompetitorPriceParametersRepository,
+) {
+  const parsedAt = startVisitRequestSchema.shape.deviceStartedAt.safeParse(at);
+  if (!parsedAt.success) {
+    throw new VisitServiceFailure('VALIDATION_FAILED', publicVisitMessage('VALIDATION_FAILED'), false);
+  }
+  const result = competitorPriceParameterSetSchema.safeParse(
+    await repository.getCurrentCompetitorPriceParameters(parsedAt.data),
+  );
+  if (!result.success || Date.parse(result.data.validFrom) > Date.parse(parsedAt.data)) {
     throw new VisitServiceFailure('DEPENDENCY_UNAVAILABLE', publicVisitMessage('DEPENDENCY_UNAVAILABLE'), true);
   }
   return result.data;

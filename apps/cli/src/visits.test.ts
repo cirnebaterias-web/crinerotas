@@ -10,13 +10,19 @@ describe('visit round-trip CLI', () => {
     let startCalls = 0;
     let stockCalls = 0;
     let stockCanonical: Record<string, unknown> | null = null;
+    let priceCalls = 0;
+    let priceCanonical: Record<string, unknown> | null = null;
+    let actionCalls = 0;
+    let scrapCalls = 0;
+    let scheduleCalls = 0;
+    let scheduleCanonical: Record<string, unknown> | null = null;
     const request = vi.fn<typeof fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname;
       if (path === '/api/v1/me') return Response.json({
         id: sellerId,
         displayName: 'Vendedor Sintético',
         roles: ['seller'],
-        capabilities: ['route.read_self', 'visit.start_self'],
+        capabilities: ['route.read_self', 'visit.start_self', 'scrap.collect_self', 'scrap.schedule_self'],
         scopeIds: [],
         status: 'active',
       });
@@ -53,6 +59,59 @@ describe('visit round-trip CLI', () => {
           }],
         },
       });
+      if (path === '/api/v1/parameter-sets/current') return Response.json({
+        schemaVersion: 1,
+        parameterSetId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        version: 1,
+        validFrom: '2026-09-17T00:00:00.000Z',
+        values: {
+          competitors: [{ id: 'c1000000-0000-4000-8000-000000000001', category: 'competitor', code: 'synthetic_competitor', label: 'Concorrente Sintético', sortOrder: 1 }],
+          technologies: [{ id: 'c1000000-0000-4000-8000-000000000002', category: 'competitor_price_technology', code: 'synthetic_technology', label: 'Tecnologia Sintética', sortOrder: 1 }],
+          conditions: [{ id: 'c1000000-0000-4000-8000-000000000003', category: 'competitor_price_condition', code: 'synthetic_condition', label: 'Condição Sintética', sortOrder: 1 }],
+          unavailableReasons: [],
+        },
+      });
+      if (path === '/api/v1/commercial-actions') return Response.json({
+        schemaVersion: 1,
+        actions: [{
+          id: 'f1000000-0000-4000-8000-000000000001', title: 'Ação sintética',
+          description: 'Descrição sintética', validFrom: '2026-01-01', validUntil: '2027-12-31', active: true,
+        }],
+      });
+      if (path === '/api/v1/sync/batches') {
+        const body = JSON.parse(String(init?.body)) as { events: Array<{ eventId: string; operation: string }> };
+        const scrap = body.events[0]?.operation === 'visit.scrap.saved.v1';
+        if (scrap) scrapCalls += 1; else actionCalls += 1;
+        const calls = scrap ? scrapCalls : actionCalls;
+        return Response.json({
+          requestId: crypto.randomUUID(),
+          results: calls === 3
+            ? [{ eventId: body.events[0]!.eventId, status: 'rejected', error: {
+              code: 'IDEMPOTENCY_KEY_REUSED', message: 'Chave divergente.', recoverable: false,
+            } }]
+            : [{ eventId: body.events[0]!.eventId, status: 'confirmed',
+              canonicalId: '88888888-8888-4888-8888-888888888888',
+              confirmedAt: '2026-09-17T12:07:01.000Z' }],
+        });
+      }
+      if (path === '/api/v1/scrap/schedules') {
+        scheduleCalls += 1;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (scheduleCalls === 3) return Response.json({
+          error: { code: 'IDEMPOTENCY_KEY_REUSED', message: 'Chave divergente.', recoverable: false,
+            timestamp: '2026-09-17T12:08:02.000Z', requestId: crypto.randomUUID() },
+        }, { status: 409 });
+        scheduleCanonical ??= {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab', offlineId: body.offlineId,
+          client: { id: body.clientId, name: 'Cliente Sintético', address: 'Endereço sintético' },
+          seller: { id: sellerId, displayName: 'Vendedor Sintético' },
+          origin: 'standalone', visitId: null, estimatedWeightKg: body.estimatedWeightKg,
+          desiredDate: body.desiredDate, period: body.period, observation: body.observation,
+          requestedAt: body.requestedAt, serverSavedAt: '2026-09-17T12:08:01.000Z',
+          status: 'pending', version: 1,
+        };
+        return Response.json(scheduleCanonical);
+      }
       if (path.endsWith('/sections/stock')) {
         stockCalls += 1;
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -72,6 +131,27 @@ describe('visit round-trip CLI', () => {
           serverSavedAt: '2026-09-17T12:05:01.000Z',
         };
         return Response.json(stockCanonical);
+      }
+      if (path.endsWith('/sections/competitor-prices')) {
+        priceCalls += 1;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (priceCalls === 3) return Response.json({
+          error: {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: 'Chave divergente.', recoverable: false,
+            timestamp: '2026-09-17T12:06:02.000Z', requestId: crypto.randomUUID(),
+          },
+        }, { status: 409 });
+        priceCanonical ??= {
+          schemaVersion: 1,
+          reportId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          visitId: '88888888-8888-4888-8888-888888888888',
+          offlineId: body.offlineId,
+          availability: 'available',
+          quotationIds: ['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'],
+          unavailableReasonId: null,
+          serverSavedAt: '2026-09-17T12:06:01.000Z',
+        };
+        return Response.json(priceCanonical);
       }
       startCalls += 1;
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -119,9 +199,25 @@ describe('visit round-trip CLI', () => {
       stockSaved: true,
       stockReplayMatched: true,
       stockDivergentRejected: true,
+      pricesSaved: true,
+      pricesReplayMatched: true,
+      pricesDivergentRejected: true,
+      commercialActionsSaved: true,
+      commercialActionsReplayMatched: true,
+      commercialActionsDivergentRejected: true,
+      scrapSaved: true,
+      scrapReplayMatched: true,
+      scrapDivergentRejected: true,
+      standaloneScheduleSaved: true,
+      standaloneScheduleReplayMatched: true,
+      standaloneScheduleDivergentRejected: true,
     });
     expect(JSON.stringify(result)).not.toMatch(/token|payload|location|eventId|idempotency/i);
     expect(startCalls).toBe(3);
     expect(stockCalls).toBe(3);
+    expect(priceCalls).toBe(3);
+    expect(actionCalls).toBe(3);
+    expect(scrapCalls).toBe(3);
+    expect(scheduleCalls).toBe(3);
   });
 });

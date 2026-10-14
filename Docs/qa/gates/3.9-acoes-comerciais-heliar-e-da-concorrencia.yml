@@ -1,0 +1,26 @@
+schema: 1
+story: '3.9'
+story_title: 'Ações comerciais Heliar e da concorrência'
+gate: PASS
+status_reason: 'Os dez critérios foram revalidados; o servidor agora deriva snapshots confiáveis e valida catálogo, concorrente, visita e evidência antes da escrita.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'story-file-sha256:84561ec5bd89a7418e8bd6f6bfd4c3246031db41b78d19632ac327e59111716c'
+updated: '2026-10-11T17:29:15Z'
+expires: '2026-10-25T17:29:15Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 948
+  current_run: { unit_passed: 323, pgtap_passed: 549, integration_passed: 19, e2e_passed: 57, lint: PASS, typecheck: PASS, production_build: PASS }
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ac_gaps: [] }
+nfr_validation:
+  security: { status: PASS, notes: 'Snapshots e referências deixam de confiar no payload do cliente.' }
+  performance: { status: PASS, notes: 'Limites de 50 ações próprias e 10 concorrentes preservados.' }
+  reliability: { status: PASS, notes: 'Catálogo diário, offline, outbox e evidência verificada foram cobertos.' }
+  maintainability: { status: PASS, notes: 'Validações permanecem nos contratos e na fronteira transacional.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Validar banners e conteúdo comercial reais antes do piloto.'
+      refs: ['Docs/stories/3.9.story.md']

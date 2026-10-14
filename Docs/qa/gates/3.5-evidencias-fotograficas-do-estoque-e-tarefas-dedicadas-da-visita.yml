@@ -1,0 +1,26 @@
+schema: 1
+story: '3.5'
+story_title: 'Evidências fotográficas do estoque e tarefas dedicadas da visita'
+gate: PASS
+status_reason: 'Os sete critérios foram revalidados, incluindo compressão, limite, persistência offline, restauração e falhas atômicas.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'story-file-sha256:9054a70fa583afc3903ee79fce04e1c25d01d5bf6827d68142a56b65f71d3c83'
+updated: '2026-10-11T17:29:15Z'
+expires: '2026-10-25T17:29:15Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 948
+  current_run: { unit_passed: 323, pgtap_passed: 549, integration_passed: 19, e2e_passed: 57, lint: PASS, typecheck: PASS, production_build: PASS }
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7], ac_gaps: [] }
+nfr_validation:
+  security: { status: PASS, notes: 'Fotos permanecem particionadas e privadas.' }
+  performance: { status: PASS, notes: 'Compressão e limite de três fotos cobertos.' }
+  reliability: { status: PASS, notes: 'Quota, commit atômico e restauração offline cobertos.' }
+  maintainability: { status: PASS, notes: 'Pipeline de imagem isolado e testado.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Validar câmera e armazenamento no Android/Chrome físico antes do piloto.'
+      refs: ['Docs/stories/3.5.story.md']

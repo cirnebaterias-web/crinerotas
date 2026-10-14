@@ -30,8 +30,17 @@ import {
   startVisitRequestSchema,
   saveStockRequestSchema,
   stockInputSchema,
+  saveCompetitorPricesRequestSchema,
+  competitorPricesInputSchema,
+  commercialActionsInputSchema,
+  saveVisitCommercialActionsRequestSchema,
+  visitScrapInputSchema,
+  visitScrapSavedPayloadSchema,
   type StartVisitRequest,
   type StockInput,
+  type CompetitorPricesInput,
+  type CommercialActionsInput,
+  type VisitScrapInput,
   type VisitStartResult,
 } from '@cirne/contracts';
 
@@ -172,9 +181,15 @@ export interface DraftMutationIds {
 type LegacyDraftOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.draft.saved' }>;
 type VisitStartedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.started.v1' }>;
 type VisitStockSavedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.stock.saved.v1' }>;
+type VisitPricesSavedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.prices.saved.v1' }>;
+type VisitCommercialActionsSavedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.commercial-actions.saved.v1' }>;
+type VisitScrapSavedOutboxEvent = Extract<OfflineOutboxEvent, { operation: 'visit.scrap.saved.v1' }>;
 type LegacyDraftSyncCommand = Extract<SyncCommand, { operation: 'visit.draft.saved' }>;
 type VisitStartedSyncCommand = Extract<SyncCommand, { operation: 'visit.started.v1' }>;
 type VisitStockSavedSyncCommand = Extract<SyncCommand, { operation: 'visit.stock.saved.v1' }>;
+type VisitPricesSavedSyncCommand = Extract<SyncCommand, { operation: 'visit.prices.saved.v1' }>;
+type VisitCommercialActionsSavedSyncCommand = Extract<SyncCommand, { operation: 'visit.commercial-actions.saved.v1' }>;
+type VisitScrapSavedSyncCommand = Extract<SyncCommand, { operation: 'visit.scrap.saved.v1' }>;
 
 export interface VisitStartMutationIds {
   offlineId: string;
@@ -183,6 +198,21 @@ export interface VisitStartMutationIds {
 }
 
 export interface VisitStockMutationIds {
+  eventId: string;
+  idempotencyKey: string;
+}
+
+export interface VisitPricesMutationIds {
+  eventId: string;
+  idempotencyKey: string;
+}
+
+export interface VisitCommercialActionsMutationIds {
+  eventId: string;
+  idempotencyKey: string;
+}
+
+export interface VisitScrapMutationIds {
   eventId: string;
   idempotencyKey: string;
 }
@@ -213,6 +243,9 @@ export function normalizeStockInput(input: StockInput): StockInput {
   return {
     heliarQuantity: parsed.data.heliarQuantity,
     mouraQuantity: parsed.data.mouraQuantity,
+    ...(parsed.data.ownLines ? { ownLines: parsed.data.ownLines } : {}),
+    ...(parsed.data.completedOwnBrands ? { completedOwnBrands: parsed.data.completedOwnBrands } : {}),
+    ...(parsed.data.competitorLines ? { competitorLines: parsed.data.competitorLines } : {}),
     ...(observation ? { observation } : {}),
   };
 }
@@ -237,7 +270,10 @@ export function createVisitStockMutation(input: {
   });
   const draft = localVisitDraftSchema.parse({
     ...currentDraft,
-    currentStep: 'prices',
+    currentStep: values.completedOwnBrands
+      ? values.completedOwnBrands.length < 4 ? 'stock'
+        : values.competitorLines === undefined ? 'competitor-stock' : 'prices'
+      : 'prices',
     stock: {
       ...values,
       eventId: input.ids.eventId,
@@ -267,6 +303,175 @@ export function createVisitStockMutation(input: {
   });
   if (event.operation !== 'visit.stock.saved.v1') {
     throw new VisitDomainError('VALIDATION_FAILED', 'Evento de estoque inválido.');
+  }
+  return { draft, event };
+}
+
+export function normalizeCompetitorPricesInput(input: CompetitorPricesInput): CompetitorPricesInput {
+  const parsed = competitorPricesInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Preços da concorrência inválidos.');
+  }
+  return parsed.data;
+}
+
+export function createVisitPricesMutation(input: {
+  draft: LocalVisitDraft;
+  values: CompetitorPricesInput;
+  deviceSavedAt: string;
+  sequence: number;
+  ids: VisitPricesMutationIds;
+}): { draft: LocalVisitDraft; event: VisitPricesSavedOutboxEvent } {
+  const currentDraft = localVisitDraftSchema.parse(input.draft);
+  if (!currentDraft.stock) {
+    throw new VisitDomainError('VERSION_CONFLICT', 'O estoque precisa ser salvo antes dos preços.');
+  }
+  const values = normalizeCompetitorPricesInput(input.values);
+  saveCompetitorPricesRequestSchema.parse({
+    schemaVersion: 1,
+    offlineId: currentDraft.offlineId,
+    deviceSavedAt: input.deviceSavedAt,
+    ...values,
+  });
+  const draft = localVisitDraftSchema.parse({
+    ...currentDraft,
+    currentStep: 'actions',
+    prices: {
+      ...values,
+      eventId: input.ids.eventId,
+      deviceSavedAt: input.deviceSavedAt,
+      persistenceState: 'saved_on_device',
+    },
+    persistenceState: 'saved_on_device',
+    updatedAt: input.deviceSavedAt,
+  });
+  const event = offlineOutboxEventSchema.parse({
+    schemaVersion: 1,
+    userId: currentDraft.userId,
+    deviceId: currentDraft.deviceId,
+    eventId: input.ids.eventId,
+    idempotencyKey: input.ids.idempotencyKey,
+    operation: 'visit.prices.saved.v1',
+    aggregateId: currentDraft.offlineId,
+    sequence: input.sequence,
+    payload: {
+      offlineId: currentDraft.offlineId,
+      deviceSavedAt: input.deviceSavedAt,
+      ...values,
+    },
+    status: 'pending',
+    attemptCount: 0,
+    occurredAt: input.deviceSavedAt,
+  });
+  if (event.operation !== 'visit.prices.saved.v1') {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Evento de preços inválido.');
+  }
+  return { draft, event };
+}
+
+export function createVisitCommercialActionsMutation(input: {
+  draft: LocalVisitDraft;
+  values: CommercialActionsInput;
+  deviceSavedAt: string;
+  sequence: number;
+  ids: VisitCommercialActionsMutationIds;
+}): { draft: LocalVisitDraft; event: VisitCommercialActionsSavedOutboxEvent } {
+  const currentDraft = localVisitDraftSchema.parse(input.draft);
+  if (!currentDraft.prices) {
+    throw new VisitDomainError('VERSION_CONFLICT', 'Os preços precisam ser salvos antes das ações comerciais.');
+  }
+  const values = commercialActionsInputSchema.parse(input.values);
+  saveVisitCommercialActionsRequestSchema.parse({
+    schemaVersion: 1,
+    offlineId: currentDraft.offlineId,
+    deviceSavedAt: input.deviceSavedAt,
+    ...values,
+  });
+  const draft = localVisitDraftSchema.parse({
+    ...currentDraft,
+    currentStep: 'scrap',
+    commercialActions: {
+      ...values,
+      eventId: input.ids.eventId,
+      deviceSavedAt: input.deviceSavedAt,
+      persistenceState: 'saved_on_device',
+    },
+    persistenceState: 'saved_on_device',
+    updatedAt: input.deviceSavedAt,
+  });
+  const event = offlineOutboxEventSchema.parse({
+    schemaVersion: 1,
+    userId: currentDraft.userId,
+    deviceId: currentDraft.deviceId,
+    eventId: input.ids.eventId,
+    idempotencyKey: input.ids.idempotencyKey,
+    operation: 'visit.commercial-actions.saved.v1',
+    aggregateId: currentDraft.offlineId,
+    sequence: input.sequence,
+    payload: {
+      offlineId: currentDraft.offlineId,
+      deviceSavedAt: input.deviceSavedAt,
+      ...values,
+    },
+    status: 'pending',
+    attemptCount: 0,
+    occurredAt: input.deviceSavedAt,
+  });
+  if (event.operation !== 'visit.commercial-actions.saved.v1') {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Evento de ações comerciais inválido.');
+  }
+  return { draft, event };
+}
+
+export function createVisitScrapMutation(input: {
+  draft: LocalVisitDraft;
+  values: VisitScrapInput;
+  deviceSavedAt: string;
+  sequence: number;
+  ids: VisitScrapMutationIds;
+}): { draft: LocalVisitDraft; event: VisitScrapSavedOutboxEvent } {
+  const currentDraft = localVisitDraftSchema.parse(input.draft);
+  if (!currentDraft.commercialActions) {
+    throw new VisitDomainError('VERSION_CONFLICT', 'As ações comerciais precisam ser salvas antes da sucata.');
+  }
+  if (currentDraft.scrap) {
+    throw new VisitDomainError('VERSION_CONFLICT', 'A resposta de sucata já foi registrada; contate a gestão para corrigir.');
+  }
+  const values = visitScrapInputSchema.parse(input.values);
+  const payload = visitScrapSavedPayloadSchema.parse({
+    schemaVersion: 1,
+    offlineId: currentDraft.offlineId,
+    deviceSavedAt: input.deviceSavedAt,
+    ...values,
+  });
+  const draft = localVisitDraftSchema.parse({
+    ...currentDraft,
+    currentStep: 'review',
+    scrap: {
+      ...values,
+      eventId: input.ids.eventId,
+      deviceSavedAt: input.deviceSavedAt,
+      persistenceState: 'saved_on_device',
+    },
+    persistenceState: 'saved_on_device',
+    updatedAt: input.deviceSavedAt,
+  });
+  const event = offlineOutboxEventSchema.parse({
+    schemaVersion: 1,
+    userId: currentDraft.userId,
+    deviceId: currentDraft.deviceId,
+    eventId: input.ids.eventId,
+    idempotencyKey: input.ids.idempotencyKey,
+    operation: 'visit.scrap.saved.v1',
+    aggregateId: currentDraft.offlineId,
+    sequence: input.sequence,
+    payload,
+    status: 'pending',
+    attemptCount: 0,
+    occurredAt: input.deviceSavedAt,
+  });
+  if (event.operation !== 'visit.scrap.saved.v1') {
+    throw new VisitDomainError('VALIDATION_FAILED', 'Evento de sucata inválido.');
   }
   return { draft, event };
 }
@@ -335,12 +540,13 @@ function visitStartedPayload(request: StartVisitRequest) {
 
 export function applyVisitStartConfirmation(
   draftInput: LocalVisitDraft,
-  result: Pick<VisitStartResult, 'visitId' | 'serverStartedAt'>,
+  result: Pick<VisitStartResult, 'visitId' | 'parameterSetId' | 'serverStartedAt'>,
 ): LocalVisitDraft {
   const draft = localVisitDraftSchema.parse(draftInput);
   return localVisitDraftSchema.parse({
     ...draft,
     canonicalVisitId: result.visitId,
+    parameterSetId: result.parameterSetId,
     serverStartedAt: result.serverStartedAt,
     persistenceState: 'synced',
     updatedAt: result.serverStartedAt,
@@ -463,6 +669,9 @@ export function restoreCanonicalRoute(bundleInput: AnyCanonicalLocalRouteBundle)
 export function toSyncCommand(eventInput: LegacyDraftOutboxEvent): LegacyDraftSyncCommand;
 export function toSyncCommand(eventInput: VisitStartedOutboxEvent): VisitStartedSyncCommand;
 export function toSyncCommand(eventInput: VisitStockSavedOutboxEvent): VisitStockSavedSyncCommand;
+export function toSyncCommand(eventInput: VisitPricesSavedOutboxEvent): VisitPricesSavedSyncCommand;
+export function toSyncCommand(eventInput: VisitCommercialActionsSavedOutboxEvent): VisitCommercialActionsSavedSyncCommand;
+export function toSyncCommand(eventInput: VisitScrapSavedOutboxEvent): VisitScrapSavedSyncCommand;
 export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand;
 export function toSyncCommand(eventInput: OfflineOutboxEvent): SyncCommand {
   const event = offlineOutboxEventSchema.parse(eventInput);
