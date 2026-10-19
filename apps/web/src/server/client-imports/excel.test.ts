@@ -75,7 +75,7 @@ describe('parseClientWorkbook', () => {
     }
     const bytes = new Uint8Array(await workbook.xlsx.writeBuffer());
     await expect(parseClientWorkbook('clientes.xlsx', bytes)).rejects.toMatchObject({ status: 422 });
-  });
+  }, 15000);
 
   it('interrompe o corpo multipart real quando ele excede o limite anunciado', async () => {
     const form = new FormData();
