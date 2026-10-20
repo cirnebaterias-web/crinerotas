@@ -34,7 +34,7 @@ select jsonb_build_object(
   'schemaVersion',1,'sourceName','clientes-sinteticos.xlsx','sourceChecksum',repeat('a',64),
   'totalCount',2,'acceptedCount',1,'rejectedCount',1,
   'rows',jsonb_build_array(jsonb_build_object(
-    'rowNumber',2,'externalReference','IMPORT-TEST-001','name','Cliente Importado TESTE',
+    'rowNumber',2,'externalReference','IMPORT-TEST-001','name','! Cliente Importado TESTE',
     'address','Rua Sintetica 1','latitude',-5.79,'longitude',-35.21,
     'portfolioReference','CARTEIRA-TESTE','sellerEmail',:'seller_email','status','active')),
   'issues',jsonb_build_array(jsonb_build_object(

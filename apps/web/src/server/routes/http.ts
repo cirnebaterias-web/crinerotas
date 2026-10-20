@@ -20,6 +20,7 @@ export class RouteRequestError extends Error {
     public readonly code: RouteErrorCode,
     message: string,
     public readonly recoverable: boolean,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -153,6 +154,7 @@ export function routeErrorResponse(error: RouteRequestError, requestId: string, 
     error: {
       code: error.code,
       message: error.message,
+      ...(error.details ? { details: error.details } : {}),
       recoverable: error.recoverable,
       timestamp: new Date().toISOString(),
       requestId,

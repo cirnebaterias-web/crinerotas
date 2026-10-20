@@ -42,7 +42,7 @@ select is((
 select is((
   select jsonb_agg(permission_code order by permission_code)
   from api.role_permissions where role_id = '00000000-0000-4000-8000-000000000002'
-), '["clients.import", "clients.read", "identity.read_self", "route.plan_scoped", "route.read_scoped", "route.reorder_scoped", "scrap.manage_operations", "scrap.manage_points", "scrap.read_operations"]'::jsonb, 'manager receives client import, scoped route and scrap management permissions without receipt');
+), '["clients.import", "clients.manage", "clients.read", "identity.read_self", "route.plan_scoped", "route.read_scoped", "route.reorder_scoped", "scrap.manage_operations", "scrap.manage_points", "scrap.read_operations"]'::jsonb, 'manager receives explicit client management, import, scoped route and scrap permissions without receipt');
 select is((
   select jsonb_agg(permission_code order by permission_code)
   from api.role_permissions where role_id = '00000000-0000-4000-8000-000000000001'

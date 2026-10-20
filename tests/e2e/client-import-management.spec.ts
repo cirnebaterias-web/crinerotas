@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import ExcelJS from 'exceljs';
 
 const client = {
+  schemaVersion: 1,
   id: '31100000-0000-4000-8000-000000000001',
   externalReference: 'CLIENTE-E2E-311',
   name: 'Cliente Excel Sintético',
@@ -9,8 +10,10 @@ const client = {
   latitude: -5.79,
   longitude: -35.21,
   portfolioReference: 'CARTEIRA-E2E',
+  sellerId: '31100000-0000-4000-8000-000000000003',
   sellerEmail: 'seller-e2e.synthetic@example.invalid',
   status: 'active',
+  version: 1,
 } as const;
 
 test.describe('controlled client import management', () => {
@@ -24,6 +27,13 @@ test.describe('controlled client import management', () => {
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
+      if (pathname === '/api/v1/me') {
+        await route.fulfill({ json: {
+          id: '31100000-0000-4000-8000-000000000004', displayName: 'Gestor E2E',
+          roles: ['manager'], capabilities: ['clients.read', 'clients.import'], scopeIds: [], status: 'active',
+        } });
+        return;
+      }
       if (pathname === '/api/v1/clients') {
         await route.fulfill({ json: { schemaVersion: 1, clients: imported ? [client] : [] } });
         return;
@@ -63,7 +73,8 @@ test.describe('controlled client import management', () => {
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
     await page.goto('/management/clients');
-    await expect(page.getByRole('heading', { name: 'Importar base de clientes' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Base de clientes' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Importar planilha oficial' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Baixar modelo Excel' })).toHaveAttribute(
       'href', '/api/v1/client-imports/template',
     );

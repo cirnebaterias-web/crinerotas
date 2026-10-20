@@ -6,6 +6,7 @@ import {
   clientImportHeaders,
   clientImportPreviewSchema,
   clientImportRowSchema,
+  normalizeClientExternalReference,
   type ClientImportIssue,
   type ClientImportPreview,
   type ClientImportRow,
@@ -204,7 +205,7 @@ export async function parseClientWorkbook(sourceName: string, bytes: Uint8Array)
             rowIssues.push(issue(rowNumber, 'FORMULA_TEXT_NOT_ALLOWED', `Conteúdo inseguro em ${clientImportHeaders[index]}.`));
           }
         });
-        const externalReference = text(cells[0]!.value);
+        const externalReference = normalizeClientExternalReference(text(cells[0]!.value));
         const name = text(cells[1]!.value);
         const address = text(cells[2]!.value);
         const latitude = coordinate(cells[3]!.value, -90, 90);
@@ -217,8 +218,8 @@ export async function parseClientWorkbook(sourceName: string, bytes: Uint8Array)
           rowIssues.push(issue(rowNumber, 'INVALID_COORDINATES', 'Latitude e longitude devem ser válidas e informadas juntas.'));
         }
         if (!['active', 'archived'].includes(statusText)) rowIssues.push(issue(rowNumber, 'INVALID_STATUS', 'Status deve ser active ou archived.'));
-        if (seen.has(externalReference.toLowerCase())) rowIssues.push(issue(rowNumber, 'DUPLICATE_REFERENCE', 'Referência repetida no arquivo.'));
-        seen.add(externalReference.toLowerCase());
+        if (seen.has(externalReference)) rowIssues.push(issue(rowNumber, 'DUPLICATE_REFERENCE', 'Referência repetida no arquivo.'));
+        seen.add(externalReference);
         const parsed = clientImportRowSchema.safeParse({ rowNumber, externalReference, name, address,
           latitude: latitude.value, longitude: longitude.value, portfolioReference, sellerEmail, status: statusText });
         if (!parsed.success && rowIssues.length === 0) rowIssues.push(issue(rowNumber, 'INVALID_ROW', 'Revise os campos desta linha.'));
