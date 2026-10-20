@@ -49,6 +49,7 @@
     "ops:sync": "tsx apps/cli/src/sync-cli.ts",
     "ops:routes": "tsx apps/cli/src/routes-cli.ts",
     "ops:client-imports": "tsx apps/cli/src/client-imports-cli.ts",
+    "ops:clients": "tsx apps/cli/src/clients-cli.ts",
     "ops:navigation": "tsx apps/cli/src/navigation-cli.ts",
     "ops:visits": "tsx apps/cli/src/visits-cli.ts",
     "ops:backup:verify": "tsx scripts/backup-verify-cli.ts",

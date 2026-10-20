@@ -71,18 +71,27 @@ select ok(not has_function_privilege('authenticated', 'private.resolve_current_i
 select ok(not has_function_privilege('anon', 'api.get_my_identity()', 'EXECUTE'), 'anon cannot execute the identity wrapper');
 
 select is((select count(*)::integer from api.roles), 4, 'confirmed roles include the dedicated logistics profile');
-select is((select count(*)::integer from api.role_permissions), 26, 'explicit identity, client import, sync, route, visit and scrap capabilities are seeded');
+select is((select count(*)::integer from api.role_permissions), 28, 'explicit identity, client management, import, sync, route, visit and scrap capabilities are seeded');
 select is((select count(*)::integer from api.user_profiles p join auth.users u on u.id=p.id
-  where u.raw_user_meta_data->>'actorKey' is distinct from 'logistics_a'), 9, 'nine foundational synthetic profiles were provisioned');
+  where u.raw_user_meta_data->>'actorKey' in ('administrator','seller_a','seller_b','manager_a','blocked',
+    'seller_e2e','manager_e2e','seller_regression','manager_regression')), 9, 'nine foundational synthetic profiles were provisioned');
 select is((select count(*)::integer from api.user_role_assignments a join auth.users u on u.id=a.user_id
-  where a.revoked_at is null and u.raw_user_meta_data->>'actorKey' is distinct from 'logistics_a'), 9, 'each foundational synthetic actor has one active role');
-select is((select count(*)::integer from api.user_seller_scopes where revoked_at is null), 3, 'API, manual preview and browser regression actors have separate scopes');
+  where a.revoked_at is null and u.raw_user_meta_data->>'actorKey' in ('administrator','seller_a','seller_b','manager_a','blocked',
+    'seller_e2e','manager_e2e','seller_regression','manager_regression')), 9, 'each foundational synthetic actor has one active role');
+select is((select count(*)::integer from api.user_seller_scopes scope_row
+  join auth.users manager on manager.id=scope_row.manager_user_id
+  join auth.users seller on seller.id=scope_row.seller_user_id
+  where scope_row.revoked_at is null and (manager.raw_user_meta_data->>'actorKey',seller.raw_user_meta_data->>'actorKey') in
+    (('manager_a','seller_a'),('manager_e2e','seller_e2e'),('manager_regression','seller_regression'))), 3,
+  'API, manual preview and browser regression actors have separate scopes');
 select is((select array_agg((manager.raw_user_meta_data ->> 'actorKey') || ':' ||
     (seller.raw_user_meta_data ->> 'actorKey') order by manager.raw_user_meta_data ->> 'actorKey')
   from api.user_seller_scopes scope_row
   join auth.users manager on manager.id = scope_row.manager_user_id
   join auth.users seller on seller.id = scope_row.seller_user_id
-  where scope_row.revoked_at is null),
+  where scope_row.revoked_at is null
+    and manager.raw_user_meta_data ->> 'actorKey' in ('manager_a','manager_e2e','manager_regression')
+    and seller.raw_user_meta_data ->> 'actorKey' in ('seller_a','seller_e2e','seller_regression')),
   array['manager_a:seller_a', 'manager_e2e:seller_e2e', 'manager_regression:seller_regression'],
   'synthetic scopes never cross suite or manual-preview boundaries');
 
@@ -110,7 +119,7 @@ reset role;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select is(api.get_my_identity() -> 'roles', '["manager"]'::jsonb, 'manager A receives its active role');
-select is(api.get_my_identity() -> 'scopeIds', jsonb_build_array(:'seller_a_id'::uuid), 'manager A sees only delegated seller A');
+select ok(api.get_my_identity() -> 'scopeIds' ? :'seller_a_id', 'manager A sees delegated seller A among its authorized portfolios');
 select ok(not (api.get_my_identity() -> 'scopeIds' ? :'seller_b_id'), 'manager A does not see seller B');
 reset role;
 

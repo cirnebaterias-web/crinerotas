@@ -71,6 +71,7 @@ const publicMessages: Record<RouteErrorCode, string> = {
   NOT_FOUND: 'Rota não encontrada.',
   VALIDATION_FAILED: 'Rota inválida.',
   VERSION_CONFLICT: 'A versão enviada conflita com o servidor.',
+  IDEMPOTENCY_KEY_REUSED: 'A chave idempotente já foi usada com outro conteúdo.',
   DEPENDENCY_UNAVAILABLE: 'Serviço de rotas temporariamente indisponível.',
   INTERNAL_ERROR: 'Não foi possível processar a rota agora.',
 };

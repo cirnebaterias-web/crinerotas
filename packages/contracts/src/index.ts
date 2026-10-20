@@ -1,5 +1,7 @@
 import { z } from 'zod';
 export * from './scrap-revisions';
+export * from './client-reference';
+export * from './clients';
 export * from './client-imports';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
@@ -38,6 +40,7 @@ export const routeErrorCodeSchema = z.enum([
   'NOT_FOUND',
   'VALIDATION_FAILED',
   'VERSION_CONFLICT',
+  'IDEMPOTENCY_KEY_REUSED',
   'DEPENDENCY_UNAVAILABLE',
   'INTERNAL_ERROR',
 ]);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { clientExternalReferenceSchema } from './client-reference';
 
 export const clientImportHeaders = [
   'referencia_externa', 'nome', 'endereco', 'latitude', 'longitude',
@@ -7,7 +8,7 @@ export const clientImportHeaders = [
 
 export const clientImportRowSchema = z.object({
   rowNumber: z.number().int().min(2),
-  externalReference: z.string().trim().min(1).max(120),
+  externalReference: clientExternalReferenceSchema,
   name: z.string().trim().min(1).max(160),
   address: z.string().trim().min(1).max(300),
   latitude: z.number().min(-90).max(90).nullable(),
@@ -59,15 +60,18 @@ export const clientImportBatchSchema = z.object({
 }).strict();
 
 export const importedClientSchema = z.object({
+  schemaVersion: z.literal(1),
   id: z.uuid(),
-  externalReference: z.string(),
+  externalReference: clientExternalReferenceSchema,
   name: z.string(),
   address: z.string(),
   latitude: z.number().nullable(),
   longitude: z.number().nullable(),
   portfolioReference: z.string().nullable(),
+  sellerId: z.uuid().nullable(),
   sellerEmail: z.string().nullable(),
   status: z.enum(['active', 'archived']),
+  version: z.number().int().positive(),
 }).strict();
 
 export const clientListResponseSchema = z.object({
@@ -81,7 +85,6 @@ export type ClientImportPreview = z.infer<typeof clientImportPreviewSchema>;
 export type ClientImportBatch = z.infer<typeof clientImportBatchSchema>;
 export type ImportedClient = z.infer<typeof importedClientSchema>;
 
-export const clientsPath = '/api/v1/clients';
 export const clientImportsPath = '/api/v1/client-imports';
 export const clientImportsValidatePath = '/api/v1/client-imports/validate';
 export const clientImportPath = (batchId: string) => `/api/v1/client-imports/${encodeURIComponent(batchId)}`;

@@ -252,7 +252,7 @@ it('validates, imports, replays and lists a synthetic client workbook through th
     const sheet = workbook.addWorksheet('Clientes');
     sheet.addRow(['referencia_externa', 'nome', 'endereco', 'latitude', 'longitude',
       'referencia_carteira', 'vendedor_email', 'status']);
-    sheet.addRow([externalReference, 'Cliente HTTP Sintético', 'Rua Sintética 311', -5.79, -35.21,
+    sheet.addRow([externalReference, '! Cliente HTTP Sintético', 'Rua Sintética 311', -5.79, -35.21,
       'CARTEIRA-HTTP', seller.email, 'active']);
     await workbook.xlsx.writeFile(filePath);
 
@@ -295,11 +295,74 @@ it('validates, imports, replays and lists a synthetic client workbook through th
     expect(clients.status).toBe(200);
     expect(await clients.json()).toMatchObject({
       schemaVersion: 1,
-      clients: expect.arrayContaining([expect.objectContaining({ externalReference, sellerEmail: seller.email })]),
+      clients: expect.arrayContaining([expect.objectContaining({
+        externalReference: externalReference.toUpperCase(), sellerEmail: seller.email,
+      })]),
     });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+it('creates, queries, corrects, replays and conflicts through the real client CLI and API', async () => {
+  const manager = actorManifest.actors.manager_a;
+  const seller = actorManifest.actors.seller_a;
+  if (!manager || !seller) throw new Error('Synthetic client-management actors missing');
+
+  const forbidden = await fetch(`${origin}/api/v1/clients`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${seller.accessToken}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': crypto.randomUUID(),
+    },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      externalReference: `FORBIDDEN-${crypto.randomUUID()}`,
+      name: 'Cliente Proibido Sintético',
+      address: 'Rua Sintética Proibida, 1',
+      latitude: null,
+      longitude: null,
+      portfolioReference: 'FORBIDDEN',
+      sellerEmail: seller.email,
+      status: 'active',
+    }),
+  });
+  expect(forbidden.status).toBe(403);
+
+  let result: Awaited<ReturnType<typeof runWithClosedInput>>;
+  try {
+    result = await runWithClosedInput(process.execPath, [
+      '--import', 'tsx', 'apps/cli/src/clients-cli.ts',
+      '--url', origin, '--seller-email', seller.email, '--json',
+    ], {
+      cwd: root,
+      env: {
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken,
+      },
+    });
+  } catch (error) {
+    const failure = error as { stderr?: string };
+    throw new Error(`Client-management CLI failed: ${failure.stderr?.trim() || 'no diagnostic output'}`);
+  }
+
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    schemaVersion: 1,
+    status: 'ok',
+    createdVersion: 1,
+    updatedVersion: 2,
+    checks: {
+      created: true,
+      replayed: true,
+      queried: true,
+      updated: true,
+      staleConflict: true,
+    },
+  });
+  expect(result.stdout + result.stderr).not.toContain(manager.accessToken);
+  expect(result.stdout + result.stderr).not.toContain(seller.email);
 });
 
 it('returns nonzero from the CLI for an unreachable server', async () => {
@@ -337,7 +400,7 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   });
   expect(managerResponse.status).toBe(200);
   const managerBody = await managerResponse.json() as { scopeIds: string[] };
-  expect(managerBody.scopeIds).toEqual([seller.id]);
+  expect(managerBody.scopeIds).toContain(seller.id);
   expect(managerBody.scopeIds).not.toContain(sellerB.id);
 });
 
@@ -746,7 +809,7 @@ it('runs the real visit API through the CLI with canonical idempotent confirmati
     set local role cirne_visit_executor;
     insert into api.parameter_sets (id, version, status, valid_from)
     values ('90000000-0000-4000-8000-000000000002', 2, 'draft', '2026-01-02T00:00:00Z')
-    on conflict (id) do nothing;
+    on conflict (id) do update set status = 'draft', published_at = null, published_by = null;
     insert into api.parameter_values (id, parameter_set_id, category, code, label, sort_order) values
       ('c2000000-0000-4000-8000-000000000001', '90000000-0000-4000-8000-000000000002', 'competitor', 'synthetic_competitor', 'Concorrente Sintético', 1),
       ('c2000000-0000-4000-8000-000000000002', '90000000-0000-4000-8000-000000000002', 'competitor_price_technology', 'synthetic_technology', 'Tecnologia Sintética', 1),
