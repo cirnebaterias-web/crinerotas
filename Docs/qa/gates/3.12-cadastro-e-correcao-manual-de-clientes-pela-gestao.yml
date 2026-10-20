@@ -1,55 +1,44 @@
 schema: 1
 story: '3.12'
 story_title: 'Cadastro e correção manual de clientes pela gestão'
-gate: CONCERNS
-status_reason: 'Os fluxos críticos de autorização, atomicidade, auditoria, idempotência e concorrência estão validados. Porém, a listagem fixa nos primeiros 100 clientes impede corrigir pela UI parte da base real, que possui mais de 700 registros.'
+gate: PASS
+status_reason: 'A busca e a paginação server-side eliminam o limite operacional dos primeiros 100 clientes sem ampliar o escopo autorizado. Contratos, banco, integração e jornada visual estão aprovados, inclusive para cliente além da centésima posição.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'sha256:7d67bc5f26996310fc14368660e02953edf1557d8e63a55ec3c9e0a060791ba2'
-updated: '2026-10-20T09:24:36-03:00'
-expires: '2026-11-03T09:24:36-03:00'
-top_issues:
-  - id: 'REQ-001'
-    severity: medium
-    finding: 'GET /api/v1/clients e a tela /management/clients expõem somente os primeiros 100 clientes, sem busca ou paginação; clientes autorizados fora desse conjunto não podem ser abertos para correção pela UI.'
-    suggested_action: 'Adicionar busca ou paginação server-side e controles correspondentes na UI, com teste usando mais de 100 clientes.'
-    suggested_owner: dev
+reviewed_revision: 'sha256:68fdea2f5f1b225c1d21ebce22b3290a255169c058c1a579f6e115f9af0fdaea'
+updated: '2026-10-20T11:24:00-03:00'
+expires: '2026-11-03T11:24:00-03:00'
+top_issues: []
 waiver: { active: false }
-quality_score: 90
+quality_score: 100
 evidence:
-  tests_reviewed: 948
-  code_review: 'CodeRabbit full review: 0 findings'
+  tests_reviewed: 959
+  code_review: 'CodeRabbit full review: 0 findings across 10 changed files'
   trace:
-    ac_covered: [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15]
-    ac_gaps: [7]
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    ac_gaps: []
 risk_summary:
   totals:
     critical: 0
     high: 0
-    medium: 1
+    medium: 0
     low: 0
-  highest:
-    id: 'REQ-001'
-    score: 6
-    probability: 3
-    impact: 2
+  highest: null
 nfr_validation:
   security:
     status: PASS
-    notes: 'Capacidade, papel, escopo, RLS, CSRF, não enumeração, grants mínimos e auditoria foram cobertos por testes em múltiplas camadas.'
+    notes: 'A nova RPC exige clients.read, preserva o recorte por papel e scopeIds, mantém grants mínimos e não expõe clientes fora da abrangência.'
   performance:
-    status: CONCERNS
-    notes: 'O limite protege a carga, mas a ausência de busca ou paginação torna a operação incompleta na escala da base real.'
+    status: PASS
+    notes: 'Busca e contagem ocorrem no servidor; páginas são limitadas a 100 itens e a UI usa 25, atendendo a base real acima de 700 clientes sem resposta irrestrita.'
   reliability:
     status: PASS
-    notes: 'Criação atômica, idempotência, concorrência otimista, preservação histórica e precedência da importação oficial estão validadas.'
+    notes: 'Metadados de paginação são validados, a compatibilidade com limit foi preservada e falha de recarga não apaga a confirmação de persistência do formulário.'
   maintainability:
     status: PASS
-    notes: 'Contratos compartilhados, handlers finos, serviço isolado, migrações incrementais e cobertura automatizada sustentam manutenção segura.'
+    notes: 'Contrato compartilhado, handler fino, RPC dedicada e testes unitários, pgTAP, integração e E2E mantêm a mudança observável e isolada.'
 recommendations:
   immediate: []
   future:
-    - action: 'Adicionar busca ou paginação server-side na listagem gerencial e cobrir o acesso a clientes além da centésima posição.'
+    - action: 'Monitorar a latência da busca e considerar índices especializados somente se o volume crescer materialmente além da base atual.'
       refs:
-        - 'apps/web/src/app/api/v1/clients/route.ts'
-        - 'apps/web/src/features/management/client-import-management.tsx'
-        - 'supabase/migrations/20261019190000_client_manual_management.sql'
+        - 'supabase/migrations/20261020140000_client_management_search_pagination.sql'

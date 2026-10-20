@@ -16,6 +16,25 @@ const client = {
   version: 1,
 } as const;
 
+function clientListPayload(clients: readonly (typeof client)[], url: URL) {
+  const query = url.searchParams.get('q')?.trim() ?? '';
+  const page = Number(url.searchParams.get('page') ?? '1');
+  const pageSize = Number(url.searchParams.get('pageSize') ?? '25');
+  const filtered = query
+    ? clients.filter((item) => item.externalReference.includes(query) || item.name.includes(query))
+    : [...clients];
+  const totalPages = Math.ceil(filtered.length / pageSize);
+  return {
+    schemaVersion: 1 as const,
+    query,
+    clients: filtered.slice((page - 1) * pageSize, page * pageSize),
+    pagination: {
+      page, pageSize, totalCount: filtered.length, totalPages,
+      hasPrevious: page > 1, hasNext: page < totalPages,
+    },
+  };
+}
+
 test.describe('controlled client import management', () => {
   test.use({ serviceWorkers: 'block' });
 
@@ -26,7 +45,8 @@ test.describe('controlled client import management', () => {
     let importCalls = 0;
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
-      const pathname = new URL(request.url()).pathname;
+      const url = new URL(request.url());
+      const pathname = url.pathname;
       if (pathname === '/api/v1/me') {
         await route.fulfill({ json: {
           id: '31100000-0000-4000-8000-000000000004', displayName: 'Gestor E2E',
@@ -35,7 +55,7 @@ test.describe('controlled client import management', () => {
         return;
       }
       if (pathname === '/api/v1/clients') {
-        await route.fulfill({ json: { schemaVersion: 1, clients: imported ? [client] : [] } });
+        await route.fulfill({ json: clientListPayload(imported ? [client] : [], url) });
         return;
       }
       if (pathname === '/api/v1/client-imports/validate') {
@@ -85,12 +105,12 @@ test.describe('controlled client import management', () => {
     });
     await expect(page.getByText(/Arquivo selecionado:/)).toContainText('clientes-e2e.xlsx');
     await page.getByRole('button', { name: 'Validar' }).click();
-    await expect(page.getByRole('status')).toContainText('pronta para importar');
+    await expect(page.getByText('Planilha válida e pronta para importar.')).toBeVisible();
     await expect(page.getByText(/Total: 1/)).toContainText('Aceitas: 1');
     expect(validateCalls).toBe(1);
 
     await page.getByRole('button', { name: 'Importar linhas válidas' }).click();
-    await expect(page.getByRole('status')).toContainText('Base de clientes atualizada');
+    await expect(page.getByText(/Base de clientes atualizada/)).toBeVisible();
     await expect(page.getByRole('heading', { name: client.name })).toBeVisible();
     await expect(page.getByText(client.address)).toBeVisible();
     expect(importCalls).toBe(1);

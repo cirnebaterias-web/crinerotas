@@ -1,4 +1,4 @@
-import { clientListResponseSchema, createClientRequestSchema } from '@cirne/contracts';
+import { clientListQuerySchema, clientListResponseSchema, createClientRequestSchema } from '@cirne/contracts';
 import { clientImportRpc, handleClientImportRequest, requireClientCapability } from '@/server/client-imports/http';
 import {
   clientRequestOrigin,
@@ -11,8 +11,16 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   return handleClientImportRequest(request, '/api/v1/clients', async ({ identity, client }, headers) => {
     requireClientCapability(identity, 'clients.read');
-    const clients = await clientImportRpc(client, 'list_import_clients', { p_limit: 100 });
-    return Response.json(clientListResponseSchema.parse({ schemaVersion: 1, clients }), { headers });
+    const parsed = clientListQuerySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams));
+    if (!parsed.success) {
+      throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Revise os filtros da consulta.', false);
+    }
+    const result = await clientImportRpc(client, 'list_management_clients', {
+      p_query: parsed.data.q,
+      p_page: parsed.data.page,
+      p_page_size: parsed.data.pageSize,
+    });
+    return Response.json(clientListResponseSchema.parse(result), { headers });
   });
 }
 export async function POST(request: Request) {

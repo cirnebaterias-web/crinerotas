@@ -22,6 +22,33 @@ const originalClient: ClientDetail = {
   version: 1,
 } as const;
 
+function clientListPayload(allClients: readonly ClientDetail[], url: URL) {
+  const query = url.searchParams.get('q')?.trim() ?? '';
+  const page = Number(url.searchParams.get('page') ?? '1');
+  const pageSize = Number(url.searchParams.get('pageSize') ?? url.searchParams.get('limit') ?? '25');
+  const normalizedQuery = query.toLocaleLowerCase('pt-BR');
+  const filtered = query ? allClients.filter((client) => [
+    client.externalReference,
+    client.name,
+    client.address,
+    client.portfolioReference ?? '',
+  ].some((value) => value.toLocaleLowerCase('pt-BR').includes(normalizedQuery))) : [...allClients];
+  const totalPages = Math.ceil(filtered.length / pageSize);
+  return {
+    schemaVersion: 1 as const,
+    query,
+    clients: filtered.slice((page - 1) * pageSize, page * pageSize),
+    pagination: {
+      page,
+      pageSize,
+      totalCount: filtered.length,
+      totalPages,
+      hasPrevious: page > 1,
+      hasNext: page < totalPages,
+    },
+  };
+}
+
 test.describe('manual client management', () => {
   test.use({ serviceWorkers: 'block' });
 
@@ -31,7 +58,8 @@ test.describe('manual client management', () => {
     let createCalls = 0;
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
-      const pathname = new URL(request.url()).pathname;
+      const url = new URL(request.url());
+      const pathname = url.pathname;
       if (pathname === '/api/v1/me') {
         await route.fulfill({ json: {
           id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
@@ -44,7 +72,7 @@ test.describe('manual client management', () => {
         return;
       }
       if (pathname === '/api/v1/clients' && request.method() === 'GET') {
-        await route.fulfill({ json: { schemaVersion: 1, clients } });
+        await route.fulfill({ json: clientListPayload(clients, url) });
         return;
       }
       if (pathname === '/api/v1/clients' && request.method() === 'POST') {
@@ -78,7 +106,7 @@ test.describe('manual client management', () => {
     await page.getByLabel('Vendedor responsável').selectOption(seller.email);
     await page.getByRole('button', { name: 'Salvar cliente' }).click();
 
-    await expect(page.getByRole('status')).toContainText('Cliente salvo e lista atualizada.');
+    await expect(page.getByText('Cliente salvo e lista atualizada.')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Novo Cliente Sintético' })).toBeVisible();
     expect(createCalls).toBe(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -87,7 +115,8 @@ test.describe('manual client management', () => {
   test('turns an authorized duplicate into an actionable correction', async ({ page }) => {
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
-      const pathname = new URL(request.url()).pathname;
+      const url = new URL(request.url());
+      const pathname = url.pathname;
       if (pathname === '/api/v1/me') {
         await route.fulfill({ json: {
           id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
@@ -100,7 +129,7 @@ test.describe('manual client management', () => {
         return;
       }
       if (pathname === '/api/v1/clients' && request.method() === 'GET') {
-        await route.fulfill({ json: { schemaVersion: 1, clients: [originalClient] } });
+        await route.fulfill({ json: clientListPayload([originalClient], url) });
         return;
       }
       if (pathname === '/api/v1/clients' && request.method() === 'POST') {
@@ -137,7 +166,8 @@ test.describe('manual client management', () => {
   test('preserves edits and offers the canonical state after a version conflict', async ({ page }) => {
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
-      const pathname = new URL(request.url()).pathname;
+      const url = new URL(request.url());
+      const pathname = url.pathname;
       if (pathname === '/api/v1/me') {
         await route.fulfill({ json: {
           id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
@@ -150,7 +180,7 @@ test.describe('manual client management', () => {
         return;
       }
       if (pathname === '/api/v1/clients' && request.method() === 'GET') {
-        await route.fulfill({ json: { schemaVersion: 1, clients: [originalClient] } });
+        await route.fulfill({ json: clientListPayload([originalClient], url) });
         return;
       }
       if (pathname === `/api/v1/clients/${originalClient.id}` && request.method() === 'PATCH') {
@@ -178,6 +208,47 @@ test.describe('manual client management', () => {
     await page.getByRole('button', { name: 'Carregar estado atual' }).click();
     await expect(page.getByLabel('Nome')).toHaveValue('Nome Concorrente');
     await expect(page.getByText('Versão atual: 2.')).toBeVisible();
+  });
+
+  test('finds and opens an authorized client beyond the first hundred records', async ({ page }) => {
+    const clients = Array.from({ length: 101 }, (_, index): ClientDetail => ({
+      ...originalClient,
+      id: `31200000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`,
+      externalReference: `CLIENTE-PAGINADO-${String(index + 1).padStart(3, '0')}`,
+      name: `Cliente Paginado ${String(index + 1).padStart(3, '0')}`,
+    }));
+    const target = clients[100]!;
+    await page.route('**/api/v1/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.pathname === '/api/v1/me') {
+        await route.fulfill({ json: {
+          id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
+          roles: ['manager'], capabilities: ['clients.read', 'clients.manage'], scopeIds: [], status: 'active',
+        } });
+        return;
+      }
+      if (url.pathname === '/api/v1/clients/sellers') {
+        await route.fulfill({ json: { schemaVersion: 1, sellers: [seller] } });
+        return;
+      }
+      if (url.pathname === '/api/v1/clients' && request.method() === 'GET') {
+        await route.fulfill({ json: clientListPayload(clients, url) });
+        return;
+      }
+      await route.abort();
+    });
+
+    await page.goto('/management/clients');
+    await expect(page.getByText('101 clientes encontrados')).toBeVisible();
+    await expect(page.getByRole('heading', { name: target.name })).toHaveCount(0);
+    await page.getByLabel('Pesquisar clientes').fill(target.externalReference);
+    await page.getByRole('button', { name: 'Buscar clientes' }).click();
+    await expect(page.getByText('1 cliente encontrado')).toBeVisible();
+    await expect(page.getByRole('heading', { name: target.name })).toBeVisible();
+    await page.getByRole('button', { name: 'Editar cliente' }).click();
+    await expect(page.getByRole('heading', { name: 'Corrigir cliente' })).toBeVisible();
+    await expect(page.getByLabel('Referência externa')).toHaveValue(target.externalReference);
   });
 
   test('shows access denied without exposing management actions', async ({ page }) => {

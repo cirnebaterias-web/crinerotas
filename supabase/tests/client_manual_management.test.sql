@@ -7,7 +7,11 @@ select has_column('api','client_seller_scopes','managed_by_manual_maintenance','
 select has_function('api','create_client',array['jsonb','uuid','text'],'narrow create wrapper exists');
 select has_function('api','get_client',array['uuid'],'narrow detail wrapper exists');
 select has_function('api','update_client',array['uuid','jsonb','uuid','text'],'narrow update wrapper exists');
+select has_function('api','list_management_clients',array['text','integer','integer'],
+  'searchable paginated management list exists');
 select ok(has_function_privilege('authenticated','api.create_client(jsonb,uuid,text)','EXECUTE'),'authenticated may call the authorized create wrapper');
+select ok(has_function_privilege('authenticated','api.list_management_clients(text,integer,integer)','EXECUTE'),
+  'authenticated may call the authorized management list');
 select ok(not has_table_privilege('authenticated','private.client_management_commands','SELECT'),'browser cannot read idempotency records directly');
 select ok(not has_table_privilege('authenticated','private.audit_events','SELECT'),'browser cannot read audit rows directly');
 do $grant_normalizer_owner$
@@ -36,6 +40,35 @@ select email as seller_b_email from auth.users where id=:'seller_b' \gset
 insert into api.user_seller_scopes(manager_user_id,seller_user_id)
 values(:'manager',:'seller_b')
 on conflict (manager_user_id,seller_user_id) where revoked_at is null do nothing;
+
+with inserted as (
+  insert into api.clients (external_reference,name,address,portfolio_reference,status)
+  select 'PAGE-QA-' || lpad(item::text,3,'0'),
+    'Página QA ' || lpad(item::text,3,'0'),
+    'Rua Paginação ' || item,
+    'CARTEIRA-PAGE-QA',
+    'active'
+  from generate_series(1,105) item
+  returning id
+)
+insert into api.client_seller_scopes (client_id,seller_id,assigned_by,managed_by_manual_maintenance)
+select id, :'seller_a', :'manager', true from inserted;
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub',:'manager',true);
+select is((api.list_management_clients('PAGE-QA-',1,25)->'pagination'->>'totalCount')::integer,105,
+  'search counts all authorized matches beyond the first hundred');
+select is(jsonb_array_length(api.list_management_clients('PAGE-QA-',5,25)->'clients'),5,
+  'fifth page exposes authorized clients beyond the first hundred');
+select is(api.list_management_clients('PAGE-QA-',5,25)->'pagination'->>'totalPages','5',
+  'pagination reports the last page');
+select is(api.list_management_clients('PAGE-QA-',5,25)->'pagination'->>'hasPrevious','true',
+  'last page reports a previous page');
+select is(api.list_management_clients('PAGE-QA-',5,25)->'pagination'->>'hasNext','false',
+  'last page does not report another page');
+select is(jsonb_array_length(api.list_management_clients('PAGE-QA-105',1,25)->'clients'),1,
+  'server-side search locates the client after the first hundred');
+reset role;
 
 select jsonb_build_object(
   'schemaVersion',1,'externalReference','12.345.678/0001-90','name','Cliente Manual TESTE',
