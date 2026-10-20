@@ -74,9 +74,42 @@ export const importedClientSchema = z.object({
   version: z.number().int().positive(),
 }).strict();
 
+const clientListIntegerParameterSchema = z.coerce.number().int().positive();
+export const clientListQuerySchema = z.object({
+  q: z.string().trim().max(120).optional().default(''),
+  page: clientListIntegerParameterSchema.max(100_000).optional().default(1),
+  pageSize: clientListIntegerParameterSchema.max(100).optional(),
+  limit: clientListIntegerParameterSchema.max(100).optional(),
+}).strict().transform(({ limit, pageSize, ...query }) => ({
+  ...query,
+  pageSize: pageSize ?? limit ?? 25,
+}));
+
+export const clientListPaginationSchema = z.object({
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive().max(100),
+  totalCount: z.number().int().nonnegative(),
+  totalPages: z.number().int().nonnegative(),
+  hasPrevious: z.boolean(),
+  hasNext: z.boolean(),
+}).strict().superRefine((pagination, context) => {
+  const expectedPages = Math.ceil(pagination.totalCount / pagination.pageSize);
+  if (pagination.totalPages !== expectedPages) {
+    context.addIssue({ code: 'custom', path: ['totalPages'], message: 'totalPages deve refletir a quantidade total.' });
+  }
+  if (pagination.hasPrevious !== (pagination.page > 1)) {
+    context.addIssue({ code: 'custom', path: ['hasPrevious'], message: 'hasPrevious deve refletir a página atual.' });
+  }
+  if (pagination.hasNext !== (pagination.page < pagination.totalPages)) {
+    context.addIssue({ code: 'custom', path: ['hasNext'], message: 'hasNext deve refletir a página atual.' });
+  }
+});
+
 export const clientListResponseSchema = z.object({
   schemaVersion: z.literal(1),
-  clients: z.array(importedClientSchema),
+  query: z.string().max(120),
+  clients: z.array(importedClientSchema).max(100),
+  pagination: clientListPaginationSchema,
 }).strict();
 
 export type ClientImportRow = z.infer<typeof clientImportRowSchema>;
@@ -84,6 +117,8 @@ export type ClientImportIssue = z.infer<typeof clientImportIssueSchema>;
 export type ClientImportPreview = z.infer<typeof clientImportPreviewSchema>;
 export type ClientImportBatch = z.infer<typeof clientImportBatchSchema>;
 export type ImportedClient = z.infer<typeof importedClientSchema>;
+export type ClientListQuery = z.infer<typeof clientListQuerySchema>;
+export type ClientListPagination = z.infer<typeof clientListPaginationSchema>;
 
 export const clientImportsPath = '/api/v1/client-imports';
 export const clientImportsValidatePath = '/api/v1/client-imports/validate';

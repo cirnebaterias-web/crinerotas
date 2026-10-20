@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   clientImportBatchSchema,
   clientImportPreviewSchema,
@@ -15,12 +15,29 @@ import {
   type ClientDetail,
   type ClientImportBatch,
   type ClientImportPreview,
+  type ClientListPagination,
   type ClientSeller,
   type ImportedClient,
   type MeResponse,
 } from '@cirne/contracts';
 import { ClientMaintenanceForm } from './client-maintenance-form';
 import { ScrapShell, scrapRequest } from '@/features/scrap/scrap-ui';
+
+const clientPageSize = 25;
+const initialPagination: ClientListPagination = {
+  page: 1,
+  pageSize: clientPageSize,
+  totalCount: 0,
+  totalPages: 0,
+  hasPrevious: false,
+  hasNext: false,
+};
+
+function clientListUrl(query: string, page: number) {
+  const parameters = new URLSearchParams({ page: String(page), pageSize: String(clientPageSize) });
+  if (query.trim()) parameters.set('q', query.trim());
+  return `${clientsPath}?${parameters}`;
+}
 
 async function sendFile(path: string, file: File) {
   const form = new FormData();
@@ -42,12 +59,19 @@ export function ClientImportManagement() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [listBusy, setListBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
+  const [pagination, setPagination] = useState<ClientListPagination>(initialPagination);
 
-  const loadClients = useCallback(async () => {
-    const result = clientListResponseSchema.parse(await scrapRequest(clientsPath));
+  const loadClients = useCallback(async (query: string, page: number) => {
+    const result = clientListResponseSchema.parse(await scrapRequest(clientListUrl(query, page)));
     setClients(result.clients);
+    setAppliedQuery(result.query);
+    setPagination(result.pagination);
+    return result;
   }, []);
 
   useEffect(() => {
@@ -65,11 +89,14 @@ export function ClientImportManagement() {
           return;
         }
         const [clientResult, sellerResult] = await Promise.all([
-          scrapRequest(clientsPath),
+          scrapRequest(clientListUrl('', 1)),
           canManage ? scrapRequest(clientSellersPath) : Promise.resolve(null),
         ]);
         if (!active) return;
-        setClients(clientListResponseSchema.parse(clientResult).clients);
+        const clientList = clientListResponseSchema.parse(clientResult);
+        setClients(clientList.clients);
+        setAppliedQuery(clientList.query);
+        setPagination(clientList.pagination);
         if (sellerResult) {
           setSellers(clientSellerListResponseSchema.parse(sellerResult).sellers);
         }
@@ -104,7 +131,7 @@ export function ClientImportManagement() {
     setBusy(true); setMessage('');
     try {
       const result = clientImportBatchSchema.parse(await sendFile(clientImportsPath, file));
-      setBatch(result); setPreview(null); await loadClients();
+      setBatch(result); setPreview(null); await loadClients(appliedQuery, 1);
       setMessage(result.replayed
         ? 'Este conteúdo já havia sido importado; o resultado anterior foi recuperado.'
         : 'Base de clientes atualizada.');
@@ -113,11 +140,40 @@ export function ClientImportManagement() {
     } finally { setBusy(false); }
   }
 
-  async function saved() {
-    await loadClients();
+  async function saved(client: ClientDetail) {
+    setSearchInput(client.externalReference);
+    await loadClients(client.externalReference, 1);
     setCreating(false);
     setEditing(null);
     setMessage('Cliente salvo e lista atualizada.');
+  }
+
+  async function searchClients(event: FormEvent) {
+    event.preventDefault();
+    setListBusy(true); setMessage('');
+    try {
+      await loadClients(searchInput, 1);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível buscar clientes.');
+    } finally { setListBusy(false); }
+  }
+
+  async function clearSearch() {
+    setSearchInput(''); setListBusy(true); setMessage('');
+    try {
+      await loadClients('', 1);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível limpar a busca.');
+    } finally { setListBusy(false); }
+  }
+
+  async function showPage(page: number) {
+    setListBusy(true); setMessage('');
+    try {
+      await loadClients(appliedQuery, page);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível carregar a página.');
+    } finally { setListBusy(false); }
   }
 
   const issues = batch?.issues ?? preview?.issues ?? [];
@@ -174,9 +230,36 @@ export function ClientImportManagement() {
       </section>}
     </section>}
 
-    {!loading && !accessDenied && <section aria-labelledby="client-list">
+    {!loading && !accessDenied && <section aria-labelledby="client-list" aria-busy={listBusy}>
       <h2 id="client-list">Clientes cadastrados</h2>
-      {clients.length === 0 && <p>Nenhum cliente encontrado na sua abrangência.</p>}
+      <form className="seller-stock-card seller-stock-form" role="search" onSubmit={searchClients}>
+        <label htmlFor="client-search">Pesquisar clientes</label>
+        <input
+          id="client-search"
+          type="search"
+          placeholder="Nome, referência, endereço ou carteira"
+          maxLength={120}
+          value={searchInput}
+          disabled={listBusy}
+          onChange={(event) => setSearchInput(event.target.value)}
+        />
+        <div className="seller-evidence-actions">
+          <button className="seller-button seller-primary" disabled={listBusy}>
+            {listBusy ? 'Buscando…' : 'Buscar clientes'}
+          </button>
+          {appliedQuery && <button
+            type="button"
+            className="seller-button seller-secondary"
+            disabled={listBusy}
+            onClick={() => void clearSearch()}
+          >Limpar busca</button>}
+        </div>
+      </form>
+      <p role="status">
+        {pagination.totalCount} {pagination.totalCount === 1 ? 'cliente encontrado' : 'clientes encontrados'}
+        {appliedQuery ? ` para “${appliedQuery}”` : ''}. Página {pagination.page} de {Math.max(pagination.totalPages, 1)}.
+      </p>
+      {clients.length === 0 && <p>Nenhum cliente encontrado na sua abrangência para esta busca.</p>}
       <ul className="seller-stop-list">{clients.map((client) => <li className="seller-stock-card" key={client.id}>
         <h3>{client.name}</h3>
         <p>{client.externalReference} · {client.status === 'active' ? 'Ativo' : 'Inativo'} · versão {client.version}</p>
@@ -188,6 +271,20 @@ export function ClientImportManagement() {
           onClick={() => { setEditing(client); setCreating(false); setMessage(''); }}
         >Editar cliente</button>}
       </li>)}</ul>
+      {(pagination.hasPrevious || pagination.hasNext) && <nav className="seller-evidence-actions" aria-label="Paginação de clientes">
+        <button
+          type="button"
+          className="seller-button seller-secondary"
+          disabled={listBusy || !pagination.hasPrevious}
+          onClick={() => void showPage(pagination.page - 1)}
+        >Página anterior</button>
+        <button
+          type="button"
+          className="seller-button seller-secondary"
+          disabled={listBusy || !pagination.hasNext}
+          onClick={() => void showPage(pagination.page + 1)}
+        >Próxima página</button>
+      </nav>}
     </section>}
   </ScrapShell>;
 }

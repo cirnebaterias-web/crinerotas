@@ -71,12 +71,16 @@ export function ClientMaintenanceForm({
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
+  const formClientKey = client ? `${client.id}:${client.version}` : 'new';
+  const previousFormClientKey = useRef(formClientKey);
 
   useEffect(() => {
+    if (previousFormClientKey.current === formClientKey) return;
+    previousFormClientKey.current = formClientKey;
     setValues(client ? valuesFromClient(client) : blank(sellers[0]?.email));
     setExpectedVersion(client?.version ?? 1);
     setErrors({}); setMessage(''); setConflict(null); setIdempotencyKey(null);
-  }, [client, sellers]);
+  }, [client, formClientKey, sellers]);
 
   function change<K extends keyof Values>(name: K, value: Values[K]) {
     setValues((current) => ({ ...current, [name]: value }));
@@ -127,8 +131,14 @@ export function ClientMaintenanceForm({
         },
       ));
       setIdempotencyKey(null);
-      setMessage(result.replayed ? 'A confirmação anterior foi recuperada.' : 'Cliente salvo no banco.');
-      await onSaved(result.client);
+      const successMessage = result.replayed ? 'A confirmação anterior foi recuperada.' : 'Cliente salvo no banco.';
+      setMessage(successMessage);
+      try {
+        await onSaved(result.client);
+      } catch {
+        setMessage(`${successMessage} Não foi possível atualizar a lista; busque o cliente novamente.`);
+        return;
+      }
       if (!client) setValues(blank(sellers[0]?.email));
     } catch (error) {
       if (error instanceof ScrapRequestError && error.status === 409) {
