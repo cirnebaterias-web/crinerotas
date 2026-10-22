@@ -430,3 +430,30 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .manager-action-form > label { display: grid; gap: 7px; font-weight: 700; }
 .manager-action-form input, .manager-action-form textarea { width: 100%; padding: 12px; border: 1px solid #80948a; border-radius: 10px; font: inherit; }
 .manager-action-list { display: grid; gap: 16px; margin-top: 30px; }
+.manager-day-page { max-width: 1180px; }
+.manager-day-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 24px 0; }
+.manager-day-controls label { display: grid; gap: 6px; color: var(--cirne-forest); font-weight: 750; }
+.manager-day-controls input { min-height: 44px; padding: 9px 12px; border: 1px solid #80948a; border-radius: 10px; background: #fff; font: inherit; }
+.manager-day-summary { display: grid; grid-template-columns: repeat(7, minmax(112px, 1fr)); gap: 10px; margin: 24px 0 14px; }
+.manager-day-summary article { display: grid; gap: 6px; min-width: 0; padding: 16px; border: 1px solid #cddbd3; border-radius: 14px; background: #fff; }
+.manager-day-summary span { color: var(--cirne-muted); font-size: 12px; font-weight: 700; }
+.manager-day-summary strong { color: var(--cirne-forest); font-size: 28px; font-variant-numeric: tabular-nums; }
+.manager-day-updated { color: var(--cirne-muted); }
+.manager-day-routes { display: grid; gap: 16px; }
+.manager-day-route { padding: 20px; border: 1px solid #cddbd3; border-radius: 18px; background: #fff; }
+.manager-day-route > header { display: flex; justify-content: space-between; gap: 18px; align-items: start; }
+.manager-day-route h3, .manager-day-route h4, .manager-day-route p { margin-top: 0; }
+.manager-day-route h4 { margin-bottom: 8px; color: var(--cirne-forest); }
+.manager-day-counts { display: grid; grid-template-columns: repeat(5, minmax(100px, 1fr)); gap: 8px; margin: 18px 0; }
+.manager-day-counts div { padding: 10px 12px; border-radius: 10px; background: #f2f6f3; }
+.manager-day-counts dt { color: var(--cirne-muted); font-size: 11px; font-weight: 700; }
+.manager-day-counts dd { margin: 4px 0 0; color: var(--cirne-forest); font-size: 20px; font-weight: 800; }
+@media (max-width: 960px) {
+  .manager-day-summary { grid-template-columns: repeat(4, minmax(112px, 1fr)); }
+}
+@media (max-width: 700px) {
+  .manager-day-controls, .manager-day-route > header { align-items: stretch; flex-direction: column; }
+  .manager-day-controls .seller-button { width: 100%; }
+  .manager-day-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .manager-day-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

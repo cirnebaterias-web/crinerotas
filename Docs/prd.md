@@ -5,8 +5,8 @@
 | Campo | Valor |
 | --- | --- |
 | Produto | Cirne Rotas - Piloto Simplificado |
-| Versão | 0.4 |
-| Data | 17/09/2026 |
+| Versão | 0.5 |
+| Data | 20/10/2026 |
 | Status | Rascunho completo para revisão e aprovação de negócio |
 | Autoria | Morgan (Product Manager) |
 | Fonte principal | `BRIEFING_MESTRE_Cirne_Rotas_v0.1.docx` |
@@ -28,6 +28,7 @@
 | 03/09/2026 | 0.2 | Infraestrutura do piloto alterada para GitHub, Supabase e Vercel em planos gratuitos, por decisão do negócio. | Morgan (PM) |
 | 03/09/2026 | 0.3 | PRD consolidado com requisitos, UX, premissas técnicas, epics, jornadas, dados, critérios de aceite, métricas, riscos, decisões, rastreabilidade e checklist. | Morgan (PM) |
 | 17/09/2026 | 0.4 | `AB-12` encerrada: somente o Gestor altera a composição publicada, com motivo, nova versão e histórico; o Vendedor apenas reordena pendências e não possui fluxo de solicitação no MVP. | Morgan (PM) |
+| 20/10/2026 | 0.5 | `AB-13` encerrada: planilha da Gestão Comercial/Administrativo definida como fonte oficial, atualização variável por upload autorizado, manutenção manual permitida e precedência sobre Orion condicionada à autorização do Gestor. | Morgan (PM) |
 
 ## 1. Goals and Background Context
 
@@ -1387,7 +1388,7 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | DEP-03 | Vercel | Publicação da PWA e eventual execução server-side aprovada. | Fechar TA-01/04/06/08 e validar canário. |
 | DEP-04 | Google Maps | Navegação externa por URL. | Tratar indisponibilidade sem impedir o registro da visita. |
 | DEP-05 | OpenStreetMap/provedor de tiles | Mapa gerencial P1. | Recurso substituível e não bloqueante; observar atribuição e política de uso. |
-| DEP-06 | Dados de clientes | Importação controlada inicial. | Aprovar arquivo, campos, origem e conflitos em AB-13. |
+| DEP-06 | Dados de clientes | Importação controlada inicial, uploads posteriores autorizados em frequência variável e manutenção manual pelo Gestor. | `AB-13` encerrada; preservar o arquivo real fora do Git, exigir autorização nos uploads e conflitos com Orion e condicionar o uso aos demais gates de dados reais. |
 | DEP-07 | Dispositivos do piloto | Android, navegador, GPS, câmera e armazenamento local. | Definir matriz real e executar testes em AB-14. |
 | DEP-08 | Gestão comercial | Taxonomias, metas, validações e revisão semanal. | Nomear decisores e fechar AB-01/02/03/09/16/17. |
 | DEP-09 | Responsável pela sucata | Tratamento de pendências e SLA. | Fechar AB-07/08 antes de ativar estados operacionais. |
@@ -1410,6 +1411,7 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | DEC-011 | n8n não será compartilhado nem afetado pelo Cirne Rotas. | Briefing v0.1 | CONFIRMADO |
 | DEC-012 | Piloto usará GitHub, Supabase e Vercel em planos gratuitos. | Decisão do negócio em 03/09/2026 | CONFIRMADO; substitui Hostinger/EasyPanel no piloto |
 | DEC-013 | Somente o Gestor altera a composição de rota publicada; a operação exige motivo, cria nova versão e histórico, preserva visitas iniciadas e atualiza o Vendedor com segurança na reconexão. O Vendedor apenas reordena pendências e não solicita alteração no MVP. | Decisão do negócio em 17/09/2026 (`AB-12`) | CONFIRMADO |
+| DEC-014 | A base oficial de clientes é a planilha atualizada pela Gestão Comercial ou pelo Administrativo. A carga usa a aba `Base clientes`, `CNPJ/CPF` como referência externa e `Endereço completo` como endereço canônico; a frequência é variável por upload autorizado e o Gestor pode cadastrar clientes manualmente. `Carteira Outros`, `Carteira Verificar` e `Sem classificação` ficam fora da carga normalizada; status `0` e `Sim` são ativos. Em conflito com Orion, prevalece a planilha somente mediante autorização do Gestor; não há integração automática com Orion. | Decisão do negócio e arquivo real fornecidos em 20/10/2026 (`AB-13`); detalhamento validado nas Stories 3.11–3.12 | CONFIRMADO |
 
 ### 10.4 Prioritized Open Business Decisions
 
@@ -1417,7 +1419,6 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | :---: | --- | --- | --- | --- | --- |
 | Bloqueador | AB-15 | LGPD | Retenção, descarte, aviso aos colaboradores e perfis autorizados a localização/fotos. | Antes de dados reais | Negócio + Privacidade/Jurídico |
 | Bloqueador | AB-17 | Piloto | Região, participantes nominais, suporte, janela operacional e meta comercial. | Antes da liberação | Patrocinador + Gestor comercial |
-| Bloqueador | AB-13 | Importação | Arquivo real, campos, fonte oficial, frequência e conflitos com Orion. | Antes de dados reais | Gestor comercial + Administrador |
 | Bloqueador | AB-14 | Offline | Aparelhos, navegadores e armazenamento local suportados. | Antes dos testes finais | Negócio + QA/Arquitetura |
 | Bloqueador | AB-10 | Evidência | Quando fotografias são obrigatórias no início, conclusão, exceções ou ações. | Antes do campo | Negócio + Privacidade |
 | Bloqueador | AB-11 | Localização | Raio, regra sem GPS e responsável por validar exceções. | Antes do campo | Negócio + Privacidade |
@@ -1432,6 +1433,8 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | Alta | AB-09 | Resultado | Resultados, motivos e campos de pedido/não visita. | Antes do campo | Gestão comercial |
 | Alta | AB-18 | Mídia | Supabase Storage ou alternativa e política de backup/recuperação. | Antes do deploy | Arquitetura + Privacidade |
 | Média | AB-16 | Relatórios | Filtros, colunas, exportações e periodicidade exata. | Antes do dashboard final | Gestão comercial |
+
+`AB-13` foi encerrada em 20/10/2026 pela `DEC-014`. O fechamento define origem e governança da importação, mas não autoriza carregar ou operar dados reais enquanto `AB-15`, perfis sensíveis, retenção, suporte e resposta a incidente permanecerem abertos.
 
 ### 10.5 Consolidated Technical and Data Gates
 
@@ -1602,11 +1605,10 @@ O PRD está forte em definição do problema, limites do MVP, jornadas, offline,
 1. **Arquitetura do backend (`TA-01`):** definir o papel de NestJS, Next.js e Supabase dentro da restrição Vercel/Supabase gratuitos.
 2. **Privacidade e retenção (`AB-15`, `DATA-05`):** aprovar finalidade, aviso, acesso, retenção, anonimização e descarte antes de dados reais.
 3. **Evidência e localização (`AB-10`, `AB-11`):** definir fotografia, raio, regra sem GPS e validação de exceções.
-4. **Dados de entrada (`AB-13`):** obter arquivo real, origem, campos e política de conflito com Orion.
-5. **Dispositivos/offline (`AB-14`):** fechar aparelhos, navegadores e capacidade local para os testes finais.
-6. **Operação do piloto (`AB-17`):** nomear região, participantes, suporte, janela e meta comercial.
-7. **Mídia e recuperação (`AB-18`, `TA-05`, `TA-07`):** confirmar armazenamento privado e restauração compatível com o plano gratuito.
-8. **Capacidade sem custo (`TA-04`, `TA-06`):** validar as cotas e restrições das plataformas contra a carga prevista.
+4. **Dispositivos/offline (`AB-14`):** fechar aparelhos, navegadores e capacidade local para os testes finais.
+5. **Operação do piloto (`AB-17`):** nomear região, participantes, suporte, janela e meta comercial.
+6. **Mídia e recuperação (`AB-18`, `TA-05`, `TA-07`):** confirmar armazenamento privado e restauração compatível com o plano gratuito.
+7. **Capacidade sem custo (`TA-04`, `TA-06`):** validar as cotas e restrições das plataformas contra a carga prevista.
 
 #### High
 
@@ -1720,6 +1722,7 @@ O documento pode seguir para análise arquitetural e fechamento das decisões ab
 | `Docs/Cirne_Rotas_Apresentacao_Executiva_v0.3.pptx` | Síntese executiva, narrativa do piloto, metas e referências de experiência. |
 | `Docs/PACOTE_VISUAL_Cirne_Rotas_v0.1/` | Referência conceitual de telas, fluxo e identidade visual; dados ilustrativos não usados como requisitos. |
 | Decisão do negócio em 03/09/2026 | Uso de GitHub, Supabase e Vercel em planos gratuitos, substituindo Hostinger/EasyPanel no piloto. |
+| Decisão do negócio e `Base clientes.xlsx` fornecida em 20/10/2026 | Origem oficial, aba/campos canônicos, frequência variável, regras de carteira/status, cadastro manual e precedência autorizada da planilha sobre Orion (`AB-13`). O arquivo real permanece fora do Git. |
 
 ### B.2 Approval Record
 

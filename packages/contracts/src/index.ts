@@ -3,6 +3,7 @@ export * from './scrap-revisions';
 export * from './client-reference';
 export * from './clients';
 export * from './client-imports';
+export * from './management-day';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
 export type LiveResponse = z.infer<typeof liveResponseSchema>;

@@ -1,0 +1,17 @@
+begin;
+drop function if exists api.get_management_day(date, text);
+drop function if exists api.resolve_sync_failure(uuid, uuid);
+drop function if exists api.observe_sync_failure(uuid, uuid, text, boolean, timestamptz);
+drop function if exists private.get_management_day(date, text);
+drop function if exists private.resolve_sync_failure(uuid, uuid);
+drop function if exists private.observe_sync_failure(uuid, uuid, text, boolean, timestamptz);
+drop function if exists private.management_identity();
+drop view if exists api.management_day_v;
+drop table if exists private.sync_failure_observations;
+drop policy if exists clients_management_executor_read on api.clients;
+drop policy if exists routes_management_executor_read on api.routes;
+drop policy if exists route_versions_management_executor_read on api.route_versions;
+drop policy if exists route_version_stops_management_executor_read on api.route_version_stops;
+drop policy if exists route_stop_executions_management_executor_read on api.route_stop_executions;
+drop role if exists cirne_management_executor;
+commit;
