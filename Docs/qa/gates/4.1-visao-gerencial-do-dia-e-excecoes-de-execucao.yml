@@ -1,0 +1,28 @@
+schema: 1
+story: '4.1'
+story_title: 'Visão gerencial do dia e exceções de execução'
+gate: PASS
+status_reason: 'Os 13 critérios estão rastreados e os riscos de escopo, dupla contagem, redaction, sincronização e estados visuais possuem controles e testes aprovados; não há questão bloqueante residual.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'working-tree-sha256:04897c9b59dcca88355a3f2d130182843f17fc519864b850cb5cc8efc7c96fef'
+updated: '2026-10-21T19:02:20Z'
+expires: '2026-11-04T19:02:20Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1071
+  current_run: { unit_passed: 352, unit_skipped: 1, pgtap_passed: 634, integration_passed: 21, e2e_passed: 64, lint: PASS, typecheck: PASS, production_build: PASS, secret_scan: PASS, coderabbit_findings: 0 }
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], ac_gaps: [] }
+nfr_validation:
+  security: { status: PASS, notes: 'Autorização em profundidade, menor privilégio, redaction e testes negativos no serviço, API e banco.' }
+  performance: { status: PASS, notes: 'Consulta incremental e ordenada, detalhes limitados e totais completos; orçamento mensurável NFR-009 ainda pertence ao gate de release.' }
+  reliability: { status: PASS, notes: 'Totais reconciliados, estados de erro determinísticos e última visão confirmada preservada.' }
+  maintainability: { status: PASS, notes: 'Contrato compartilhado, handler fino, clock injetável, rollback e suíte estratificada.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Definir o orçamento NFR-009 e medir o plano da RPC com o volume acordado do piloto antes da produção.'
+      refs: ['Docs/prd.md', 'supabase/migrations/20261020170000_management_day.sql']
+    - action: 'Adicionar axe ao baseline de acessibilidade quando a dependência for aprovada para o projeto.'
+      refs: ['tests/e2e/management-day.spec.ts']

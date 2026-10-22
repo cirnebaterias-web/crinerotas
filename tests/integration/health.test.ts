@@ -545,6 +545,70 @@ it('runs the synthetic route round-trip CLI without exposing tokens or client sn
   expect(repeated.stdout + repeated.stderr).not.toContain(seller.accessToken);
 });
 
+it('returns the scoped management day through the real API and CLI', async () => {
+  const seller = actorManifest.actors.seller_a;
+  const sellerB = actorManifest.actors.seller_b;
+  const manager = actorManifest.actors.manager_a;
+  if (!seller || !sellerB || !manager || !publishedRouteId) {
+    throw new Error('Published synthetic route or management actors missing');
+  }
+
+  const response = await fetch(`${origin}/api/v1/management/day`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  const body = await response.json() as {
+    schemaVersion: number;
+    serviceDate: string;
+    availability: string;
+    totals: { planned: number };
+    routes: Array<{ routeId: string; seller: { id: string } }>;
+  };
+  expect(body).toMatchObject({
+    schemaVersion: 1,
+    availability: 'available',
+    routes: expect.arrayContaining([
+      expect.objectContaining({
+        routeId: publishedRouteId,
+        seller: expect.objectContaining({ id: seller.id }),
+      }),
+    ]),
+  });
+  expect(body.totals.planned).toBeGreaterThan(0);
+  expect(body.routes.some((route) => route.seller.id === sellerB.id)).toBe(false);
+
+  const forbidden = await fetch(`${origin}/api/v1/management/day?serviceDate=${body.serviceDate}`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(forbidden.status).toBe(403);
+  expect(forbidden.headers.get('cache-control')).toContain('no-store');
+
+  const invalid = await fetch(`${origin}/api/v1/management/day?serviceDate=${body.serviceDate}&actorId=${seller.id}`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(invalid.status).toBe(422);
+
+  const result = await runWithClosedInput(process.execPath, [
+    '--import', 'tsx', 'apps/cli/src/management-day-cli.ts',
+    '--url', origin, '--date', body.serviceDate, '--json',
+  ], {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken,
+    },
+  });
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    schemaVersion: 1,
+    serviceDate: body.serviceDate,
+    availability: 'available',
+  });
+  expect(result.stdout + result.stderr).not.toContain(manager.accessToken);
+  expect(output).not.toContain(manager.accessToken);
+});
+
 it('enforces route scope at the BFF while preserving the published aggregate', async () => {
   const seller = actorManifest.actors.seller_a;
   const sellerB = actorManifest.actors.seller_b;
