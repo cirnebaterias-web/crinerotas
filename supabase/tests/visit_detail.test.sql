@@ -1,8 +1,10 @@
 begin;
 
-select plan(34);
+select plan(36);
 
 select has_view('api', 'visit_details_v', 'narrow visit detail projection exists');
+select ok(has_table_privilege('cirne_management_executor', 'api.visits', 'SELECT'), 'management executor can read bounded visit references');
+select ok(not has_table_privilege('authenticated', 'api.visits', 'SELECT'), 'authenticated cannot read visits directly');
 select has_function('api', 'get_visit_detail', array['uuid', 'uuid', 'text'], 'authorized visit detail reader exists');
 select has_function('api', 'authorize_visit_attachment_download', array['uuid', 'uuid', 'text'], 'attachment authorization exists');
 select ok(not has_table_privilege('authenticated', 'api.visit_details_v', 'SELECT'), 'authenticated cannot select the projection directly');

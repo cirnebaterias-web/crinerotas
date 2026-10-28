@@ -558,13 +558,13 @@ begin
 end
 $management_function_ownership$;
 
-grant select on table api.visits to cirne_management_executor;
 do $visit_management_policy_ownership$
 begin
   execute pg_catalog.format('grant cirne_visit_executor to %I with set true granted by current_user', current_user);
 end
 $visit_management_policy_ownership$;
 set local role cirne_visit_executor;
+grant select on table api.visits to cirne_management_executor;
 create policy visits_management_executor_read on api.visits
   for select to cirne_management_executor using (true);
 reset role;
