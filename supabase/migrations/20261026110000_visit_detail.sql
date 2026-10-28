@@ -446,6 +446,10 @@ returns jsonb language plpgsql volatile security definer set search_path = '' as
 declare
   identity_document jsonb := private.resolve_current_identity();
   visit_id uuid;
+  evidence_kind text;
+  seller_id uuid;
+  parent_id uuid;
+  content_type text;
   bucket text;
   object_path text;
 begin
@@ -457,13 +461,15 @@ begin
     raise exception using errcode = 'P0001', message = 'NOT_FOUND';
   end if;
 
-  select attachment.visit_id, 'visit-evidence', attachment.storage_path
-  into visit_id, bucket, object_path
+  select attachment.visit_id, 'visit', attachment.seller_id, attachment.visit_id,
+    attachment.content_type, 'visit-evidence', attachment.storage_path
+  into visit_id, evidence_kind, seller_id, parent_id, content_type, bucket, object_path
   from api.visit_attachments attachment
   where attachment.id = p_attachment_id and attachment.status = 'verified';
   if not found then
-    select report.visit_id, 'scrap-evidence', attachment.storage_path
-    into visit_id, bucket, object_path
+    select report.visit_id, 'scrap', attachment.seller_id, attachment.collection_id,
+      attachment.content_type, 'scrap-evidence', attachment.storage_path
+    into visit_id, evidence_kind, seller_id, parent_id, content_type, bucket, object_path
     from api.scrap_attachments attachment
     join api.scrap_collections collection on collection.id = attachment.collection_id
     join api.scrap_reports report on report.id = collection.report_id
@@ -480,7 +486,17 @@ begin
     'visit.evidence.download_url.issued.v1', null,
     jsonb_build_object('visitId', visit_id, 'expiresInSeconds', 60), p_origin, p_request_id, clock_timestamp()
   );
-  return jsonb_build_object('bucket', bucket, 'storagePath', object_path, 'expiresInSeconds', 60);
+  -- The caller-facing RPC returns only canonical metadata. The BFF reconstructs the
+  -- deterministic object location server-side and lets caller-scoped Storage RLS
+  -- authorize the actual signing request; the Data API never exposes the path.
+  return jsonb_build_object(
+    'attachmentId', p_attachment_id,
+    'evidenceKind', evidence_kind,
+    'sellerId', seller_id,
+    'parentId', parent_id,
+    'contentType', content_type,
+    'expiresInSeconds', 60
+  );
 end
 $function$;
 
@@ -573,10 +589,13 @@ alter function private.authorize_visit_attachment_download(uuid, uuid, text) own
 alter function api.authorize_visit_attachment_download(uuid, uuid, text) owner to cirne_visit_detail_executor;
 
 revoke all on function private.visit_detail_identity(uuid),
-  private.can_manager_download_visit_evidence(text, text),
   private.get_visit_detail(uuid, uuid, text),
   private.authorize_visit_attachment_download(uuid, uuid, text)
 from public, anon, authenticated;
+revoke all on function private.can_manager_download_visit_evidence(text, text)
+from public, anon;
+grant execute on function private.can_manager_download_visit_evidence(text, text)
+to authenticated;
 revoke all on function api.get_visit_detail(uuid, uuid, text),
   api.authorize_visit_attachment_download(uuid, uuid, text)
 from public, anon;
@@ -588,6 +607,8 @@ comment on view api.visit_details_v is
   'Projeção mínima de fatos de visita; acesso externo somente pelas RPCs autorizadas.';
 comment on function api.get_visit_detail(uuid, uuid, text) is
   'Detalhe gerencial com escopo e redaction sensível por capacidades não atribuídas por padrão.';
+comment on function api.authorize_visit_attachment_download(uuid, uuid, text) is
+  'Autoriza evidência no escopo do Gestor e retorna somente metadados canônicos; o caminho é resolvido no BFF caller-scoped.';
 
 revoke create on schema api, private from cirne_visit_detail_executor;
 do $detail_ownership$

@@ -1,0 +1,63 @@
+schema: 1
+story: '4.2'
+story_title: 'Detalhe autorizado da visita'
+gate: FAIL
+status_reason: 'A RPC de autorização de evidência é executável diretamente por authenticated e devolve bucket/storagePath; isso contorna o BFF e viola a redaction obrigatória dos ACs 9 e 15.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'ed340a2'
+updated: '2026-10-28T12:42:02Z'
+expires: '2026-11-11T12:42:02Z'
+top_issues:
+  - id: 'SEC-001'
+    severity: high
+    finding: 'api.authorize_visit_attachment_download(uuid,uuid,text) está concedida a authenticated e retorna o caminho interno do objeto antes da assinatura.'
+    impact: 'Um cliente com a capacidade sensível pode chamar a Data API diretamente e obter bucket/storagePath, ignorando a resposta pública restrita à URL efêmera.'
+    refs:
+      - 'supabase/migrations/20261026110000_visit_detail.sql:442'
+      - 'supabase/migrations/20261026110000_visit_detail.sql:483'
+      - 'supabase/migrations/20261026110000_visit_detail.sql:580'
+      - 'apps/web/src/server/visits/supabase-repository.ts:145'
+    suggested_owner: dev
+waiver: { active: false }
+quality_score: 80
+evidence:
+  tests_reviewed: 1059
+  risks_identified: 1
+  current_run:
+    unit_passed: 374
+    unit_skipped: 1
+    pgtap_passed: 659
+    integration_passed: 22
+    targeted_e2e_passed: 4
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    coderabbit_findings: 0
+    direct_rpc_reproduction: FAIL
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14]
+    ac_gaps: [9, 15]
+nfr_validation:
+  security:
+    status: FAIL
+    notes: 'A autorização por capacidade e escopo funciona, porém a RPC exposta devolve o caminho interno que o contrato público deve ocultar.'
+  performance:
+    status: PASS
+    notes: 'Projeções limitadas e ordenadas, sem N+1 no fluxo revisado; build e testes de integração aprovados.'
+  reliability:
+    status: PASS
+    notes: 'Erros recuperáveis, preservação do último detalhe e rollback/reaplicação possuem evidência aprovada.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato compartilhado estrito, handlers finos, CLI-first, rollback e suíte em camadas.'
+recommendations:
+  immediate:
+    - action: 'Redesenhar a emissão para que nenhum RPC executável diretamente pelo cliente devolva bucket ou storagePath; manter revalidação de identidade, capacidade, escopo, vínculo e objeto antes de produzir somente a URL efêmera.'
+      refs:
+        - 'supabase/migrations/20261026110000_visit_detail.sql'
+        - 'apps/web/src/server/visits/supabase-repository.ts'
+    - action: 'Adicionar teste positivo com anexo verificado que falhe se a Data API expuser caminho interno e valide URL de 60 segundos, auditoria sanitizada e política de Storage.'
+      refs:
+        - 'supabase/tests/visit_detail.test.sql'
+        - 'tests/integration/health.test.ts'
+  future: []

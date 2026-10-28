@@ -12,6 +12,7 @@ import {
   type VisitErrorCode,
 } from '@cirne/contracts';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { readEvidenceConfig } from '@cirne/config/server';
 import {
   publicVisitMessage,
   VisitServiceFailure,
@@ -25,10 +26,25 @@ import {
 import { z } from 'zod';
 
 const authorizedAttachmentSchema = z.object({
-  bucket: z.enum(['visit-evidence', 'scrap-evidence']),
-  storagePath: z.string().trim().min(1).max(500),
+  attachmentId: z.string().uuid(),
+  evidenceKind: z.enum(['visit', 'scrap']),
+  sellerId: z.string().uuid(),
+  parentId: z.string().uuid(),
+  contentType: z.enum(['image/jpeg', 'image/webp']),
   expiresInSeconds: z.literal(60),
 }).strict();
+
+function authorizedEvidenceLocation(authorization: z.infer<typeof authorizedAttachmentSchema>) {
+  const extension = authorization.contentType === 'image/webp' ? 'webp' : 'jpg';
+  const parentSegment = authorization.evidenceKind === 'visit' ? 'visit' : 'collection';
+  const bucket = authorization.evidenceKind === 'visit'
+    ? readEvidenceConfig(process.env).EVIDENCE_STORAGE_BUCKET
+    : 'scrap-evidence';
+  return {
+    bucket,
+    storagePath: `seller/${authorization.sellerId}/${parentSegment}/${authorization.parentId}/${authorization.attachmentId}.${extension}`,
+  };
+}
 
 function unavailable() {
   return new VisitServiceFailure(
@@ -154,10 +170,12 @@ export class SupabaseVisitRepository implements VisitStartRepository, VisitStock
     if (response.error) throw mapDatabaseFailure(response.error.message);
     const authorization = authorizedAttachmentSchema.safeParse(response.data);
     if (!authorization.success) throw unavailable();
+    if (authorization.data.attachmentId !== attachmentId) throw unavailable();
+    const location = authorizedEvidenceLocation(authorization.data);
     let signed: Awaited<ReturnType<ReturnType<typeof this.client.storage.from>['createSignedUrl']>>;
     try {
-      signed = await this.client.storage.from(authorization.data.bucket)
-        .createSignedUrl(authorization.data.storagePath, authorization.data.expiresInSeconds);
+      signed = await this.client.storage.from(location.bucket)
+        .createSignedUrl(location.storagePath, authorization.data.expiresInSeconds);
     } catch {
       throw unavailable();
     }

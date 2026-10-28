@@ -1,6 +1,6 @@
 begin;
 
-select plan(25);
+select plan(34);
 
 select has_view('api', 'visit_details_v', 'narrow visit detail projection exists');
 select has_function('api', 'get_visit_detail', array['uuid', 'uuid', 'text'], 'authorized visit detail reader exists');
@@ -8,6 +8,8 @@ select has_function('api', 'authorize_visit_attachment_download', array['uuid', 
 select ok(not has_table_privilege('authenticated', 'api.visit_details_v', 'SELECT'), 'authenticated cannot select the projection directly');
 select ok(has_function_privilege('authenticated', 'api.get_visit_detail(uuid,uuid,text)', 'EXECUTE'), 'authenticated can execute the guarded detail reader');
 select ok(not has_function_privilege('anon', 'api.get_visit_detail(uuid,uuid,text)', 'EXECUTE'), 'anon cannot execute the detail reader');
+select ok(has_function_privilege('authenticated', 'private.can_manager_download_visit_evidence(text,text)', 'EXECUTE'), 'authenticated can evaluate the caller-scoped Storage policy');
+select ok(not has_function_privilege('anon', 'private.can_manager_download_visit_evidence(text,text)', 'EXECUTE'), 'anon cannot evaluate the sensitive Storage policy');
 select ok(
   not (select rolcanlogin or rolbypassrls or rolsuper from pg_catalog.pg_roles where rolname = 'cirne_visit_detail_executor'),
   'detail executor cannot login or bypass RLS'
@@ -110,17 +112,55 @@ where manager_user_id = :'manager_a_id'::uuid and seller_user_id = :'seller_a_id
 insert into api.role_permissions (role_id, permission_code) values
   (:'manager_role_id', 'visit.location.read_scoped'),
   (:'manager_role_id', 'visit.evidence.read_scoped');
+insert into api.visit_attachments (
+  id, offline_id, visit_id, seller_id, device_id, purpose, storage_path,
+  content_type, byte_size, checksum, captured_at, expires_at, status,
+  reservation_key, reservation_hash, confirmation_key, verified_at
+)
+select
+  '92000000-0000-4000-8000-000000000013',
+  '92000000-0000-4000-8000-000000000014',
+  visit.id, visit.seller_id, visit.device_id, 'visit_checkin',
+  'seller/' || visit.seller_id || '/visit/' || visit.id || '/92000000-0000-4000-8000-000000000013.jpg',
+  'image/jpeg', 4, repeat('a', 64), '2099-10-26T12:00:00Z', '2100-04-24T12:00:00Z',
+  'verified', '92000000-0000-4000-8000-000000000015', repeat('b', 64),
+  '92000000-0000-4000-8000-000000000016', '2099-10-26T12:00:01Z'
+from api.visits visit where visit.id = :'detail_visit_id'::uuid;
+insert into storage.objects (bucket_id, name, metadata)
+select 'visit-evidence', attachment.storage_path, '{"size":4,"mimetype":"image/jpeg"}'::jsonb
+from api.visit_attachments attachment where attachment.id = '92000000-0000-4000-8000-000000000013';
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.get_visit_detail(:'detail_visit_id', '92000000-0000-4000-8000-000000000011', 'web') as sensitive_detail \gset
 select is((:'sensitive_detail')::jsonb #>> '{location,state}', 'available', 'synthetic explicit capability reveals location');
 select is((:'sensitive_detail')::jsonb #>> '{evidence,state}', 'available', 'synthetic explicit capability reveals verified evidence metadata only');
 select is((:'sensitive_detail')::jsonb #>> '{location,latitude}', '-7.115', 'authorized location preserves decimal text');
+select api.authorize_visit_attachment_download(
+  '92000000-0000-4000-8000-000000000013',
+  '92000000-0000-4000-8000-000000000017', 'web'
+) as attachment_authorization \gset
+select is((:'attachment_authorization')::jsonb ->> 'evidenceKind', 'visit', 'download authorization identifies the canonical evidence kind');
+select is((:'attachment_authorization')::jsonb ->> 'parentId', :'detail_visit_id', 'download authorization remains bound to the canonical visit');
+select is((:'attachment_authorization')::jsonb ->> 'attachmentId', '92000000-0000-4000-8000-000000000013', 'download authorization remains bound to the requested attachment');
+select ok((:'attachment_authorization')::text !~* '(bucket|storagePath|seller/)', 'direct Data API authorization exposes no bucket or internal storage path');
+select is((select count(*)::integer from storage.objects
+  where bucket_id = 'visit-evidence'
+    and name = 'seller/' || :'seller_a_id' || '/visit/' || :'detail_visit_id' || '/92000000-0000-4000-8000-000000000013.jpg'),
+  1, 'caller-scoped Storage RLS authorizes the verified object');
 select throws_ok($$select api.authorize_visit_attachment_download(
   '92000000-0000-4000-8000-000000000099',
   '92000000-0000-4000-8000-000000000012', 'web'
 )$$, 'P0001', 'NOT_FOUND', 'missing evidence remains non-enumerating even with explicit capability');
 reset role;
+select is((select count(*)::integer from private.audit_events
+  where target_id = '92000000-0000-4000-8000-000000000013'::uuid
+    and action = 'visit.evidence.download_url.issued.v1'
+    and request_id = '92000000-0000-4000-8000-000000000017'), 1,
+  'authorized download appends one audit event');
+select ok(not exists (select 1 from private.audit_events
+  where request_id = '92000000-0000-4000-8000-000000000017'
+    and coalesce(after_data::text, '') ~* '(bucket|storagePath|seller/)'),
+  'download audit contains no bucket or internal storage path');
 select is((select count(*)::integer from private.audit_events
   where target_id = :'detail_visit_id'::uuid and action = 'visit.location.read.v1'
     and request_id = '92000000-0000-4000-8000-000000000011'), 1, 'sensitive location read appends one audit event');

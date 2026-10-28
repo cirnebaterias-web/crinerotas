@@ -70,14 +70,22 @@ describe('visit detail service', () => {
 
   it('maps a thrown storage signing failure to a recoverable dependency error', async () => {
     const abortSignal = vi.fn().mockResolvedValue({
-      data: { bucket: 'visit-evidence', storagePath: 'synthetic/evidence.jpg', expiresInSeconds: 60 },
+      data: {
+        attachmentId: id,
+        evidenceKind: 'visit',
+        sellerId: manager.id,
+        parentId: id,
+        contentType: 'image/jpeg',
+        expiresInSeconds: 60,
+      },
       error: null,
     });
+    const createSignedUrl = vi.fn().mockRejectedValue(new Error('storage unavailable'));
     const client = {
       schema: vi.fn().mockReturnValue({ rpc: vi.fn().mockReturnValue({ abortSignal }) }),
       storage: {
         from: vi.fn().mockReturnValue({
-          createSignedUrl: vi.fn().mockRejectedValue(new Error('storage unavailable')),
+          createSignedUrl,
         }),
       },
     };
@@ -86,5 +94,65 @@ describe('visit detail service', () => {
       code: 'DEPENDENCY_UNAVAILABLE',
       recoverable: true,
     });
+    expect(client.storage.from).toHaveBeenCalledWith('visit-evidence');
+    expect(createSignedUrl).toHaveBeenCalledWith(
+      `seller/${manager.id}/visit/${id}/${id}.jpg`,
+      60,
+    );
+  });
+
+  it('derives a scrap object location only inside the BFF and returns the signed URL', async () => {
+    const abortSignal = vi.fn().mockResolvedValue({
+      data: {
+        attachmentId: id,
+        evidenceKind: 'scrap',
+        sellerId: manager.id,
+        parentId: requestId,
+        contentType: 'image/webp',
+        expiresInSeconds: 60,
+      },
+      error: null,
+    });
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: 'https://example.invalid/storage/signed' },
+      error: null,
+    });
+    const client = {
+      schema: vi.fn().mockReturnValue({ rpc: vi.fn().mockReturnValue({ abortSignal }) }),
+      storage: { from: vi.fn().mockReturnValue({ createSignedUrl }) },
+    };
+    const repository = new SupabaseVisitRepository(client as never);
+
+    await expect(repository.createDownloadUrl(id, requestId)).resolves.toEqual({
+      schemaVersion: 1,
+      attachmentId: id,
+      url: 'https://example.invalid/storage/signed',
+      expiresInSeconds: 60,
+    });
+    expect(client.storage.from).toHaveBeenCalledWith('scrap-evidence');
+    expect(createSignedUrl).toHaveBeenCalledWith(
+      `seller/${manager.id}/collection/${requestId}/${id}.webp`,
+      60,
+    );
+  });
+
+  it('rejects the legacy RPC response that exposes a bucket or storage path', async () => {
+    const abortSignal = vi.fn().mockResolvedValue({
+      data: { bucket: 'visit-evidence', storagePath: 'seller/private.jpg', expiresInSeconds: 60 },
+      error: null,
+    });
+    const createSignedUrl = vi.fn();
+    const client = {
+      schema: vi.fn().mockReturnValue({ rpc: vi.fn().mockReturnValue({ abortSignal }) }),
+      storage: { from: vi.fn().mockReturnValue({ createSignedUrl }) },
+    };
+    const repository = new SupabaseVisitRepository(client as never);
+
+    await expect(repository.createDownloadUrl(id, requestId)).rejects.toMatchObject({
+      code: 'DEPENDENCY_UNAVAILABLE',
+      recoverable: true,
+    });
+    expect(client.storage.from).not.toHaveBeenCalled();
+    expect(createSignedUrl).not.toHaveBeenCalled();
   });
 });
