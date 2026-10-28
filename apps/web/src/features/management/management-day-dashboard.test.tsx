@@ -25,6 +25,7 @@ const result: ManagementDayResponse = {
     syncIssues: [{ eventId: '50000000-0000-4000-8000-000000000001', status: 'recoverable_error',
       errorCode: 'DEPENDENCY_UNAVAILABLE', occurredAt: '2026-10-20T11:00:00.000Z',
       lastObservedAt: '2026-10-20T11:05:00.000Z' }],
+    visits: [],
     lastKnownUpdateAt: '2026-10-20T11:05:00.000Z',
   }],
 };

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   apiErrorResponseSchema,
   managementDayPath,
@@ -113,6 +114,9 @@ export function ManagementDayDashboard({ initial }: { initial: ManagementDayInit
           : <section aria-labelledby="manager-routes-title"><h2 id="manager-routes-title">Rotas por vendedor</h2><div className="manager-day-routes">{confirmed.routes.map((route) => <article className="manager-day-route" key={route.routeId}>
             <header><div><h3>{route.seller.displayName}</h3><p>Rota versão {route.versionNumber}</p></div><p>Atualizada em {localDateTime(route.lastKnownUpdateAt)}</p></header>
             <dl className="manager-day-counts"><div><dt>Planejadas</dt><dd>{route.counts.planned}</dd></div><div><dt>Pendentes</dt><dd>{route.counts.pending}</dd></div><div><dt>Em visita</dt><dd>{route.counts.inVisit}</dd></div><div><dt>Concluídas</dt><dd>{route.counts.completed}</dd></div><div><dt>Não visitadas</dt><dd>{route.counts.notVisited}</dd></div></dl>
+            {route.visits.length > 0 && <section><h4>Visitas conhecidas pelo servidor</h4><ul>{route.visits.map((visit) => <li key={visit.visitId}>
+              <Link href={`/management/visits/${visit.visitId}`}><strong>{visit.client.name}</strong></Link> · {visit.status === 'completed' ? 'Concluída' : 'Em andamento'} · iniciada em {localDateTime(visit.serverStartedAt)}
+            </li>)}</ul></section>}
             {route.nonVisits.length > 0 && <section><h4>Motivos de não visita</h4><ul>{route.nonVisits.map((item) => <li key={item.routeVersionStopId}><strong>{item.clientName}</strong> · motivo registrado sob referência {item.reasonId}</li>)}</ul></section>}
             {route.historicalExecutions.length > 0 && <section><h4>Execuções preservadas de versões anteriores</h4><ul>{route.historicalExecutions.map((item) => <li key={item.routeVersionStopId}><strong>{item.clientName}</strong> · {statusLabel[item.status]} · não compõe o total planejado atual</li>)}</ul></section>}
             {route.syncIssues.length > 0 && <section><h4>Sincronização conhecida pelo servidor</h4><ul>{route.syncIssues.map((issue) => <li key={issue.eventId}><strong>{issue.status === 'recoverable_error' ? 'Recuperável' : 'Ação necessária'}</strong> · código {issue.errorCode} · observado em {localDateTime(issue.lastObservedAt)}</li>)}</ul></section>}

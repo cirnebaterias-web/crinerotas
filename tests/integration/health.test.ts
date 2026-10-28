@@ -23,6 +23,7 @@ let actorManifest: {
   actors: Record<string, { id: string; accessToken: string; email: string; password: string }>;
 };
 let publishedRouteId = '';
+let canonicalVisitId = '';
 
 async function listenOnRandomPort(socket: Server) {
   await new Promise<void>((resolve, reject) => {
@@ -847,8 +848,9 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
 
 it('runs the real visit API through the CLI with canonical idempotent confirmation', async () => {
   const seller = actorManifest.actors.seller_a;
+  const manager = actorManifest.actors.manager_a;
   const administrator = actorManifest.actors.administrator;
-  if (!seller) throw new Error('Synthetic seller missing');
+  if (!seller || !manager) throw new Error('Synthetic visit actors missing');
   if (!administrator || !/^[0-9a-f-]{36}$/i.test(administrator.id)) {
     throw new Error('Synthetic administrator missing');
   }
@@ -866,6 +868,15 @@ it('runs the real visit API through the CLI with canonical idempotent confirmati
       CIRNE_ACCESS_TOKEN: seller.accessToken } })).rejects.toMatchObject({
       stderr: expect.stringContaining('parada pendente'),
     });
+    const dayResponse = await fetch(`${origin}/api/v1/management/day`, {
+      headers: { Authorization: `Bearer ${manager.accessToken}` },
+    });
+    expect(dayResponse.status).toBe(200);
+    const day = await dayResponse.json() as {
+      routes: Array<{ visits: Array<{ visitId: string }> }>;
+    };
+    canonicalVisitId = day.routes.flatMap((route) => route.visits)[0]?.visitId ?? '';
+    expect(canonicalVisitId).toMatch(/^[0-9a-f-]{36}$/i);
     return;
   }
   const catalogSql = `begin;
@@ -916,7 +927,13 @@ it('runs the real visit API through the CLI with canonical idempotent confirmati
       'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', catalogResetSql],
     { windowsHide: true, timeout: 25_000 });
   }
-  expect(JSON.parse(result.stdout)).toMatchObject({
+  const visitResult = JSON.parse(result.stdout) as {
+    visitId: string;
+    status: string;
+    visitStatus: string;
+    checks: Record<string, boolean>;
+  };
+  expect(visitResult).toMatchObject({
     status: 'ok',
     visitStatus: 'in_progress',
     checks: {
@@ -933,6 +950,58 @@ it('runs the real visit API through the CLI with canonical idempotent confirmati
   expect(result.stdout + result.stderr).not.toMatch(
     /routeVersionStopId|offlineId|deviceId|eventId|idempotencyKey|latitude|longitude|payload/i,
   );
+  canonicalVisitId = visitResult.visitId;
+});
+
+it('returns the authorized visit detail through the real API and CLI with sensitive data withheld', async () => {
+  const manager = actorManifest.actors.manager_a;
+  const seller = actorManifest.actors.seller_a;
+  if (!manager || !seller || !canonicalVisitId) throw new Error('Canonical visit detail fixture missing');
+
+  const response = await fetch(`${origin}/api/v1/visits/${canonicalVisitId}`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  const detail = await response.json() as {
+    schemaVersion: number;
+    visitId: string;
+    location: { state: string };
+    evidence: { state: string };
+  };
+  expect(detail).toMatchObject({
+    schemaVersion: 1,
+    visitId: canonicalVisitId,
+    location: { state: 'withheld' },
+    evidence: { state: 'withheld' },
+  });
+  expect(JSON.stringify(detail)).not.toMatch(/latitude|longitude|storagePath|signedUrl|idempotencyKey|payloadHash/i);
+
+  const forbidden = await fetch(`${origin}/api/v1/visits/${canonicalVisitId}`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(forbidden.status).toBe(403);
+  expect(JSON.stringify(await forbidden.json())).not.toMatch(/client|seller|location|evidence/i);
+
+  const cli = await runWithClosedInput(process.execPath, [
+    '--import', 'tsx', 'apps/cli/src/visit-detail-cli.ts',
+    '--url', origin, '--visit-id', canonicalVisitId, '--json',
+  ], {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken,
+    },
+  });
+  expect(JSON.parse(cli.stdout)).toMatchObject({
+    schemaVersion: 1,
+    visitId: canonicalVisitId,
+    location: { state: 'withheld' },
+    evidence: { state: 'withheld' },
+  });
+  expect(cli.stdout + cli.stderr).not.toContain(manager.accessToken);
+  expect(output).not.toContain(manager.accessToken);
 });
 
 it('enforces sync BFF authorization and preserves independent partial progress', async () => {

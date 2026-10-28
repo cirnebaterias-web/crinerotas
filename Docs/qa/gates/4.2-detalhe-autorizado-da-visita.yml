@@ -1,0 +1,50 @@
+schema: 1
+story: '4.2'
+story_title: 'Detalhe autorizado da visita'
+gate: PASS
+status_reason: 'SEC-001 foi corrigido: a RPC pública não devolve bucket/storagePath, o BFF resolve o objeto somente após autorização e o Storage repete a decisão pela sessão caller-scoped. Todos os gates e testes de regressão passaram.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: '4f489ec'
+updated: '2026-10-28T16:34:13Z'
+expires: '2026-11-11T16:34:13Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1070
+  risks_identified: 0
+  current_run:
+    unit_passed: 376
+    unit_skipped: 1
+    pgtap_passed: 668
+    integration_passed: 22
+    targeted_e2e_passed: 4
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    coderabbit: 'UNAVAILABLE: CLI WSL não reconheceu o worktree Windows; revisão manual profunda e todos os gates executados.'
+    direct_rpc_reproduction: PASS
+    caller_scoped_storage_rls: PASS
+    sanitized_download_audit: PASS
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'A RPC executável por authenticated não expõe bucket/storagePath; anon permanece revogado, o helper da policy é caller-scoped e a auditoria não registra o local do objeto.'
+  performance:
+    status: PASS
+    notes: 'Projeções limitadas e ordenadas, assinatura pontual sem N+1 e build/integração aprovados.'
+  reliability:
+    status: PASS
+    notes: 'Contrato legado falha fechado, erros permanecem recuperáveis e rollback/reaplicação foram exercitados sobre o banco sintético.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato Zod estrito, derivação do objeto isolada no repositório, comentários de segurança e suíte de regressão em camadas.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Atualizar a configuração do CodeRabbit para a CLI atual e suportar worktrees Windows via WSL.'
+      refs:
+        - '.aiox-core/core-config.yaml'

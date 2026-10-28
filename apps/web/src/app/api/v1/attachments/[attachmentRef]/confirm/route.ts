@@ -10,7 +10,7 @@ import { confirmEvidenceAttachment } from '@/server/visits/evidence';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request, context: { params: Promise<{ offlineId: string }> }) {
+export async function POST(request: Request, context: { params: Promise<{ attachmentRef: string }> }) {
   const requestId = randomUUID();
   const headers = visitResponseHeaders(requestId);
   try {
@@ -22,12 +22,12 @@ export async function POST(request: Request, context: { params: Promise<{ offlin
     const deviceId = request.headers.get('x-device-id');
     const idempotencyKey = request.headers.get('idempotency-key');
     const parsed = attachmentConfirmRequestSchema.safeParse(await readVisitJson(request));
-    const { offlineId } = await context.params;
+    const { attachmentRef } = await context.params;
     if (!deviceId || !idempotencyKey || !parsed.success) {
       throw new VisitRequestError(422, 'VALIDATION_FAILED', publicVisitMessage('VALIDATION_FAILED'), false);
     }
     return Response.json(await confirmEvidenceAttachment(
-      client, offlineId, deviceId, idempotencyKey, parsed.data, identity.id,
+      client, attachmentRef, deviceId, idempotencyKey, parsed.data, identity.id,
     ), { headers });
   } catch (error) {
     return visitErrorResponse(mapVisitRequestError(error), requestId, headers);
