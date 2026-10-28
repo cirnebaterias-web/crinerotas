@@ -62,6 +62,19 @@ export const managementDayHistoricalExecutionSchema = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 }).strict();
 
+export const managementDayVisitReferenceSchema = z.object({
+  visitId: z.uuid(),
+  routeVersionStopId: z.uuid(),
+  client: z.object({
+    id: z.uuid(),
+    name: z.string().trim().min(1).max(160),
+  }).strict(),
+  status: z.enum(['in_progress', 'completed']),
+  deviceStartedAt: z.iso.datetime({ offset: true }),
+  serverStartedAt: z.iso.datetime({ offset: true }),
+  lastKnownUpdateAt: z.iso.datetime({ offset: true }),
+}).strict();
+
 export const managementDayRouteSchema = z.object({
   routeId: z.uuid(),
   routeVersionId: z.uuid(),
@@ -75,6 +88,7 @@ export const managementDayRouteSchema = z.object({
   nonVisits: z.array(managementDayNonVisitSchema).max(50),
   historicalExecutions: z.array(managementDayHistoricalExecutionSchema).max(50),
   syncIssues: z.array(managementDaySyncIssueSchema).max(100),
+  visits: z.array(managementDayVisitReferenceSchema).max(50).default([]),
   lastKnownUpdateAt: z.iso.datetime({ offset: true }).nullable(),
 }).strict();
 

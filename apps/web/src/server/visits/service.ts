@@ -6,6 +6,8 @@ import {
   saveStockRequestSchema,
   stockSnapshotResultSchema,
   visitStartResultSchema,
+  visitDetailResponseSchema,
+  attachmentDownloadUrlResponseSchema,
   type CompetitorPriceParameterSet,
   type CompetitorPricesResult,
   type SaveCompetitorPricesRequest,
@@ -14,6 +16,9 @@ import {
   type StockSnapshotResult,
   type VisitErrorCode,
   type VisitStartResult,
+  type VisitDetailResponse,
+  type AttachmentDownloadUrlResponse,
+  type MeResponse,
 } from '@cirne/contracts';
 import { normalizeVisitStart } from '@cirne/domain';
 
@@ -48,6 +53,14 @@ export interface CompetitorPriceParametersRepository {
   getCurrentCompetitorPriceParameters(at: string): Promise<CompetitorPriceParameterSet>;
 }
 
+export interface VisitDetailRepository {
+  getDetail(visitId: string, requestId: string): Promise<VisitDetailResponse>;
+}
+
+export interface VisitAttachmentDownloadRepository {
+  createDownloadUrl(attachmentId: string, requestId: string): Promise<AttachmentDownloadUrlResponse>;
+}
+
 export class VisitServiceFailure extends Error {
   constructor(
     public readonly code: VisitErrorCode,
@@ -72,6 +85,57 @@ const publicMessages: Record<VisitErrorCode, string> = {
 
 export function publicVisitMessage(code: VisitErrorCode) {
   return publicMessages[code];
+}
+
+export function requireVisitDetailAccess(identity: MeResponse) {
+  if (!identity.roles.includes('manager') ||
+      !identity.capabilities.includes('route.read_scoped') ||
+      identity.scopeIds.length === 0) {
+    throw new VisitServiceFailure('FORBIDDEN', publicVisitMessage('FORBIDDEN'), false);
+  }
+}
+
+export async function getVisitDetail(
+  identity: MeResponse,
+  visitId: string,
+  requestId: string,
+  repository: VisitDetailRepository,
+) {
+  requireVisitDetailAccess(identity);
+  const parsedVisitId = startVisitRequestSchema.shape.offlineId.safeParse(visitId);
+  const parsedRequestId = startVisitRequestSchema.shape.offlineId.safeParse(requestId);
+  if (!parsedVisitId.success || !parsedRequestId.success) {
+    throw new VisitServiceFailure('VALIDATION_FAILED', 'Identificador de visita inválido.', false);
+  }
+  const result = visitDetailResponseSchema.safeParse(await repository.getDetail(parsedVisitId.data, parsedRequestId.data));
+  if (!result.success || result.data.visitId !== parsedVisitId.data) {
+    throw new VisitServiceFailure('DEPENDENCY_UNAVAILABLE', publicVisitMessage('DEPENDENCY_UNAVAILABLE'), true);
+  }
+  return result.data;
+}
+
+export async function createVisitAttachmentDownloadUrl(
+  identity: MeResponse,
+  attachmentId: string,
+  requestId: string,
+  repository: VisitAttachmentDownloadRepository,
+) {
+  requireVisitDetailAccess(identity);
+  if (!identity.capabilities.includes('visit.evidence.read_scoped')) {
+    throw new VisitServiceFailure('NOT_FOUND', publicVisitMessage('NOT_FOUND'), false);
+  }
+  const parsedAttachmentId = startVisitRequestSchema.shape.offlineId.safeParse(attachmentId);
+  const parsedRequestId = startVisitRequestSchema.shape.offlineId.safeParse(requestId);
+  if (!parsedAttachmentId.success || !parsedRequestId.success) {
+    throw new VisitServiceFailure('VALIDATION_FAILED', 'Identificador de evidência inválido.', false);
+  }
+  const result = attachmentDownloadUrlResponseSchema.safeParse(
+    await repository.createDownloadUrl(parsedAttachmentId.data, parsedRequestId.data),
+  );
+  if (!result.success || result.data.attachmentId !== parsedAttachmentId.data) {
+    throw new VisitServiceFailure('DEPENDENCY_UNAVAILABLE', publicVisitMessage('DEPENDENCY_UNAVAILABLE'), true);
+  }
+  return result.data;
 }
 
 export async function saveVisitStock(

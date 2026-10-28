@@ -18,7 +18,7 @@ const maxBodyBytes = 64 * 1024;
 
 export class VisitRequestError extends Error {
   constructor(
-    public readonly status: 400 | 401 | 403 | 409 | 413 | 415 | 422 | 500 | 503,
+    public readonly status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 500 | 503,
     public readonly code: VisitErrorCode,
     message: string,
     public readonly recoverable: boolean,

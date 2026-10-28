@@ -11,6 +11,15 @@ function managementResult(availability: 'available' | 'empty') {
     counts: { planned: 2, pending: 1, inVisit: 0, completed: 1, notVisited: 0 },
     sync: { pending: 0, errors: 0, oldestPendingAt: null, lastKnownAt: null },
     nonVisits: [], historicalExecutions: [], syncIssues: [],
+    visits: [{
+      visitId: '60000000-0000-4000-8000-000000000001',
+      routeVersionStopId: '60000000-0000-4000-8000-000000000002',
+      client: { id: '60000000-0000-4000-8000-000000000003', name: 'Cliente Visitado' },
+      status: 'completed',
+      deviceStartedAt: '2026-10-20T11:55:00.000Z',
+      serverStartedAt: '2026-10-20T12:00:00.000Z',
+      lastKnownUpdateAt: '2026-10-20T12:00:00.000Z',
+    }],
     lastKnownUpdateAt: '2026-10-20T12:00:00.000Z',
   };
   return {
@@ -75,6 +84,8 @@ test.describe('management day access boundary', () => {
     await page.getByRole('button', { name: 'Atualizar agora' }).click();
     await expect(page.getByRole('status')).toContainText('Atualizando');
     releaseInitialResponse?.();
+    await expect(page.locator('a[href="/management/visits/60000000-0000-4000-8000-000000000001"]'))
+      .toHaveText('Cliente Visitado');
     await expect(page.getByRole('heading', { name: 'Vendedor Sintético' })).toBeVisible();
     await expect(page.getByText(visibilityNote)).toBeVisible();
 

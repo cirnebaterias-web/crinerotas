@@ -4,6 +4,8 @@ import {
   competitorPriceParameterSetSchema,
   visitStartResultSchema,
   stockSnapshotResultSchema,
+  visitDetailResponseSchema,
+  attachmentDownloadUrlResponseSchema,
   type SaveCompetitorPricesRequest,
   type StartVisitRequest,
   type SaveStockRequest,
@@ -17,7 +19,16 @@ import {
   type CompetitorPriceParametersRepository,
   type VisitCompetitorPricesRepository,
   type VisitStockRepository,
+  type VisitDetailRepository,
+  type VisitAttachmentDownloadRepository,
 } from './service';
+import { z } from 'zod';
+
+const authorizedAttachmentSchema = z.object({
+  bucket: z.enum(['visit-evidence', 'scrap-evidence']),
+  storagePath: z.string().trim().min(1).max(500),
+  expiresInSeconds: z.literal(60),
+}).strict();
 
 function unavailable() {
   return new VisitServiceFailure(
@@ -38,7 +49,8 @@ function mapDatabaseFailure(message: string) {
 }
 
 export class SupabaseVisitRepository implements VisitStartRepository, VisitStockRepository,
-  VisitCompetitorPricesRepository, CompetitorPriceParametersRepository {
+  VisitCompetitorPricesRepository, CompetitorPriceParametersRepository, VisitDetailRepository,
+  VisitAttachmentDownloadRepository {
   constructor(private readonly client: SupabaseClient) {}
 
   async start(deviceId: string, idempotencyKey: string, command: StartVisitRequest) {
@@ -113,5 +125,48 @@ export class SupabaseVisitRepository implements VisitStartRepository, VisitStock
     const parsed = competitorPriceParameterSetSchema.safeParse(data);
     if (!parsed.success) throw unavailable();
     return parsed.data;
+  }
+
+  async getDetail(visitId: string, requestId: string) {
+    let response: { data: unknown; error: { message: string } | null };
+    try {
+      response = await this.client.schema('api').rpc('get_visit_detail', {
+        p_visit_id: visitId, p_request_id: requestId, p_origin: 'web',
+      }).abortSignal(AbortSignal.timeout(10_000));
+    } catch {
+      throw unavailable();
+    }
+    if (response.error) throw mapDatabaseFailure(response.error.message);
+    const parsed = visitDetailResponseSchema.safeParse(response.data);
+    if (!parsed.success) throw unavailable();
+    return parsed.data;
+  }
+
+  async createDownloadUrl(attachmentId: string, requestId: string) {
+    let response: { data: unknown; error: { message: string } | null };
+    try {
+      response = await this.client.schema('api').rpc('authorize_visit_attachment_download', {
+        p_attachment_id: attachmentId, p_request_id: requestId, p_origin: 'web',
+      }).abortSignal(AbortSignal.timeout(10_000));
+    } catch {
+      throw unavailable();
+    }
+    if (response.error) throw mapDatabaseFailure(response.error.message);
+    const authorization = authorizedAttachmentSchema.safeParse(response.data);
+    if (!authorization.success) throw unavailable();
+    let signed: Awaited<ReturnType<ReturnType<typeof this.client.storage.from>['createSignedUrl']>>;
+    try {
+      signed = await this.client.storage.from(authorization.data.bucket)
+        .createSignedUrl(authorization.data.storagePath, authorization.data.expiresInSeconds);
+    } catch {
+      throw unavailable();
+    }
+    if (signed.error || !signed.data?.signedUrl) throw unavailable();
+    return attachmentDownloadUrlResponseSchema.parse({
+      schemaVersion: 1,
+      attachmentId,
+      url: signed.data.signedUrl,
+      expiresInSeconds: authorization.data.expiresInSeconds,
+    });
   }
 }
