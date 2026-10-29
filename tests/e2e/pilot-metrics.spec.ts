@@ -21,7 +21,7 @@ const result = {
 };
 
 test.describe('pilot metrics manager journey', () => {
-  test.use({ serviceWorkers: 'block' });
+  test.use({ serviceWorkers: 'block', timezoneId: 'UTC' });
 
   test('keeps filters, keyboard access and responsive reading at the authorization boundary', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -52,6 +52,7 @@ test.describe('pilot metrics manager journey', () => {
     await page.goto('/management/pilot?from=2026-10-26&to=2026-11-01');
     await page.getByRole('button', { name: 'Atualizar agora' }).click();
     await expect(page.getByLabel('Nove métricas do piloto').locator('article')).toHaveCount(9);
+    await expect(page.getByText('Última confirmação server-side:')).toContainText('28/10/2026, 08:55');
     await expect(page.getByText(visibility)).toBeVisible();
     fail = true;
     await page.getByRole('button', { name: 'Atualizar agora' }).click();
@@ -59,6 +60,25 @@ test.describe('pilot metrics manager journey', () => {
     await expect(alert).toContainText('Métricas temporariamente indisponíveis.');
     await expect(alert).toBeFocused();
     await expect(page.getByLabel('Nove métricas do piloto').locator('article')).toHaveCount(9);
+  });
+
+  test('maps network and invalid response failures to controlled messages', async ({ page }) => {
+    let networkFailure = false;
+    await page.route('**/api/v1/reports/pilot-metrics?*', async (route) => {
+      if (networkFailure) {
+        await route.abort('failed');
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ schemaVersion: 999 }) });
+    });
+    await page.goto('/management/pilot?from=2026-10-26&to=2026-11-01');
+    await page.getByRole('button', { name: 'Atualizar agora' }).click();
+    const alert = page.locator('.seller-notice.seller-error');
+    await expect(alert).toContainText('O servidor retornou uma resposta inválida para as métricas.');
+
+    networkFailure = true;
+    await page.getByRole('button', { name: 'Tentar novamente' }).click();
+    await expect(alert).toContainText('Não foi possível conectar ao servidor para atualizar as métricas.');
   });
 
   test('remounts the dashboard and removes stale cards when the normalized filter changes', async ({ page }) => {

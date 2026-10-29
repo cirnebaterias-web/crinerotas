@@ -30,12 +30,15 @@ function query(filters: PilotMetricsFilter, withCursor = false) {
   if (withCursor && filters.cursor) value.set('cursor', filters.cursor);
   return value;
 }
-function localDateTime(value: string | null) {
-  return value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+function localDateTime(value: string | null, timeZone: string) {
+  return value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone }).format(new Date(value))
     : 'Sem confirmação no período';
 }
 
-export function PilotMetricsDashboard({ initial }: { initial: PilotMetricsInitialState }) {
+export function PilotMetricsDashboard({ initial, timeZone }: {
+  initial: PilotMetricsInitialState;
+  timeZone: string;
+}) {
   const router = useRouter();
   const [draft, setDraft] = useState(initial.filters);
   const [confirmed, setConfirmed] = useState(initial.kind === 'ready' || initial.kind === 'empty' ? initial.result : null);
@@ -56,7 +59,12 @@ export function PilotMetricsDashboard({ initial }: { initial: PilotMetricsInitia
   }
   async function fetchResult(filters: PilotMetricsFilter) {
     const url = new URL(pilotMetricsPath, window.location.origin); url.search = query(filters, true).toString();
-    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+    let response: Response;
+    try {
+      response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+    } catch {
+      throw new Error('Não foi possível conectar ao servidor para atualizar as métricas.');
+    }
     const body = await response.json().catch(() => null) as unknown;
     if (!response.ok) {
       const failure = apiErrorResponseSchema.safeParse(body);
@@ -65,7 +73,11 @@ export function PilotMetricsDashboard({ initial }: { initial: PilotMetricsInitia
       }
       throw new Error(failure.success ? failure.data.error.message : 'Não foi possível atualizar as métricas.');
     }
-    return pilotMetricsResponseSchema.parse(body);
+    const result = pilotMetricsResponseSchema.safeParse(body);
+    if (!result.success) {
+      throw new Error('O servidor retornou uma resposta inválida para as métricas.');
+    }
+    return result.data;
   }
   async function refresh() {
     setState('loading'); setMessage('');
@@ -100,7 +112,7 @@ export function PilotMetricsDashboard({ initial }: { initial: PilotMetricsInitia
     </form>
     {state === 'loading' && <p role="status" aria-live="polite">Atualizando métricas confirmadas…</p>}
     {(state === 'recoverable_error' || state === 'forbidden') && <div className="seller-notice seller-error" role="alert" tabIndex={-1} ref={alertRef}><strong>{state === 'forbidden' ? 'Acesso não autorizado.' : 'Atualização não concluída.'}</strong><p>{message}</p>{state === 'recoverable_error' && <button type="button" className="seller-button seller-secondary" onClick={() => void refresh()}>Tentar novamente</button>}</div>}
-    {confirmed && <><p className="manager-day-updated">Última confirmação server-side: <strong>{localDateTime(confirmed.lastServerConfirmedAt)}</strong></p><p className="seller-notice">{confirmed.serverVisibilityNote}</p>
+    {confirmed && <><p className="manager-day-updated">Última confirmação server-side: <strong>{localDateTime(confirmed.lastServerConfirmedAt, timeZone)}</strong></p><p className="seller-notice">{confirmed.serverVisibilityNote}</p>
       <section className="field-intelligence-records" aria-label="Nove métricas do piloto">{confirmed.metrics.map((metric) => <article className="field-intelligence-card" key={metric.id}><header><p>{metric.id}</p><h2>{metric.name}</h2></header><p><strong>{assessmentLabels[metric.assessment]}</strong></p>{metric.observation ? metric.observation.denominator > 0 ? <p><strong>{metric.observation.percentage}%</strong> · {metric.observation.numerator} de {metric.observation.denominator}</p> : <p>Sem denominador confirmado no período.</p> : <p>Fonte necessária: {metric.requiredSource}</p>}<p>Meta: {metric.target.operator === 'gte' ? '≥' : '='} {metric.target.value}{metric.target.unit === 'percent' ? '%' : ''}</p><p>{metric.note}</p></article>)}</section>
       {confirmed.records.length > 0 && <section aria-labelledby="pilot-exceptions"><h2 id="pilot-exceptions">Exceções para investigação</h2><div className="field-intelligence-records">{confirmed.records.map((record) => <article className="field-intelligence-card" key={record.visitId}><header><h3>{record.client.name}</h3><p>{record.seller.displayName} · {record.serviceDate}</p></header><ul><li>Etapas obrigatórias: {record.checks.requiredComplete ? 'completas' : 'incompletas'}</li><li>Sucata: {record.checks.scrapReported ? 'informada' : 'ausente'}</li><li>Ação concorrente: {record.checks.commercialActionReported ? 'informada' : 'ausente'}</li><li>Sincronização: {syncLabels[record.checks.sync24h]}</li></ul></article>)}</div></section>}
       {confirmed.nextCursor && <button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void loadMore()}>Carregar mais exceções</button>}

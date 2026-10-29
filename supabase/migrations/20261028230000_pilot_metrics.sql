@@ -155,10 +155,15 @@ begin
       from (select page.visit_id, page.seller_id, page.client_id, page.service_date,
         page.seller_name, page.client_name, page.device_completed_at, page.server_completed_at,
         page.required_complete, page.scrap_reported, page.commercial_action_reported, page.sync_24h
-        from page limit page_size) row), '[]'::jsonb),
+        from page
+        order by page.service_date desc, page.server_completed_at desc, page.visit_id desc
+        limit page_size) row), '[]'::jsonb),
     case when (select count(*) from page) > page_size then (
       select private.field_intelligence_cursor(row.service_date, row.server_completed_at, row.visit_id)
-      from (select page.service_date, page.server_completed_at, page.visit_id from page limit page_size) row
+      from (select page.service_date, page.server_completed_at, page.visit_id
+        from page
+        order by page.service_date desc, page.server_completed_at desc, page.visit_id desc
+        limit page_size) row
       order by row.service_date, row.server_completed_at, row.visit_id limit 1
     ) end
   into totals_document, last_confirmed_at, records_document, next_cursor

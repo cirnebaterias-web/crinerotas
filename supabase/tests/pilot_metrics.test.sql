@@ -1,6 +1,6 @@
 begin;
 
-select plan(28);
+select plan(29);
 
 select has_function(
   'api', 'get_pilot_metrics', array['date','date','uuid','uuid','text','text'],
@@ -18,6 +18,10 @@ select has_index(
   'api', 'visits', 'visits_pilot_metrics_idx',
   'pilot metrics has a partial index compatible with its range and total order'
 );
+select is(regexp_count(
+  pg_get_functiondef('private.get_pilot_metrics(date,date,uuid,uuid,text,text)'::regprocedure),
+  'order by page\.service_date desc, page\.server_completed_at desc, page\.visit_id desc'
+)::integer, 2, 'both limited page projections preserve the canonical total order');
 
 select id as seller_a_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a'
   order by created_at desc limit 1 \gset
