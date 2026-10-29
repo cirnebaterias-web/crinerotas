@@ -1,0 +1,37 @@
+schema: 1
+story: '4.7'
+story_title: 'Central operacional desktop-first do gestor'
+gate: PASS
+status_reason: 'Os 12 critérios de aceite estão cobertos por testes em camadas, sem achado crítico/alto ou lacuna de autorização, redaction, integridade ou acessibilidade funcional. CodeRabbit finalizou com zero findings e rollback/reaplicação foram comprovados no PostgreSQL local.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'working-tree-sha256:73c7df153edac89799f1e95dfb5704c1699e7673e27d943009df4ae3749f2af2'
+updated: '2026-10-29T17:02:28Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1223
+  risks_identified: 0
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Autorização em profundidade, grants/RLS, contrato estrito e redaction validados; secretlint passou.'
+  performance:
+    status: PASS
+    notes: 'Uma leitura autorizada, sem N+1 na aplicação, com limites de 50 visitas por rota e 10 por parada para o volume do piloto.'
+  reliability:
+    status: PASS
+    notes: 'Erro recuperável preserva a última resposta; migração, rollback e reaplicação foram executados com sucesso.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato, modelo puro, shell, projeção e UI permanecem separados e cobertos por testes.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Medir latência e plano da RPC com o volume real acordado antes do deploy produtivo.'
+      refs: ['Docs/prd.md#nfr-009', 'supabase/migrations/20261029120000_management_command_center.sql']
+    - action: 'Adicionar axe/visual regression ao baseline quando a dependência de acessibilidade for aprovada.'
+      refs: ['tests/e2e/management-day.spec.ts']

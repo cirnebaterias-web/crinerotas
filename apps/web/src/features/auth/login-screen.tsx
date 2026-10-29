@@ -17,7 +17,11 @@ export function LoginScreen() {
     setError('');
     try {
       const identity = await sellerClient.login({ email: String(form.get('email') ?? ''), password: String(form.get('password') ?? '') });
-      window.location.replace(identity.capabilities.includes('scrap.read_operations') ? '/management/scrap' : '/home');
+      window.location.replace(
+        identity.roles.includes('manager') && identity.capabilities.includes('route.read_scoped')
+          ? '/management/day'
+          : identity.capabilities.includes('scrap.read_operations') ? '/management/scrap' : '/home',
+      );
     } catch (failure) {
       setError(failure instanceof SellerHttpError && [400, 401, 403].includes(failure.status)
         ? 'Não foi possível entrar. Confira seu e-mail, senha e se o acesso está ativo.'
