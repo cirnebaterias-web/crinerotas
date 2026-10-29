@@ -24,8 +24,10 @@ const actionLabels = {
   retailer_incentive: 'Incentivo ao varejista', purchase_combo: 'Combo de compra', other: 'Outro',
 } as const;
 
-function localDateTime(value: string | null) {
-  return value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+function localDateTime(value: string | null, timeZone?: string) {
+  return value ? new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short', timeStyle: 'short', ...(timeZone ? { timeZone } : {}),
+  }).format(new Date(value))
     : 'Sem confirmação no período';
 }
 function filterUrl(filters: FieldIntelligenceFilter, cursor = false) {
@@ -44,7 +46,7 @@ function indicatorEntries(result: FieldIntelligenceResponse): [string, string | 
   return [['Registros', result.indicators.records], ['Visitas concluídas', result.indicators.completedVisits]];
 }
 
-function RecordCards({ result }: { result: FieldIntelligenceResponse }) {
+function RecordCards({ result, timeZone }: { result: FieldIntelligenceResponse; timeZone?: string }) {
   if (result.section === 'stock') return <>{result.records.map((record) => <article className="field-intelligence-card" key={record.recordId}>
     <header><h3>{record.client.name}</h3><p>{record.seller.name} · {record.serviceDate}</p></header>
     <p><strong>Heliar:</strong> {record.heliarQuantity} · <strong>Moura:</strong> {record.mouraQuantity}</p>
@@ -65,10 +67,13 @@ function RecordCards({ result }: { result: FieldIntelligenceResponse }) {
     {record.actions.length === 0 ? <p>Nenhuma ação identificada.</p> : record.actions.map((action) => <p key={action.id}><strong>{action.competitor.label} · {action.actionType === 'other' ? action.otherType : actionLabels[action.actionType]}</strong> · {action.description} · {action.validFrom} a {action.validUntil}</p>)}
   </article>)}</>;
   if (result.section === 'scrap') return <>{result.records.map((record) => <article className="field-intelligence-card" key={record.recordId}><header><h3>{record.client.name}</h3><p>{record.seller.name} · {record.serviceDate}</p></header>{record.collection && <p><strong>Coletado:</strong> {record.collection.actualWeightKg} kg</p>}{record.schedule && <p><strong>Agendado:</strong> {record.schedule.estimatedWeightKg} kg para {record.schedule.desiredDate}</p>}{!record.collection && !record.schedule && <p>Sem sucata para coleta.</p>}</article>)}</>;
-  return <>{result.records.map((record) => <article className="field-intelligence-card" key={record.recordId}><header><h3>{record.client.name}</h3><p>{record.seller.name} · {record.serviceDate}</p></header><p>Visita concluída em {localDateTime(record.serverCompletedAt)}.</p></article>)}</>;
+  return <>{result.records.map((record) => <article className="field-intelligence-card" key={record.recordId}><header><h3>{record.client.name}</h3><p>{record.seller.name} · {record.serviceDate}</p></header><p>Visita concluída em {localDateTime(record.serverCompletedAt, timeZone)}.</p></article>)}</>;
 }
 
-export function FieldIntelligenceDashboard({ initial }: { initial: FieldIntelligenceInitialState }) {
+export function FieldIntelligenceDashboard({ initial, timeZone }: {
+  initial: FieldIntelligenceInitialState;
+  timeZone?: string;
+}) {
   const router = useRouter();
   const [draft, setDraft] = useState(initial.filters);
   const [confirmed, setConfirmed] = useState(initial.kind === 'ready' || initial.kind === 'empty' ? initial.result : null);
@@ -121,6 +126,6 @@ export function FieldIntelligenceDashboard({ initial }: { initial: FieldIntellig
     </form>
     {state === 'loading' && <p role="status" aria-live="polite">Atualizando dados confirmados…</p>}
     {(state === 'recoverable_error' || state === 'forbidden') && <div className="seller-notice seller-error" role="alert" tabIndex={-1} ref={alertRef}><strong>{state === 'forbidden' ? 'Acesso não autorizado.' : 'Atualização não concluída.'}</strong><p>{message}</p>{state === 'recoverable_error' && <button type="button" className="seller-button seller-secondary" onClick={() => void refresh()}>Tentar novamente</button>}</div>}
-    {confirmed && <><section className="field-intelligence-summary" aria-label="Indicadores do recorte">{indicatorEntries(confirmed).map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</section><p className="manager-day-updated">Última confirmação no recorte: <strong>{localDateTime(confirmed.lastConfirmedAt)}</strong></p><p className="seller-notice">{confirmed.serverVisibilityNote}</p>{confirmed.records.length === 0 ? <section className="seller-state" aria-live="polite"><h2>Nenhum registro confirmado</h2><p>Ajuste o período ou os filtros e tente novamente.</p></section> : <section aria-labelledby="field-records-title"><h2 id="field-records-title">Registros confirmados</h2><div className="field-intelligence-records"><RecordCards result={confirmed} /></div></section>}{confirmed.nextCursor && <button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void loadMore()}>Carregar mais</button>}</>}
+    {confirmed && <><section className="field-intelligence-summary" aria-label="Indicadores do recorte">{indicatorEntries(confirmed).map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</section><p className="manager-day-updated">Última confirmação no recorte: <strong>{localDateTime(confirmed.lastConfirmedAt, timeZone)}</strong></p><p className="seller-notice">{confirmed.serverVisibilityNote}</p>{confirmed.records.length === 0 ? <section className="seller-state" aria-live="polite"><h2>Nenhum registro confirmado</h2><p>Ajuste o período ou os filtros e tente novamente.</p></section> : <section aria-labelledby="field-records-title"><h2 id="field-records-title">Registros confirmados</h2><div className="field-intelligence-records"><RecordCards result={confirmed} timeZone={timeZone} /></div></section>}{confirmed.nextCursor && <button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void loadMore()}>Carregar mais</button>}</>}
   </main></ScrapShell>;
 }

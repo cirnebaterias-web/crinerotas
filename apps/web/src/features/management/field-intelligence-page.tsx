@@ -15,8 +15,9 @@ export async function FieldIntelligencePage({ searchParams }: { searchParams: Pr
   const today = new Date().toISOString().slice(0, 10);
   let selectedFilters: FieldIntelligenceFilter = { section: 'stock', from: today, to: today };
   let initial: FieldIntelligenceInitialState;
+  let timeZone: string | undefined;
   try {
-    const timeZone = readServerConfig(process.env).OPERATIONAL_TIME_ZONE;
+    timeZone = readServerConfig(process.env).OPERATIONAL_TIME_ZONE;
     selectedFilters = { section: 'stock', ...currentFieldIntelligenceWeek(timeZone) };
     const keys = ['section', 'from', 'to', 'sellerId', 'clientId', 'competitorId', 'actionType', 'cursor'] as const;
     if (keys.some((key) => Array.isArray(parameters[key]))) {
@@ -46,5 +47,5 @@ export async function FieldIntelligencePage({ searchParams }: { searchParams: Pr
   }
   const key = initial.kind === 'ready' || initial.kind === 'empty'
     ? `${initial.result.section}:${initial.result.generatedAt}` : `${initial.filters.section}:${initial.kind}`;
-  return <FieldIntelligenceDashboard key={key} initial={initial} />;
+  return <FieldIntelligenceDashboard key={key} initial={initial} timeZone={timeZone} />;
 }

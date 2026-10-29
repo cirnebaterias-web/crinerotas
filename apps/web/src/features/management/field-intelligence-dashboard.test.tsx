@@ -51,6 +51,38 @@ describe('field intelligence dashboard', () => {
     expect(html).not.toContain('Indicadores do recorte');
   });
 
+  it('formats confirmation timestamps in the explicit operational time zone', () => {
+    const results: FieldIntelligenceResponse = {
+      schemaVersion: 1,
+      section: 'results',
+      filters: { section: 'results', from: '2026-10-26', to: '2026-11-01' },
+      generatedAt: '2026-10-28T12:00:00.000Z',
+      lastConfirmedAt: '2026-10-28T11:55:00.000Z',
+      nextCursor: null,
+      serverVisibilityNote: stockResult.serverVisibilityNote,
+      indicators: { records: 1, completedVisits: 1 },
+      records: [{
+        recordId: '30000000-0000-4000-8000-000000000001',
+        visitId: '30000000-0000-4000-8000-000000000002',
+        serviceDate: '2026-10-28',
+        seller: { id: '30000000-0000-4000-8000-000000000003', name: 'Vendedor Sintético' },
+        client: { id: '30000000-0000-4000-8000-000000000004', name: 'Cliente Visitado' },
+        confirmedAt: '2026-10-28T11:55:00.000Z',
+        outcome: 'completed',
+        deviceStartedAt: '2026-10-28T11:00:00.000Z',
+        serverStartedAt: '2026-10-28T11:00:01.000Z',
+        deviceCompletedAt: '2026-10-28T11:54:59.000Z',
+        serverCompletedAt: '2026-10-28T11:55:00.000Z',
+      }],
+    };
+    const html = renderToStaticMarkup(<FieldIntelligenceDashboard
+      initial={{ kind: 'ready', filters: results.filters, result: results }}
+      timeZone="America/Sao_Paulo"
+    />);
+    expect(html.match(/28\/10\/2026, 08:55/g)).toHaveLength(2);
+    expect(html).not.toContain('28/10/2026, 11:55');
+  });
+
   it('renders historical price attributes and the recorded label for an other action', () => {
     const common = {
       recordId: '20000000-0000-4000-8000-000000000001',
