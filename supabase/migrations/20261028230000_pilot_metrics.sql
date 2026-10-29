@@ -2,6 +2,29 @@ begin;
 
 grant create on schema api, private to cirne_field_intelligence_executor;
 
+do $visit_index_ownership$
+begin
+  execute pg_catalog.format('grant cirne_visit_executor to %I with set true granted by current_user', current_user);
+end
+$visit_index_ownership$;
+grant create on schema api to cirne_visit_executor;
+set local role cirne_visit_executor;
+create index visits_pilot_metrics_idx on api.visits (
+  (context_snapshot #>> '{route,serviceDate}') desc,
+  server_completed_at desc,
+  id desc
+) include (seller_id, client_id)
+where status = 'completed'
+  and device_completed_at is not null
+  and server_completed_at is not null;
+reset role;
+revoke create on schema api from cirne_visit_executor;
+do $visit_index_ownership$
+begin
+  execute pg_catalog.format('revoke cirne_visit_executor from %I granted by current_user', current_user);
+end
+$visit_index_ownership$;
+
 create function private.get_pilot_metrics(
   p_from date,
   p_to date,
@@ -56,16 +79,19 @@ begin
 
   with filtered as (
     select
-      base.visit_id, base.seller_id, base.client_id, base.service_date,
-      base.seller_name, base.client_name, base.device_completed_at, base.server_completed_at,
-      exists (select 1 from api.stock_snapshots stock where stock.visit_id = base.visit_id)
-        and exists (select 1 from api.competitor_price_reports price where price.visit_id = base.visit_id)
-        and exists (select 1 from api.visit_commercial_action_reports action where action.visit_id = base.visit_id)
-        and exists (select 1 from api.scrap_reports scrap where scrap.visit_id = base.visit_id)
+      base.id as visit_id, base.seller_id, base.client_id,
+      (base.context_snapshot #>> '{route,serviceDate}')::date as service_date,
+      base.context_snapshot #>> '{seller,displayName}' as seller_name,
+      base.context_snapshot #>> '{client,name}' as client_name,
+      base.device_completed_at, base.server_completed_at,
+      exists (select 1 from api.stock_snapshots stock where stock.visit_id = base.id)
+        and exists (select 1 from api.competitor_price_reports price where price.visit_id = base.id)
+        and exists (select 1 from api.visit_commercial_action_reports action where action.visit_id = base.id)
+        and exists (select 1 from api.scrap_reports scrap where scrap.visit_id = base.id)
         as required_complete,
-      exists (select 1 from api.scrap_reports scrap where scrap.visit_id = base.visit_id)
+      exists (select 1 from api.scrap_reports scrap where scrap.visit_id = base.id)
         as scrap_reported,
-      exists (select 1 from api.visit_commercial_action_reports action where action.visit_id = base.visit_id)
+      exists (select 1 from api.visit_commercial_action_reports action where action.visit_id = base.id)
         as commercial_action_reported,
       case
         when base.device_completed_at > base.server_completed_at then 'clock_suspicious'
@@ -73,10 +99,10 @@ begin
         when base.server_completed_at <= base.device_completed_at + interval '24 hours' then 'within_24h'
         else 'outside_24h'
       end as sync_24h
-    from api.field_intelligence_v base
+    from api.visits base
     where base.status = 'completed'
       and base.device_completed_at is not null and base.server_completed_at is not null
-      and base.service_date between p_from and p_to
+      and (base.context_snapshot #>> '{route,serviceDate}') between p_from::text and p_to::text
       and exists (select 1 from jsonb_array_elements_text(identity_document -> 'scopeIds') scope(id)
         where scope.id::uuid = base.seller_id)
       and (p_seller_id is null or base.seller_id = p_seller_id)

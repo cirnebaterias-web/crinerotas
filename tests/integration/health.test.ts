@@ -1121,6 +1121,62 @@ it('serves all field intelligence recuts only to an authorized scoped manager', 
   expect(duplicated.status).toBe(422);
 });
 
+it('serves pilot metrics directly to scoped managers with strict filters', async () => {
+  const managerA = actorManifest.actors.manager_a;
+  const seller = actorManifest.actors.seller_a;
+  const sellerB = actorManifest.actors.seller_b;
+  const blocked = actorManifest.actors.blocked;
+  if (!managerA || !seller || !sellerB || !blocked) throw new Error('Synthetic actors missing');
+
+  const response = await fetch(`${origin}/api/v1/reports/pilot-metrics?from=2199-01-01&to=2199-01-07`, {
+    headers: { Authorization: `Bearer ${managerA.accessToken}` },
+  });
+  const responseText = await response.text();
+  expect(response.status, responseText).toBe(200);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  const body = JSON.parse(responseText) as {
+    schemaVersion: number;
+    filters: Record<string, unknown>;
+    metrics: Array<{ id: string; coverage: string; assessment: string; observation: unknown }>;
+    records: unknown[];
+    nextCursor: string | null;
+  };
+  expect(body).toMatchObject({
+    schemaVersion: 1,
+    filters: { from: '2199-01-01', to: '2199-01-07' },
+    records: [],
+    nextCursor: null,
+  });
+  expect(body.metrics.map((metric) => metric.id)).toEqual([
+    'SM-01', 'SM-02', 'SM-03', 'SM-04', 'SM-05', 'SM-06', 'SM-07', 'SM-08', 'SM-09',
+  ]);
+  for (const metric of body.metrics.filter((item) => item.coverage === 'external_source_required')) {
+    expect(metric).toMatchObject({ assessment: 'not_evaluable', observation: null });
+  }
+
+  for (const actor of [seller, blocked]) {
+    const response = await fetch(`${origin}/api/v1/reports/pilot-metrics`, {
+      headers: { Authorization: `Bearer ${actor.accessToken}` },
+    });
+    expect(response.status).toBe(403);
+  }
+
+  const outsideScope = await fetch(`${origin}/api/v1/reports/pilot-metrics?from=2199-01-01&to=2199-01-07&sellerId=${sellerB.id}`, {
+    headers: { Authorization: `Bearer ${managerA.accessToken}` },
+  });
+  expect(outsideScope.status).toBe(403);
+
+  const duplicated = await fetch(`${origin}/api/v1/reports/pilot-metrics?from=2199-01-01&from=2199-01-02&to=2199-01-07`, {
+    headers: { Authorization: `Bearer ${managerA.accessToken}` },
+  });
+  expect(duplicated.status).toBe(422);
+
+  const unknown = await fetch(`${origin}/api/v1/reports/pilot-metrics?from=2199-01-01&to=2199-01-07&sort=metric`, {
+    headers: { Authorization: `Bearer ${managerA.accessToken}` },
+  });
+  expect(unknown.status).toBe(422);
+});
+
 it('serves the pending scrap agenda to authorized operational readers with strict filters', async () => {
   const manager = actorManifest.actors.manager_a;
   const seller = actorManifest.actors.seller_a;
