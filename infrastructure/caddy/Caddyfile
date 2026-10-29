@@ -1,0 +1,36 @@
+{
+	admin off
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	reverse_proxy app:3000 {
+		health_uri /api/v1/health/live
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	log_append request_method {http.request.method}
+	log_append request_host {http.request.host}
+	log_append request_path {http.request.uri.path}
+
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request delete
+				resp_headers delete
+			}
+		}
+	}
+}

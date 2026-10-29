@@ -19,9 +19,11 @@ ENV APP_BASE_URL=http://127.0.0.1:3000
 RUN npm run build
 
 FROM base AS runtime
+ARG CIRNE_RELEASE_SHA=unknown
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000
+LABEL org.opencontainers.image.revision="${CIRNE_RELEASE_SHA}"
 
 # Standalone tracing starts at the monorepo root. Static/public are not traced.
 COPY --from=builder /app/apps/web/.next/standalone ./

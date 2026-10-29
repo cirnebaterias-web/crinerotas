@@ -1,6 +1,6 @@
 # Cirne Rotas — Documento de Arquitetura Fullstack
 
-**Versão:** 1.0 — desenho técnico consolidado em 09/09/2026. **Estado:** pronto para detalhamento das stories de fundação; execução e piloto ainda dependem dos gates indicados na seção 20. Decisões técnicas tomadas autonomamente por autorização do usuário; não representam resultados de testes nem autorização de custos.
+**Versão:** 1.1 — decisão de hospedagem reconciliada em 29/10/2026. **Estado:** aplicação implementada localmente e em preparação para empacotamento de piloto; deploy remoto e dados reais ainda dependem dos gates indicados na seção 20. Decisões técnicas não representam resultados de testes remotos nem autorização automática de custos.
 
 ## 1. Introdução
 
@@ -31,6 +31,7 @@ Este documento resolve e registra decisões de arquitetura, mas não autoriza im
 | 09/09/2026 | 0.1 | Criação da arquitetura e aprovação da introdução. | Aria (Architect) |
 | 09/09/2026 | 0.2 | Definição da arquitetura de alto nível com desenvolvimento local e destino em VPS separada. | Aria (Architect) |
 | 09/09/2026 | 1.0 | Consolidação técnica autônoma: seções 3–20, implantação, segurança, desempenho, testes, padrões, erros, observabilidade e revisão de consistência. | Aria; revisão de dados por Dara |
+| 29/10/2026 | 1.1 | Provedora da VPS Linux do aplicativo confirmada como Contabo; PRD reconciliado por `DEC-016`, mantendo Supabase Cloud e isolamento do n8n. | Aria (Architect) |
 
 ## 2. Arquitetura de alto nível
 
@@ -44,7 +45,7 @@ O computador local será usado para desenvolvimento e testes. A aplicação ser�
 
 **Plataforma de desenvolvimento:** computador local, com runtime e dependências isolados por containers quando aplicável.
 
-**Plataforma-alvo do piloto:** VPS separada e independente da infraestrutura do n8n.
+**Plataforma-alvo do piloto:** VPS Contabo com Linux, exclusiva do Cirne Rotas e independente da infraestrutura do n8n.
 
 **Serviços principais:**
 
@@ -131,7 +132,7 @@ flowchart LR
 
 ### 2.8 Decisão de hospedagem e impacto no PRD
 
-A hospedagem do piloto em VPS substitui a direção de Vercel registrada em `DEC-012` e `NFR-016`. A alteração precisa passar pelo controle de mudança do PRD e pela aprovação do negócio antes do primeiro deploy remoto. A VPS existente do n8n não será usada, pois uma falha ou reinicialização do host compartilhado violaria o requisito de isolamento absoluto.
+A hospedagem do piloto em VPS Contabo Linux substitui a direção de Vercel registrada historicamente em `DEC-012`. A mudança foi aprovada pelo negócio e registrada no PRD por `DEC-016` e no `NFR-016` em 29/10/2026. Distribuição/versão Linux, plano, região, domínio e credenciais continuam fatos de provisionamento a validar antes do primeiro deploy remoto. A VPS existente do n8n não será usada, pois uma falha ou reinicialização do host compartilhado violaria o requisito de isolamento absoluto.
 
 ## 3. Stack tecnológica
 
@@ -2319,9 +2320,9 @@ flowchart LR
 
 Docker Compose executará Caddy e uma instância da aplicação. Caddy 2.11.4 e Compose 5.5.1 são referências verificadas em 09/09/2026; imagens e ferramentas serão fixadas por versão/digest no bootstrap e submetidas a teste de compatibilidade. Fontes: [Caddy](https://github.com/caddyserver/caddy/releases/tag/v2.11.4), [Compose](https://github.com/docker/compose/releases/tag/v5.5.1).
 
-Somente o proxy publicará portas web 80/443. A aplicação escutará na rede dos containers, sem porta pública própria. SSH usará chave e origem restrita; API administrativa do Caddy e socket Docker não serão publicados. Dados dos certificados serão persistentes, com permissões restritas. Caddy administra certificados e redirecionamento HTTPS: [documentação](https://caddyserver.com/docs/automatic-https).
+Somente o proxy publicará portas web 80/443. A aplicação escutará na rede interna dos containers, sem porta pública própria, e usará uma segunda rede de egress sem portas publicadas para alcançar Supabase Cloud/Auth/Storage. SSH usará chave e origem restrita; API administrativa do Caddy e socket Docker não serão publicados. Dados dos certificados serão persistentes, com permissões restritas. Caddy administra certificados e redirecionamento HTTPS: [documentação](https://caddyserver.com/docs/automatic-https).
 
-Dimensionamento inicial para ensaio: Linux x86-64 suportado, 2 vCPU, 4 GiB de RAM e 40 GiB de disco. Isso é um orçamento de recursos para testar aplicação/proxy, não uma compra nem garantia de capacidade. O build roda no CI, não na VPS. Medir memória, CPU, disco e latência antes da contratação; escolher distribuição e imagens suportadas nessa data. A VPS será independente do n8n.
+Provedora confirmada: Contabo. Dimensionamento inicial para ensaio: Linux x86-64 suportado, 2 vCPU, 4 GiB de RAM e 40 GiB de disco. Isso é um orçamento de recursos para testar aplicação/proxy, não especificação de plano, compra nem garantia de capacidade. O build roda no CI, não na VPS. Medir memória, CPU, disco e latência antes do provisionamento; confirmar distribuição/versão, região e imagens suportadas nessa data. A VPS será exclusiva do Cirne Rotas e independente do n8n.
 
 | Ambiente | Aplicação | Dados |
 | --- | --- | --- |
@@ -2392,7 +2393,7 @@ Estimativa conservadora: 2 vendedores × 8 visitas × 30 dias = 480 visitas. Com
 
 No GitHub, medir minutos de CI, artifacts e uso do registry; consultar [Actions](https://docs.github.com/en/billing/concepts/product-billing/github-actions) e [Packages](https://docs.github.com/en/billing/concepts/product-billing/github-packages). Releases anteriores necessárias para rollback não serão removidas por uma limpeza genérica. Nenhum upgrade pago será automático.
 
-Antes do primeiro deploy: conferir domínio, VPS, SMTP, região/cotas, destino de backup e alinhamento formal do PRD que ainda menciona Vercel. Nenhuma contratação ou publicação é executada por este documento.
+Antes do primeiro deploy: conferir domínio, VPS Contabo provisionada, distribuição/versão Linux, SMTP, região/cotas, destino de backup, monitor externo e segredos. O alinhamento formal Vercel→VPS foi concluído pela `DEC-016`, mas não substitui essas evidências. Nenhuma contratação ou publicação é executada por este documento.
 
 ## 15. Segurança e desempenho
 
@@ -2751,16 +2752,16 @@ O desenho é forte em fronteiras modulares, operação offline durável, idempot
 
 | Decisão | Situação arquitetural | Pendência para fechamento |
 | --- | --- | --- |
-| `TA-01` | Resolvida: Supabase-first, BFF fino Next.js, sem NestJS no MVP | Registrar no PRD junto da troca Vercel→VPS |
+| `TA-01` | Resolvida: Supabase-first, BFF fino Next.js, sem NestJS no MVP | Registrada no PRD por `DEC-016`; comprovar no runtime promovido |
 | `TA-02` | Resolvida: PostgreSQL, Auth, RLS e Storage; sem funções externas obrigatórias | Provar permissões no bootstrap |
 | `TA-03` | Resolvida: monorepo npm workspaces | Criar estrutura/lockfile |
 | `TA-04` | Dimensionada inicialmente na seção 14.6 | Recalcular com AB-10, conta e carga reais |
 | `TA-05` | Estratégia e RPO/RTO de ensaio definidos | Escolher destino externo e passar restauração |
-| `TA-06` | Superada pela decisão de VPS; limites Vercel deixam de se aplicar | Controle de mudança do PRD |
+| `TA-06` | Superada pela decisão de VPS; limites Vercel deixam de se aplicar | Medir recursos e limites do container na VPS Contabo provisionada |
 | `TA-07` | Supabase Storage privado, compressão, hash e capacidade inicial definidos | Fechar AB-10/15/18 formalmente e ensaiar backup/egress |
 | `TA-08` | Ambientes, ausência de preview remoto e segregação de segredos definidos | Provisionar sem cobrança automática |
 | `TA-09` | PostGIS e eventos pontuais, sem rastreamento contínuo | Medir consultas e fechar tolerância DATA-02/AB-11 |
-| `TA-10` | Pipeline, digest, promoção manual e gates definidos | Implementar CI e confirmar proteções disponíveis na conta |
+| `TA-10` | Pipeline, digest, promoção manual e gates definidos | Implementar release/promoção e confirmar proteções disponíveis na conta |
 
 `AB-18` recebe nesta arquitetura a escolha técnica de Supabase Storage privado. O gate só pode ser marcado fechado no PRD depois de aceitar capacidade, retenção e recuperação junto de AB-10/15 e do ensaio de TA-05/07.
 
@@ -2772,7 +2773,7 @@ O desenho é forte em fronteiras modulares, operação offline durável, idempot
 | 2 | LGPD, retenção e perfis sensíveis (`AB-15`) | Exposição e uso não autorizado de fotos/localização | Não usar dados reais; aprovar finalidade, aviso, acesso, retenção, descarte e resposta a incidente |
 | 3 | Durabilidade prometida versus backup/cotas do plano | Perda confirmada ou restauração incompleta | Destino externo, manifesto e ensaio de restauração; resolver a tolerância residual antes do go-live |
 | 4 | Aparelho/navegador/armazenamento não validados (`AB-14`) | Falha offline em campo | Matriz física, HTTPS, encerramento, quota, câmera/GPS e atualização PWA em teste real |
-| 5 | VPS diverge do NFR-016/DEC-012 e falta operação nomeada | Deploy sem aprovação ou resposta a incidente | Controle de mudança do PRD, VPS exclusiva, monitor externo, responsáveis, SMTP, domínio e runbooks |
+| 5 | VPS Contabo ainda não provisionada e falta operação nomeada | Deploy sem evidência ou resposta a incidente | `DEC-016` registrada; exigir VPS exclusiva, monitor externo, responsáveis, SMTP, domínio, segredos e runbooks |
 
 As cotas de fotos/egress, o arquivo real de clientes (`AB-13`) e a definição de filtros (`AB-16`) permanecem riscos altos dentro desses grupos. Escala horizontal, mapas e exportações P1 não são bloqueadores do núcleo.
 
@@ -2784,7 +2785,7 @@ As cotas de fotos/egress, o arquivo real de clientes (`AB-13`) e a definição d
 | Iniciar implementação local | Inicializar repositório, lockfile e ambientes; validar combinação/licenças das versões; criar contratos e migração base |
 | Implementar módulo funcional | Gates `AB-*` diretamente associados fechados ou comportamento explicitamente bloqueado/configurável |
 | Homologar no celular | `AB-14`, HTTPS confiável, pacote offline, falhas de quota/rede/sessão e matriz física aprovados |
-| Implantar na VPS | Mudança do PRD aprovada, VPS/domínio/SMTP/segredos, CI, backup externo, monitor e rollback testados |
+| Implantar na VPS | `DEC-016` registrada; VPS Contabo/domínio/SMTP/segredos provisionados, CI/release aprovados, backup externo, monitor e rollback testados |
 | Usar dados reais | `AB-13`, `AB-15`, perfis sensíveis, retenção, suporte e resposta a incidente aprovados |
 | Iniciar piloto | Todos os P0 aplicáveis, critérios de aceite, restauração, cotas, observabilidade e go/no-go do responsável |
 

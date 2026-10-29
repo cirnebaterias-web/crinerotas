@@ -58,6 +58,7 @@
     "ops:navigation": "tsx apps/cli/src/navigation-cli.ts",
     "ops:visits": "tsx apps/cli/src/visits-cli.ts",
     "ops:backup:verify": "tsx scripts/backup-verify-cli.ts",
+    "ops:vps:preflight": "tsx scripts/pilot-vps-preflight-cli.ts",
     "ops:scrap:restore-drill": "tsx scripts/scrap-full-restore-drill.ts",
     "catalog:products:validate": "python scripts/product-catalog-cli.py validate \"Docs/Base produtos Clarios.xlsx\"",
     "catalog:products:preview": "python scripts/product-catalog-cli.py preview \"Docs/Base produtos Clarios.xlsx\"",
