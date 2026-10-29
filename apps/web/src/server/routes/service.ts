@@ -7,6 +7,9 @@ import {
   canonicalRouteSchema,
   changeRouteCompositionRequestSchema,
   routeCompositionDraftSchema,
+  routePlanningQuerySchema,
+  routePlanningResponseSchema,
+  updateRouteDraftRequestSchema,
   reorderRouteExecutionRequestSchema,
   reorderRouteExecutionResultSchema,
   type CanonicalRoute,
@@ -17,9 +20,12 @@ import {
   type RouteErrorCode,
   type RoutePublication,
   type RouteCompositionDraft,
+  type RoutePlanningQuery,
+  type RoutePlanningResponse,
   type RouteTodayResponse,
   type ReorderRouteExecutionRequest,
   type ReorderRouteExecutionResult,
+  type UpdateRouteDraftRequest,
 } from '@cirne/contracts';
 import {
   normalizePendingStopOrder,
@@ -45,9 +51,15 @@ export interface RouteRepository {
     request: ChangeRouteCompositionRequest,
     context: RouteCompositionMutationContext,
   ): Promise<RouteCompositionDraft>;
+  updateDraft(
+    routeId: string,
+    request: UpdateRouteDraftRequest,
+    context: RouteCompositionMutationContext,
+  ): Promise<RouteDraft>;
   publish(routeId: string, request: PublishRouteRequest): Promise<RoutePublication>;
   getById(routeId: string): Promise<CanonicalRoute>;
   getForDate(serviceDate: string): Promise<RouteTodayResponse>;
+  getPlanning(query: RoutePlanningQuery): Promise<RoutePlanningResponse>;
   reorder(
     routeId: string,
     request: ReorderRouteExecutionRequest,
@@ -123,6 +135,37 @@ export async function changeRouteComposition(
     command,
     { ...context, idempotencyKey: parsedKey.data },
   ));
+}
+
+export async function updateRouteDraft(
+  routeId: string,
+  input: UpdateRouteDraftRequest,
+  context: RouteCompositionMutationContext,
+  repository: RouteRepository,
+) {
+  const parsedRouteId = routeDraftSchema.shape.routeId.safeParse(routeId);
+  const parsedKey = routeDraftSchema.shape.routeId.safeParse(context.idempotencyKey);
+  const parsed = updateRouteDraftRequestSchema.safeParse(input);
+  if (!parsedRouteId.success || !parsedKey.success || !parsed.success) {
+    throw new RouteServiceFailure('VALIDATION_FAILED', publicRouteMessage('VALIDATION_FAILED'), false);
+  }
+  const command = {
+    ...parsed.data,
+    stops: [...parsed.data.stops].sort((left, right) => left.plannedOrder - right.plannedOrder),
+  };
+  return routeDraftSchema.parse(await repository.updateDraft(
+    parsedRouteId.data.toLowerCase(),
+    command,
+    { ...context, idempotencyKey: parsedKey.data },
+  ));
+}
+
+export async function getRoutePlanning(input: RoutePlanningQuery, repository: RouteRepository) {
+  const parsed = routePlanningQuerySchema.safeParse(input);
+  if (!parsed.success) {
+    throw new RouteServiceFailure('VALIDATION_FAILED', publicRouteMessage('VALIDATION_FAILED'), false);
+  }
+  return routePlanningResponseSchema.parse(await repository.getPlanning(parsed.data));
 }
 
 export async function getRoute(routeId: string, repository: RouteRepository) {

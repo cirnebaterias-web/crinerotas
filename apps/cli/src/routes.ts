@@ -101,7 +101,7 @@ export async function runRouteRoundTrip(
 
   const initialStops = [
     { clientId: syntheticClientIds[0], plannedOrder: 1, priority: 1 },
-    { clientId: syntheticClientIds[1], plannedOrder: 3, priority: 0 },
+    { clientId: syntheticClientIds[1], plannedOrder: 2, priority: 0 },
   ];
   const revisedStops = [
     { clientId: syntheticClientIds[1], plannedOrder: 1, priority: 0 },

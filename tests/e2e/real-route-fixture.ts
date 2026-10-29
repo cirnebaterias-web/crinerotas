@@ -28,6 +28,8 @@ export const test = base.extend<{ realRoute: RealRouteFixture }>({
     // Only generated values enter SQL, in the project's fixed local container. Keep old facts.
     const values = clients.map(({ id, name }, index) =>
       `('${id}', 'E2E-${id}', '${name}', 'Endereco E2E sintetico ${index + 1}', 'CARTEIRA-E2E', 'active')`).join(',');
+    const scopeValues = clients.map(({ id }) =>
+      `('${id}', '${seller.id}', '${manager.id}')`).join(',');
     const useRancherDesktopWsl = process.platform === 'win32' &&
       process.env.CIRNE_DOCKER_BACKEND === 'rancher-desktop-wsl';
     const dockerProgram = useRancherDesktopWsl ? 'wsl' : 'docker';
@@ -35,7 +37,8 @@ export const test = base.extend<{ realRoute: RealRouteFixture }>({
     try {
       await promisify(execFile)(dockerProgram, [...dockerPrefix, 'exec', 'supabase_db_cirne-rotas-dev',
         'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres',
-        '-c', `insert into api.clients (id, external_reference, name, address, portfolio_reference, status) values ${values}`],
+        '-c', `insert into api.clients (id, external_reference, name, address, portfolio_reference, status) values ${values};
+          insert into api.client_seller_scopes (client_id, seller_id, assigned_by) values ${scopeValues}`],
       { windowsHide: true, timeout: 25_000 });
     } catch (cause) {
       throw new Error('Could not create exclusively synthetic browser clients in the local database.', { cause });

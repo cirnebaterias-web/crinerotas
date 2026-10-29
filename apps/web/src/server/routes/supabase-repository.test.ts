@@ -113,6 +113,45 @@ describe('SupabaseRouteRepository', () => {
     });
   });
 
+  it('validates a first draft edit and forwards its idempotency key', async () => {
+    const routeId = '20000000-0000-4000-8000-000000000001';
+    const request = { schemaVersion: 1 as const, expectedVersion: 1, stops: command.stops };
+    const { repository, rpc } = clientReturning({
+      ...command,
+      routeId,
+      routeVersionId: '30000000-0000-4000-8000-000000000001',
+      versionNumber: 1,
+      expectedVersion: 2,
+      status: 'draft',
+      stops: [{ ...command.stops[0], routeVersionStopId: '40000000-0000-4000-8000-000000000001' }],
+    });
+    await expect(repository.updateDraft(routeId, request, {
+      idempotencyKey: '60000000-0000-4000-8000-000000000001', origin: 'web',
+    })).resolves.toMatchObject({ expectedVersion: 2 });
+    expect(rpc).toHaveBeenCalledWith('update_route_draft', {
+      p_route_id: routeId,
+      p_command: request,
+      p_idempotency_key: '60000000-0000-4000-8000-000000000001',
+      p_origin: 'web',
+    });
+  });
+
+  it('rejects a planning response for another selected seller', async () => {
+    const { repository, rpc } = clientReturning({
+      schemaVersion: 1,
+      availability: 'empty',
+      serviceDate: command.serviceDate,
+      sellerId: '11111111-1111-4111-8111-111111111112',
+    });
+    await expect(repository.getPlanning({
+      serviceDate: command.serviceDate, sellerId: command.sellerId,
+    })).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+    expect(rpc).toHaveBeenCalledWith('get_route_planning', {
+      p_service_date: command.serviceDate,
+      p_seller_id: command.sellerId,
+    });
+  });
+
   it('rejects a composition result that duplicates one client and omits another', async () => {
     const routeId = '20000000-0000-4000-8000-000000000001';
     const secondStop = {

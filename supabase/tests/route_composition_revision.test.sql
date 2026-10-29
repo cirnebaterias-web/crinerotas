@@ -27,6 +27,14 @@ values
   ('10000000-0000-4000-8000-000000000003', 'SYN-003', 'Cliente Sintetico 03', 'Endereco sintetico 03', 'CARTEIRA-SINTETICA-A')
 on conflict (id) do update set status = 'active', archived_at = null, name = excluded.name;
 
+insert into api.client_seller_scopes (client_id, seller_id, assigned_by)
+select client.id, :'seller_a_id', :'manager_a_id' from api.clients client
+where client.id in (
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000002',
+  '10000000-0000-4000-8000-000000000003'
+) on conflict do nothing;
+
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.create_route_draft(jsonb_build_object(
@@ -35,7 +43,7 @@ select api.create_route_draft(jsonb_build_object(
   'sellerId', :'seller_a_id',
   'stops', jsonb_build_array(
     jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000001', 'plannedOrder', 1, 'priority', 1),
-    jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000002', 'plannedOrder', 3, 'priority', 0)
+    jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000002', 'plannedOrder', 2, 'priority', 0)
   )
 )) as initial_draft \gset
 select (:'initial_draft')::jsonb ->> 'routeId' as route_id \gset

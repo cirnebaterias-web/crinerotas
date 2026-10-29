@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { changeRouteCompositionRequestSchema, routePath, routeDraftSchema } from '@cirne/contracts';
-import { changeRouteComposition, getRoute } from '@/server/routes/service';
+import {
+  changeRouteCompositionRequestSchema,
+  routePath,
+  routeDraftSchema,
+  updateRouteDraftRequestSchema,
+} from '@cirne/contracts';
+import { changeRouteComposition, getRoute, updateRouteDraft } from '@/server/routes/service';
 import { SupabaseRouteRepository } from '@/server/routes/supabase-repository';
 import {
   logRouteRequest,
@@ -59,17 +64,21 @@ export async function PATCH(
     if (!idempotencyKey || !routeDraftSchema.shape.routeId.safeParse(idempotencyKey).success) {
       throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Idempotency-Key UUID obrigatória.', false);
     }
-    const parsed = changeRouteCompositionRequestSchema.safeParse(await readRouteJson(request));
-    if (!parsed.success) {
+    const body = await readRouteJson(request);
+    const draftUpdate = updateRouteDraftRequestSchema.safeParse(body);
+    const compositionChange = changeRouteCompositionRequestSchema.safeParse(body);
+    if (!draftUpdate.success && !compositionChange.success) {
       throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Composição de rota inválida.', false);
     }
     const { routeId } = await context.params;
-    const result = await changeRouteComposition(
-      routeId,
-      parsed.data,
-      { idempotencyKey, origin: request.headers.has('authorization') ? 'cli' : 'web' },
-      new SupabaseRouteRepository(client),
-    );
+    const mutationContext = {
+      idempotencyKey,
+      origin: request.headers.has('authorization') ? 'cli' as const : 'web' as const,
+    };
+    const repository = new SupabaseRouteRepository(client);
+    const result = draftUpdate.success
+      ? await updateRouteDraft(routeId, draftUpdate.data, mutationContext, repository)
+      : await changeRouteComposition(routeId, compositionChange.data!, mutationContext, repository);
     return Response.json(result, { status, headers });
   } catch (error) {
     const publicError = mapRouteRequestError(error);

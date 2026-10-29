@@ -22,7 +22,10 @@ import {
   routeDraftSchema,
   routePublicationSchema,
   routeCompositionDraftSchema,
+  routePlanningQuerySchema,
+  routePlanningResponseSchema,
   routeTodayResponseSchema,
+  updateRouteDraftRequestSchema,
   syncBatchRequestSchema,
   syncBatchExchangeSchema,
   syncBatchResponseSchema,
@@ -113,11 +116,11 @@ const routeRequest = {
   sellerId: '11111111-1111-4111-8111-111111111111',
   stops: [
     { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', plannedOrder: 1, priority: 1 },
-    { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', plannedOrder: 3, priority: 0 },
+    { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', plannedOrder: 2, priority: 0 },
   ],
 };
 
-it('validates a route draft command without inventing contiguous order', () => {
+it('validates a route draft command with unique contiguous order', () => {
   expect(createRouteDraftRequestSchema.parse(routeRequest)).toEqual(routeRequest);
   expect(createRouteDraftRequestSchema.safeParse({
     ...routeRequest,
@@ -127,7 +130,34 @@ it('validates a route draft command without inventing contiguous order', () => {
     ...routeRequest,
     stops: [routeRequest.stops[0]!, { ...routeRequest.stops[1]!, plannedOrder: 1 }],
   }).success).toBe(false);
+  expect(createRouteDraftRequestSchema.safeParse({
+    ...routeRequest,
+    stops: [routeRequest.stops[0]!, { ...routeRequest.stops[1]!, plannedOrder: 3 }],
+  }).success).toBe(false);
   expect(createRouteDraftRequestSchema.safeParse({ ...routeRequest, internalStatus: 'published' }).success).toBe(false);
+});
+
+it('validates route planning lookup, initial draft edits, and honest state', () => {
+  expect(routePlanningQuerySchema.parse({
+    serviceDate: routeRequest.serviceDate,
+    sellerId: routeRequest.sellerId,
+  })).toEqual({ serviceDate: routeRequest.serviceDate, sellerId: routeRequest.sellerId });
+  expect(updateRouteDraftRequestSchema.parse({
+    schemaVersion: 1,
+    expectedVersion: 1,
+    stops: routeRequest.stops,
+  }).stops).toEqual(routeRequest.stops);
+  expect(routePlanningResponseSchema.parse({
+    schemaVersion: 1,
+    availability: 'empty',
+    serviceDate: routeRequest.serviceDate,
+    sellerId: routeRequest.sellerId,
+  }).availability).toBe('empty');
+  expect(routePlanningResponseSchema.safeParse({
+    schemaVersion: 1,
+    availability: 'empty',
+    serviceDate: routeRequest.serviceDate,
+  }).success).toBe(false);
 });
 
 it('keeps draft, publication and canonical route responses strict', () => {

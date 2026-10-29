@@ -48,6 +48,14 @@ values
   ('10000000-0000-4000-8000-000000000093', 'VIS-093', 'Cliente Retirado Offline', 'Endereco visita 03', 'CARTEIRA-VISITA')
 on conflict (id) do update set name = excluded.name, address = excluded.address;
 
+insert into api.client_seller_scopes (client_id, seller_id, assigned_by)
+select client.id, :'seller_a_id', :'manager_a_id' from api.clients client
+where client.id in (
+  '10000000-0000-4000-8000-000000000091',
+  '10000000-0000-4000-8000-000000000092',
+  '10000000-0000-4000-8000-000000000093'
+) on conflict do nothing;
+
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.create_route_draft(jsonb_build_object(

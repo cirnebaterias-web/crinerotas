@@ -80,6 +80,7 @@ export const clientListQuerySchema = z.object({
   page: clientListIntegerParameterSchema.max(100_000).optional().default(1),
   pageSize: clientListIntegerParameterSchema.max(100).optional(),
   limit: clientListIntegerParameterSchema.max(100).optional(),
+  sellerId: z.uuid().optional(),
 }).strict().transform(({ limit, pageSize, ...query }) => ({
   ...query,
   pageSize: pageSize ?? limit ?? 25,

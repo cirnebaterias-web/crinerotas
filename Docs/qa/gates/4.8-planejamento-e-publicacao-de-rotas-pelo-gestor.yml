@@ -1,0 +1,52 @@
+schema: 1
+story: '4.8'
+story_title: 'Planejamento e publicação de rotas pelo gestor'
+gate: PASS
+status_reason: 'Os 12 critérios estão cobertos em contratos, autorização, persistência e fluxo desktop, sem achado crítico/alto ou lacuna P0. CodeRabbit encerrou com zero findings e migração, rollback, integração e jornadas Playwright foram comprovados localmente.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'product-tree-sha256:0afa3dd543efd5cab6bd1511415853db0215c52d984469a49f7c2315f663ad8b'
+updated: '2026-10-29T21:26:39Z'
+expires: '2026-11-12T21:26:39Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1336
+  risks_identified: 0
+  current_run:
+    lint: PASS
+    typecheck: PASS
+    unit_passed: 447
+    unit_skipped: 1
+    production_build: PASS
+    pgtap_passed: 786
+    integration_passed: 25
+    e2e_mocked_passed: 77
+    e2e_real_planner_passed: 1
+    secretlint: PASS
+    rollback_reapply: PASS
+    git_diff_check: PASS
+    coderabbit: 'PASS: primeira rodada encontrou 5 achados válidos, todos corrigidos; segunda rodada terminou com 0 findings.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Capacidade, papel, escopo, portfólio, grants/RLS, CSRF, idempotência por agregado e chamadas negativas estão validados; secretlint passou.'
+  performance:
+    status: PASS
+    notes: 'Carteira é filtrada e paginada no servidor, composição é limitada a 50 paradas e RPCs têm timeout; adequado ao volume do piloto local.'
+  reliability:
+    status: PASS
+    notes: 'Versão esperada, conflito 409, preservação local, descarte de resposta obsoleta, auditoria, rollback/reaplicação e reabertura real foram exercitados.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos compartilhados, domínio, serviço, repositório, handlers, migração e UI mantêm responsabilidades separadas e testes em camadas.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Medir latência e plano das RPCs com o volume real acordado antes do deploy produtivo na VPS.'
+      refs: ['Docs/prd.md#nfr-009', 'supabase/migrations/20261029150000_route_planning.sql']
+    - action: 'Executar o smoke com contas e escopos reais somente após provisionamento, backup e preflight da VPS.'
+      refs: ['Docs/runbooks/pilot-readiness-contabo.md']

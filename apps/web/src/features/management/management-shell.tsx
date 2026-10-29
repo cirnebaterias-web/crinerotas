@@ -10,6 +10,7 @@ type Item = { href: string; label: string; capability: string };
 
 const items: Item[] = [
   { href: '/management/day', label: 'Central do dia', capability: 'route.read_scoped' },
+  { href: '/management/routes', label: 'Planejar rotas', capability: 'route.plan_scoped' },
   { href: '/management/intelligence', label: 'Inteligência de campo', capability: 'route.read_scoped' },
   { href: '/management/pilot', label: 'Indicadores do piloto', capability: 'route.read_scoped' },
   { href: '/management/commercial-actions', label: 'Ações comerciais', capability: 'route.plan_scoped' },

@@ -55,6 +55,14 @@ values
   ('10000000-0000-4000-8000-000000000003', 'SYN-003', 'Cliente Sintético 03', 'Endereço sintético 03', 'CARTEIRA-SINTETICA-A')
 on conflict (id) do update set name = excluded.name;
 
+insert into api.client_seller_scopes (client_id, seller_id, assigned_by)
+select client.id, :'seller_a_id', :'manager_a_id' from api.clients client
+where client.id in (
+  '10000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000002',
+  '10000000-0000-4000-8000-000000000003'
+) on conflict do nothing;
+
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.create_route_draft(jsonb_build_object(
@@ -63,8 +71,8 @@ select api.create_route_draft(jsonb_build_object(
   'sellerId', :'seller_a_id',
   'stops', jsonb_build_array(
     jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000001', 'plannedOrder', 1, 'priority', 1),
-    jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000002', 'plannedOrder', 3, 'priority', 0),
-    jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000003', 'plannedOrder', 5, 'priority', 0)
+    jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000002', 'plannedOrder', 2, 'priority', 0),
+    jsonb_build_object('clientId', '10000000-0000-4000-8000-000000000003', 'plannedOrder', 3, 'priority', 0)
   )
 )) as draft_result \gset
 select is((:'draft_result')::jsonb ->> 'status', 'draft', 'manager creates the reorder fixture');
@@ -118,7 +126,7 @@ select is((
   select jsonb_agg(planned_order order by planned_order)
   from api.route_version_stops
   where route_version_id = :'route_version_id'::uuid
-), '[1, 3, 5]'::jsonb, 'planned order remains immutable');
+), '[1, 2, 3]'::jsonb, 'planned order remains immutable');
 select is((
   select count(*)::integer
   from private.audit_events
@@ -266,7 +274,7 @@ select is((
   select jsonb_build_object('status', status, 'executionOrder', execution_order)
   from api.route_stop_executions
   where route_version_stop_id = :'stop_2_id'::uuid
-), jsonb_build_object('status', 'in_visit', 'executionOrder', 3), 'fixture marks one non-pending stop at its existing position');
+), jsonb_build_object('status', 'in_visit', 'executionOrder', 2), 'fixture marks one non-pending stop at its existing position');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
@@ -287,7 +295,7 @@ select is((
   select jsonb_build_object('status', status, 'executionOrder', execution_order)
   from api.route_stop_executions
   where route_version_stop_id = :'stop_2_id'::uuid
-), jsonb_build_object('status', 'in_visit', 'executionOrder', 3), 'non-pending state and position are preserved');
+), jsonb_build_object('status', 'in_visit', 'executionOrder', 2), 'non-pending state and position are preserved');
 select is((
   select jsonb_agg(route_version_stop_id order by execution_order)
   from api.route_stop_executions
@@ -415,7 +423,7 @@ select is((
   select jsonb_agg(planned_order order by planned_order)
   from api.route_version_stops
   where route_version_id = :'route_version_id'::uuid
-), '[1, 3, 5]'::jsonb, 'all reorder attempts preserve published composition');
+), '[1, 2, 3]'::jsonb, 'all reorder attempts preserve published composition');
 select ok((
   select relrowsecurity and relforcerowsecurity
   from pg_catalog.pg_class
