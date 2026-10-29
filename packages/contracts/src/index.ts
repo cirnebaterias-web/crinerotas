@@ -1,10 +1,13 @@
 import { z } from 'zod';
+import { competitorCommercialActionTypeSchema } from './commercial-action-types';
 export * from './scrap-revisions';
 export * from './client-reference';
 export * from './clients';
 export * from './client-imports';
 export * from './management-day';
 export * from './visit-detail';
+export * from './commercial-action-types';
+export * from './field-intelligence';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
 export type LiveResponse = z.infer<typeof liveResponseSchema>;
@@ -592,15 +595,6 @@ export const competitorPricesResultSchema = z.object({
 });
 export type CompetitorPricesResult = z.infer<typeof competitorPricesResultSchema>;
 
-export const competitorCommercialActionTypeSchema = z.enum([
-  'differentiated_price',
-  'seller_or_driver_incentive',
-  'retailer_incentive',
-  'purchase_combo',
-  'other',
-]);
-export type CompetitorCommercialActionType = z.infer<typeof competitorCommercialActionTypeSchema>;
-
 export const commercialActionSchema = z.object({
   id: z.uuid(),
   title: z.string().trim().min(1).max(120),
@@ -786,6 +780,136 @@ export const pickupScheduleSchema = z.object({
   version: z.number().int().positive(),
 }).strict();
 export type PickupSchedule = z.infer<typeof pickupScheduleSchema>;
+
+const scrapAgendaCursorSchema = z.string().regex(/^[A-Za-z0-9_-]{8,1024}$/u);
+const scrapAgendaFilterObjectSchema = z.object({
+  from: z.iso.date(),
+  to: z.iso.date(),
+  status: z.literal('pending').default('pending'),
+  period: scrapPeriodSchema.optional(),
+  sellerId: z.uuid().optional(),
+  clientId: z.uuid().optional(),
+  cursor: scrapAgendaCursorSchema.optional(),
+}).strict();
+export const scrapAgendaFilterSchema = scrapAgendaFilterObjectSchema.superRefine((filters, context) => {
+  if (filters.from > filters.to) {
+    context.addIssue({ code: 'custom', path: ['to'], message: 'A data final deve ser igual ou posterior à inicial.' });
+  }
+});
+export type ScrapAgendaFilter = z.infer<typeof scrapAgendaFilterSchema>;
+
+export const scrapAgendaResponseSchema = z.object({
+  schemaVersion: z.literal(1),
+  filters: scrapAgendaFilterObjectSchema.omit({ cursor: true }),
+  generatedAt: z.iso.datetime({ offset: true }),
+  lastServerConfirmedAt: z.iso.datetime({ offset: true }).nullable(),
+  indicators: z.object({
+    records: z.number().int().nonnegative(),
+    scheduledKg: nonNegativeDecimalSchema,
+  }).strict(),
+  records: z.array(pickupScheduleSchema).max(50),
+  nextCursor: scrapAgendaCursorSchema.nullable(),
+  serverVisibilityNote: z.literal(
+    'Somente agendamentos recebidos e confirmados pelo servidor estão incluídos; conteúdo ainda apenas no aparelho não é conhecido.',
+  ),
+}).strict();
+export type ScrapAgendaResponse = z.infer<typeof scrapAgendaResponseSchema>;
+export const scrapAgendaPath = '/api/v1/pickup-schedules';
+
+export const pilotMetricIdSchema = z.enum([
+  'SM-01', 'SM-02', 'SM-03', 'SM-04', 'SM-05', 'SM-06', 'SM-07', 'SM-08', 'SM-09',
+]);
+export const pilotMetricCoverageSchema = z.enum([
+  'server_confirmed_cohort', 'partial_server_view', 'external_source_required',
+]);
+export const pilotMetricAssessmentSchema = z.enum([
+  'provisional_met', 'provisional_not_met', 'not_evaluable',
+]);
+const pilotMetricsFilterObjectSchema = z.object({
+  from: z.iso.date(), to: z.iso.date(), sellerId: z.uuid().optional(), clientId: z.uuid().optional(),
+  cursor: scrapAgendaCursorSchema.optional(),
+}).strict();
+export const pilotMetricsFilterSchema = pilotMetricsFilterObjectSchema.superRefine((filters, context) => {
+  if (filters.from > filters.to) {
+    context.addIssue({ code: 'custom', path: ['to'], message: 'A data final deve ser igual ou posterior à inicial.' });
+  }
+});
+export type PilotMetricsFilter = z.infer<typeof pilotMetricsFilterSchema>;
+
+export const pilotMetricObservationSchema = z.object({
+  numerator: z.number().int().nonnegative(),
+  denominator: z.number().int().nonnegative(),
+  percentage: nonNegativeDecimalSchema.nullable(),
+  exclusions: z.object({
+    windowOpen: z.number().int().nonnegative(),
+    clockSuspicious: z.number().int().nonnegative(),
+  }).strict(),
+}).strict().superRefine((observation, context) => {
+  if (observation.numerator > observation.denominator) {
+    context.addIssue({ code: 'custom', path: ['numerator'], message: 'O numerador não pode exceder o denominador.' });
+  }
+  if ((observation.denominator === 0) !== (observation.percentage === null)) {
+    context.addIssue({ code: 'custom', path: ['percentage'], message: 'Percentual exige denominador positivo.' });
+  }
+});
+
+export const pilotMetricSchema = z.object({
+  id: pilotMetricIdSchema,
+  name: z.string().trim().min(1).max(160),
+  target: z.object({
+    operator: z.enum(['gte', 'eq']), value: nonNegativeDecimalSchema, unit: z.enum(['percent', 'count']),
+  }).strict(),
+  formula: z.string().trim().min(1).max(500),
+  source: z.string().trim().min(1).max(300),
+  periodicity: z.array(z.enum(['daily', 'weekly', 'final', 'continuous'])).min(1),
+  coverage: pilotMetricCoverageSchema,
+  assessment: pilotMetricAssessmentSchema,
+  observation: pilotMetricObservationSchema.nullable(),
+  requiredSource: z.string().trim().min(1).max(500).nullable(),
+  note: z.string().trim().min(1).max(700),
+}).strict().superRefine((metric, context) => {
+  const external = metric.coverage === 'external_source_required';
+  if (external && (metric.observation !== null || metric.assessment !== 'not_evaluable' || !metric.requiredSource)) {
+    context.addIssue({ code: 'custom', path: ['observation'], message: 'Métrica externa não pode fabricar observação.' });
+  }
+  if (!external && (metric.observation === null || metric.requiredSource !== null)) {
+    context.addIssue({ code: 'custom', path: ['observation'], message: 'Métrica server-side exige observação explícita.' });
+  }
+  if (metric.observation?.denominator === 0 && metric.assessment !== 'not_evaluable') {
+    context.addIssue({ code: 'custom', path: ['assessment'], message: 'Denominador zero não permite avaliar a meta.' });
+  }
+});
+export type PilotMetric = z.infer<typeof pilotMetricSchema>;
+
+export const pilotMetricDrilldownSchema = z.object({
+  visitId: z.uuid(), serviceDate: z.iso.date(),
+  seller: scrapActorSchema, client: z.object({ id: z.uuid(), name: z.string().trim().min(1).max(160) }).strict(),
+  deviceCompletedAt: z.iso.datetime({ offset: true }), serverCompletedAt: z.iso.datetime({ offset: true }),
+  checks: z.object({
+    requiredComplete: z.boolean(), scrapReported: z.boolean(), commercialActionReported: z.boolean(),
+    sync24h: z.enum(['within_24h', 'outside_24h', 'window_open', 'clock_suspicious']),
+  }).strict(),
+}).strict();
+
+export const pilotMetricsResponseSchema = z.object({
+  schemaVersion: z.literal(1),
+  filters: pilotMetricsFilterObjectSchema.omit({ cursor: true }),
+  generatedAt: z.iso.datetime({ offset: true }),
+  lastServerConfirmedAt: z.iso.datetime({ offset: true }).nullable(),
+  metrics: z.array(pilotMetricSchema).length(9),
+  records: z.array(pilotMetricDrilldownSchema).max(50),
+  nextCursor: scrapAgendaCursorSchema.nullable(),
+  serverVisibilityNote: z.literal(
+    'Somente fatos confirmados pelo servidor são observados; fontes externas e conteúdo ainda apenas no aparelho permanecem não avaliáveis.',
+  ),
+}).strict().superRefine((response, context) => {
+  const ids = response.metrics.map((metric) => metric.id);
+  if (new Set(ids).size !== 9 || pilotMetricIdSchema.options.some((id) => !ids.includes(id))) {
+    context.addIssue({ code: 'custom', path: ['metrics'], message: 'A resposta deve conter SM-01 a SM-09 uma única vez.' });
+  }
+});
+export type PilotMetricsResponse = z.infer<typeof pilotMetricsResponseSchema>;
+export const pilotMetricsPath = '/api/v1/reports/pilot-metrics';
 
 export const confirmScrapReceiptRequestSchema = z.object({
   schemaVersion: z.literal(1), expectedVersion: z.number().int().positive(),

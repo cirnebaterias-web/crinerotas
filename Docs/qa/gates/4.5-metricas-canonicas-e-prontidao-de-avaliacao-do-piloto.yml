@@ -1,0 +1,52 @@
+schema: 1
+story: '4.5'
+story_title: 'Métricas canônicas e prontidão de avaliação do piloto'
+gate: PASS
+status_reason: 'Os 16 critérios foram rastreados em contrato, CLI, RPC caller-scoped, BFF, painel e testes. Cinco achados automatizados válidos foram corrigidos; a revisão incremental final encerrou com zero findings e todos os gates aplicáveis passaram com dados sintéticos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: '11a416d'
+updated: '2026-10-29T11:04:33Z'
+expires: '2026-11-12T11:04:33Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1273
+  risks_identified: 0
+  current_run:
+    unit_passed: 423
+    unit_skipped: 1
+    pgtap_passed: 750
+    integration_passed: 25
+    e2e_passed: 75
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    secretlint: PASS
+    database_reset_and_reapply: PASS
+    coderabbit: 'PASS: delta completo encontrou 3 minors; deltas seguintes encontraram 1 major e 1 minor. Todos foram corrigidos e a revisão incremental final encerrou com 0 findings.'
+    direct_rpc_and_http: PASS
+    deterministic_cursor_order: PASS
+    controlled_network_and_schema_errors: PASS
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Gestor ativo, capacidade e escopo são repetidos no serviço e no banco; anon permanece revogado, authenticated não recebe SELECT direto e mensagens de falha de rede/schema são controladas.'
+  performance:
+    status: PASS
+    notes: 'Filtros e escopo precedem a agregação; índice parcial, projeção estreita, limite 50 e ordem total explícita nos dois recortes de página foram comprovados em pgTAP.'
+  reliability:
+    status: PASS
+    notes: 'Coortes, fronteira inclusiva de 24 h, relógio suspeito, denominador zero, cursores e estados recuperáveis foram testados; os 25 cenários de integração passaram após recuperação do pipe Docker/Hyper-V.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato Zod compartilhado, Clock/fuso explícitos, camadas CLI/serviço/repositório/BFF/UI separadas e regressões específicas reduzem duplicação e ambiguidade.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Conectar o repositório ao CodeRabbit antes do pre-PR para associar futuras revisões ao plano da organização e evitar limites da CLI gratuita.'
+      refs:
+        - 'Docs/stories/4.5.story.md'

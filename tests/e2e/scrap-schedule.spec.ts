@@ -153,8 +153,18 @@ test.describe('standalone scrap scheduling', () => {
         const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
         if (url.pathname === '/api/v1/me') return json(manager);
         const stored = () => JSON.parse(sessionStorage.getItem('revised-schedule') ?? JSON.stringify(initial));
-        if (url.pathname === '/api/v1/scrap/collections') return json({ schemaVersion: 1, collections: [], totals: { collectedKg: '0', receivedKg: '0', scheduledKg: stored().estimatedWeightKg } });
-        if (url.pathname === '/api/v1/scrap/schedules' && !init?.method) return json({ schemaVersion: 1, schedules: [stored()] });
+        if (url.pathname === '/api/v1/pickup-schedules' && !init?.method) return json({
+          schemaVersion: 1,
+          filters: {
+            from: url.searchParams.get('from') ?? stored().desiredDate,
+            to: url.searchParams.get('to') ?? stored().desiredDate,
+            status: 'pending',
+            ...(url.searchParams.get('period') ? { period: url.searchParams.get('period') } : {}),
+          },
+          generatedAt: new Date().toISOString(), lastServerConfirmedAt: stored().serverSavedAt,
+          indicators: { records: 1, scheduledKg: stored().estimatedWeightKg }, records: [stored()], nextCursor: null,
+          serverVisibilityNote: 'Somente agendamentos recebidos e confirmados pelo servidor estão incluídos; conteúdo ainda apenas no aparelho não é conhecido.',
+        });
         if (url.pathname.endsWith(initial.id) && init?.method === 'PATCH') {
           const body = JSON.parse(String(init.body)); const key = new Headers(init.headers).get('idempotency-key');
           const attempts = JSON.parse(sessionStorage.getItem('revision-attempts') ?? '[]'); attempts.push({ body, key }); sessionStorage.setItem('revision-attempts', JSON.stringify(attempts));
@@ -164,9 +174,8 @@ test.describe('standalone scrap scheduling', () => {
         return previous(input, init);
       };
     }, { customer: client, manager: { ...identity, roles: ['manager'], capabilities: ['identity.read_self', 'scrap.read_operations'] } });
-    await page.goto('/management/scrap');
-    await expect(page.getByText('Carregando registros…')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Agendamentos', exact: true }).click();
+    await page.goto('/management/scrap/agenda');
+    await page.getByRole('button', { name: 'Atualizar agora' }).click();
     await page.getByRole('button', { name: 'Revisar agendamento', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Revisar agendamento · versão 1' })).toBeVisible();
     await page.getByLabel('Peso estimado revisado em kg').fill('120,5');
@@ -178,8 +187,8 @@ test.describe('standalone scrap scheduling', () => {
     await expect(page.locator('.seller-app').getByRole('alert')).toContainText('Não foi possível confirmar');
     await page.getByRole('button', { name: 'Salvar revisão auditada' }).click();
     await expect(page.getByText('Revisão confirmada no servidor. O agendamento continua pendente.')).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Agenda de coletas' })).toContainText('Agendamento pendente · Versão 2');
-    await expect(page.getByRole('region', { name: 'Agenda de coletas' })).toContainText('120.5 kg previstos');
+    await expect(page.getByRole('region', { name: 'Agendamentos pendentes' })).toContainText('Estado: Pendente · versão 2');
+    await expect(page.getByRole('region', { name: 'Agendamentos pendentes' })).toContainText('120.5 kg estimados');
     const attempts = await page.evaluate(() => JSON.parse(sessionStorage.getItem('revision-attempts') ?? '[]') as Array<{ body: { expectedVersion: number; reason: string }; key: string }>);
     expect(attempts).toHaveLength(2); expect(attempts[0]).toEqual(attempts[1]); expect(attempts[0]!.body.expectedVersion).toBe(1);
     expect(attempts[0]!.body.reason).toContain('Cliente solicitou');

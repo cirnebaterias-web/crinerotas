@@ -50,8 +50,10 @@ function uuid(value: string) {
 
 it('serializes overlapping visit starts, rejects divergent content, and persists each effect once', async () => {
   const actors = await jsonSql<{ seller: string; manager: string }>(`select jsonb_build_object(
-    'seller', (select id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a'),
-    'manager', (select id from auth.users where raw_user_meta_data ->> 'actorKey' = 'manager_a'))`);
+    'seller', (select id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a'
+      order by created_at desc limit 1),
+    'manager', (select id from auth.users where raw_user_meta_data ->> 'actorKey' = 'manager_a'
+      order by created_at desc limit 1))`);
   const seller = uuid(actors.seller);
   const manager = uuid(actors.manager);
   // A dedicated future route avoids consuming the daily route used by API/CLI/browser tests.

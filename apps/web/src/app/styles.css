@@ -457,3 +457,28 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .manager-day-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manager-day-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.field-intelligence-page { max-width: 1180px; }
+.field-intelligence-tabs { display: flex; gap: 8px; overflow-x: auto; margin: 22px 0; padding-bottom: 4px; }
+.field-intelligence-tabs a { flex: 0 0 auto; padding: 10px 14px; border: 1px solid #a8b9af; border-radius: 999px; color: var(--cirne-forest); font-weight: 750; text-decoration: none; }
+.field-intelligence-tabs a[aria-current="page"] { border-color: var(--cirne-forest); background: var(--cirne-forest); color: #fff; }
+.field-intelligence-filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 12px; align-items: end; margin-bottom: 24px; }
+.field-intelligence-filters label { display: grid; gap: 6px; color: var(--cirne-forest); font-weight: 750; }
+.field-intelligence-filters input, .field-intelligence-filters select { min-height: 44px; min-width: 0; padding: 9px 12px; border: 1px solid #80948a; border-radius: 10px; background: #fff; font: inherit; }
+.field-intelligence-actions { display: flex; gap: 8px; grid-column: 1 / -1; }
+.field-intelligence-summary { display: grid; grid-template-columns: repeat(5, minmax(112px, 1fr)); gap: 10px; margin: 24px 0 14px; }
+.field-intelligence-summary article { display: grid; gap: 6px; padding: 16px; border: 1px solid #cddbd3; border-radius: 14px; background: #fff; }
+.field-intelligence-summary span { color: var(--cirne-muted); font-size: 12px; font-weight: 700; }
+.field-intelligence-summary strong { color: var(--cirne-forest); font-size: 28px; font-variant-numeric: tabular-nums; }
+.field-intelligence-records { display: grid; gap: 14px; margin-bottom: 18px; }
+.field-intelligence-card { padding: 18px; border: 1px solid #cddbd3; border-radius: 16px; background: #fff; }
+.field-intelligence-card header { display: flex; justify-content: space-between; gap: 14px; }
+.field-intelligence-card h3, .field-intelligence-card header p { margin-top: 0; }
+@media (max-width: 900px) {
+  .field-intelligence-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .field-intelligence-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .field-intelligence-filters, .field-intelligence-summary { grid-template-columns: 1fr; }
+  .field-intelligence-actions, .field-intelligence-card header { align-items: stretch; flex-direction: column; }
+  .field-intelligence-actions .seller-button { width: 100%; }
+}

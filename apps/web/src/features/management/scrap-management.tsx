@@ -2,15 +2,13 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { z } from 'zod';
-import { scrapCollectionsPath, scrapSchedulesPath, scrapCollectionSchema, pickupScheduleSchema, scrapCollectionReceiptPath, scrapCollectionAttachmentsPath, confirmScrapReceiptRequestSchema, type ScrapCollection, type PickupSchedule, type MeResponse } from '@cirne/contracts';
+import { scrapCollectionsPath, scrapCollectionSchema, scrapCollectionReceiptPath, scrapCollectionAttachmentsPath, confirmScrapReceiptRequestSchema, type ScrapCollection, type MeResponse } from '@cirne/contracts';
 import { sellerClient } from '@/lib/seller-client';
 import { ScrapShell, scrapRequest, scrapMutation } from '@/features/scrap/scrap-ui';
-import { PickupScheduleRevisionForm } from './pickup-schedule-revision-form';
 import { ScrapCorrectionForm } from './scrap-correction-form';
 import { ScrapRevisionHistory } from './scrap-revision-history';
 
 const collectionList = z.object({ collections: z.array(scrapCollectionSchema), totals: z.object({ collectedKg: z.string(), receivedKg: z.string(), scheduledKg: z.string() }) });
-const scheduleList = z.object({ schedules: z.array(pickupScheduleSchema) });
 const evidenceList = z.object({ attachments: z.array(z.object({ offlineId: z.string(), signedUrl: z.string().url() })) });
 
 function ReceiptForm({ collection, onDone }: { collection: ScrapCollection; onDone: () => Promise<void> }) {
@@ -62,21 +60,17 @@ function CollectionDetail({ collection, canReceive, canCorrect, onReload }: { co
 }
 
 export function ScrapManagement() {
-  const [identity, setIdentity] = useState<MeResponse | null>(null); const [collections, setCollections] = useState<ScrapCollection[]>([]); const [schedules, setSchedules] = useState<PickupSchedule[]>([]);
-  const [totals, setTotals] = useState({ collectedKg: '0', receivedKg: '0', scheduledKg: '0' }); const [tab, setTab] = useState<'collections' | 'schedules'>('collections');
+  const [identity, setIdentity] = useState<MeResponse | null>(null); const [collections, setCollections] = useState<ScrapCollection[]>([]);
+  const [totals, setTotals] = useState({ collectedKg: '0', receivedKg: '0', scheduledKg: '0' });
   const [selected, setSelected] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(true);
-  const [revising, setRevising] = useState(''); const [revisionMessage, setRevisionMessage] = useState('');
-  async function load() { setBusy(true); setError(''); try { const user = await sellerClient.identity(); if (!user.capabilities.includes('scrap.read_operations')) throw new Error('Seu perfil não tem acesso à gestão de sucata.'); setIdentity(user); const [a, b] = await Promise.all([scrapRequest(scrapCollectionsPath), scrapRequest(scrapSchedulesPath)]); const result = collectionList.parse(a); setCollections(result.collections); setTotals(result.totals); setSchedules(scheduleList.parse(b).schedules); } catch (failure) { setError(failure instanceof Error ? failure.message : 'Não foi possível consultar a operação.'); } finally { setBusy(false); } }
+  async function load() { setBusy(true); setError(''); try { const user = await sellerClient.identity(); if (!user.capabilities.includes('scrap.read_operations')) throw new Error('Seu perfil não tem acesso à gestão de sucata.'); setIdentity(user); const result = collectionList.parse(await scrapRequest(scrapCollectionsPath)); setCollections(result.collections); setTotals(result.totals); } catch (failure) { setError(failure instanceof Error ? failure.message : 'Não foi possível consultar a operação.'); } finally { setBusy(false); } }
   useEffect(() => { void load(); }, []);
   const collection = collections.find((c) => c.id === selected);
   const canCorrect = Boolean(identity?.capabilities.includes('scrap.manage_operations') && identity.roles.some((role) => role === 'manager' || role === 'administrator'));
   return <ScrapShell><p className="seller-kicker">ADMINISTRAÇÃO · LOGÍSTICA · GESTÃO</p><h1>Coleta de sucata</h1><nav aria-label="Gestão"><a className="seller-button seller-secondary" href="/management/commercial-actions">Ações comerciais</a>{identity?.capabilities.includes('scrap.manage_points') && <a className="seller-button seller-secondary" href="/management/scrap/points">Pontos de concentração</a>}</nav>
     <section className="seller-progress" aria-label="Volumes separados"><p>Coletados pelo vendedor: <strong>{totals.collectedKg} kg</strong></p><p>Recebidos pela Cirne: <strong>{totals.receivedKg} kg</strong></p><p>Agendados para logística: <strong>{totals.scheduledKg} kg previstos</strong></p></section>
-    <div className="seller-evidence-actions"><button className="seller-button seller-secondary" aria-pressed={tab === 'collections'} onClick={() => setTab('collections')}>Coletas do vendedor</button><button className="seller-button seller-secondary" aria-pressed={tab === 'schedules'} onClick={() => setTab('schedules')}>Agendamentos</button><button className="seller-button seller-secondary" disabled={busy} onClick={() => void load()}>Atualizar</button></div>
+    <div className="seller-evidence-actions"><a className="seller-button seller-secondary" aria-current="page" href="/management/scrap">Coletas do vendedor</a><a className="seller-button seller-secondary" href="/management/scrap/agenda">Agenda pendente</a><button className="seller-button seller-secondary" disabled={busy} onClick={() => void load()}>Atualizar</button></div>
     {busy && <p role="status">Carregando registros…</p>}{error && <p className="seller-notice seller-error" role="alert">{error}</p>}
-    {tab === 'collections' && <><ul className="seller-stop-list">{collections.map((c) => <li key={c.id}><button className="seller-task-card" onClick={() => setSelected(c.id)} aria-pressed={selected === c.id}><span><strong>{c.client.name} · {c.actualWeightKg} kg coletados</strong><small>{c.seller.displayName} · {new Date(c.collectedAt).toLocaleString('pt-BR')} · termo {c.receiptNumber}</small><small>{c.concentrationPoint?.name ?? 'Matriz em Natal'}</small></span><span>{c.status === 'received' ? 'Recebido pela Cirne' : 'Aguardando recebimento'}</span></button></li>)}</ul>{!busy && collections.length === 0 && <p>Nenhuma coleta registrada.</p>}{collection && <CollectionDetail key={collection.id} collection={collection} canReceive={Boolean(identity?.capabilities.includes('scrap.receive'))} canCorrect={canCorrect} onReload={load} />}</>}
-    {tab === 'schedules' && <section aria-label="Agenda de coletas">{revisionMessage && <p role="status" className="seller-notice">{revisionMessage}</p>}{schedules.map((s) => <article className="seller-stock-card" key={s.id}><h2>{s.client.name}</h2><p>{s.client.address}</p><p>{s.desiredDate} · {s.period === 'morning' ? 'Manhã' : 'Tarde'} · <strong>{s.estimatedWeightKg} kg previstos</strong></p><p>{s.seller.displayName} · {s.origin === 'visit' ? 'Durante visita' : 'Fora da rota'} · Agendamento pendente · Versão {s.version}</p><p>{s.observation ?? 'Sem observação'}</p>
-      {identity?.capabilities.includes('scrap.read_operations') && (revising === s.id ? <PickupScheduleRevisionForm key={`${s.id}-${s.version}`} schedule={s} onCancel={() => setRevising('')} onDone={async () => { await load(); setRevising(''); setRevisionMessage('Revisão confirmada no servidor. O agendamento continua pendente.'); }} /> : <button className="seller-button seller-secondary" disabled={busy} onClick={() => { setRevising(s.id); setRevisionMessage(''); }}>Revisar agendamento</button>)}
-    </article>)}{!busy && schedules.length === 0 && <p>Nenhum agendamento registrado.</p>}</section>}
+    <ul className="seller-stop-list">{collections.map((c) => <li key={c.id}><button className="seller-task-card" onClick={() => setSelected(c.id)} aria-pressed={selected === c.id}><span><strong>{c.client.name} · {c.actualWeightKg} kg coletados</strong><small>{c.seller.displayName} · {new Date(c.collectedAt).toLocaleString('pt-BR')} · termo {c.receiptNumber}</small><small>{c.concentrationPoint?.name ?? 'Matriz em Natal'}</small></span><span>{c.status === 'received' ? 'Recebido pela Cirne' : 'Aguardando recebimento'}</span></button></li>)}</ul>{!busy && collections.length === 0 && <p>Nenhuma coleta registrada.</p>}{collection && <CollectionDetail key={collection.id} collection={collection} canReceive={Boolean(identity?.capabilities.includes('scrap.receive'))} canCorrect={canCorrect} onReload={load} />}
   </ScrapShell>;
 }
