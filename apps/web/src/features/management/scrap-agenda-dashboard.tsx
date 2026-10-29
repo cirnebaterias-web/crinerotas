@@ -14,6 +14,7 @@ import {
 } from '@cirne/contracts';
 import { ScrapShell } from '../scrap/scrap-ui';
 import { PickupScheduleRevisionForm } from './pickup-schedule-revision-form';
+import { ReportExportActions } from './report-export-actions';
 
 export type ScrapAgendaInitialState =
   | { kind: 'ready' | 'empty'; filters: ScrapAgendaFilter; result: ScrapAgendaResponse }
@@ -155,7 +156,7 @@ export function ScrapAgendaDashboard({
       <label>Cliente (ID)<input value={draft.clientId ?? ''} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || undefined })} /></label>
       <label>Estado<input value="Pendente" disabled aria-describedby="agenda-state-note" /></label>
       <p id="agenda-state-note">Outros estados dependem da definição de responsável e SLA.</p>
-      <div className="field-intelligence-actions"><button className="seller-button seller-primary">Aplicar filtros</button><button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button></div>
+      <div className="field-intelligence-actions"><button className="seller-button seller-primary">Aplicar filtros</button><button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button>{confirmed && <ReportExportActions view="scrap_agenda" filters={{ ...confirmed.filters }} disabled={state === 'loading'} />}</div>
     </form>
     {state === 'loading' && <p role="status" aria-live="polite">Atualizando pendências confirmadas…</p>}
     {(state === 'recoverable_error' || state === 'forbidden') && <div className="seller-notice seller-error" role="alert" tabIndex={-1} ref={alertRef}><strong>{state === 'forbidden' ? 'Acesso não autorizado.' : 'Atualização não concluída.'}</strong><p>{message}</p>{state === 'recoverable_error' && <button type="button" className="seller-button seller-secondary" onClick={() => void refresh()}>Tentar novamente</button>}</div>}

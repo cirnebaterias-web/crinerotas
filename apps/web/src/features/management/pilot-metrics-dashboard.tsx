@@ -8,6 +8,7 @@ import {
   type PilotMetricsFilter, type PilotMetricsResponse,
 } from '@cirne/contracts';
 import { ScrapShell } from '../scrap/scrap-ui';
+import { ReportExportActions } from './report-export-actions';
 
 export type PilotMetricsInitialState =
   | { kind: 'ready' | 'empty'; filters: PilotMetricsFilter; result: PilotMetricsResponse }
@@ -110,7 +111,7 @@ export function PilotMetricsDashboard({ initial, timeZone }: {
       <label>Data final<input type="date" required value={draft.to} onChange={(event) => setDraft({ ...draft, to: event.target.value })} /></label>
       <label>Vendedor (ID)<input value={draft.sellerId ?? ''} onChange={(event) => setDraft({ ...draft, sellerId: event.target.value || undefined })} /></label>
       <label>Cliente (ID)<input value={draft.clientId ?? ''} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || undefined })} /></label>
-      <div className="field-intelligence-actions"><button className="seller-button seller-primary">Aplicar filtros</button><button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button></div>
+      <div className="field-intelligence-actions"><button className="seller-button seller-primary">Aplicar filtros</button><button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button>{confirmed && <ReportExportActions view="pilot_metrics" filters={{ ...confirmed.filters }} disabled={state === 'loading'} />}</div>
     </form>
     {state === 'loading' && <p role="status" aria-live="polite">Atualizando métricas confirmadas…</p>}
     {(state === 'recoverable_error' || state === 'forbidden') && <div className="seller-notice seller-error" role="alert" tabIndex={-1} ref={alertRef}><strong>{state === 'forbidden' ? 'Acesso não autorizado.' : 'Atualização não concluída.'}</strong><p>{message}</p>{state === 'recoverable_error' && <button type="button" className="seller-button seller-secondary" onClick={() => void refresh()}>Tentar novamente</button>}</div>}

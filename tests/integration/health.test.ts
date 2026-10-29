@@ -1244,3 +1244,80 @@ it('serves the pending scrap agenda to authorized operational readers with stric
   });
   expect(unknown.status).toBe(422);
 });
+
+it('exports private CSV and XLSX reports with the same scoped filters', async () => {
+  const manager = actorManifest.actors.manager_a;
+  const seller = actorManifest.actors.seller_a;
+  if (!manager || !seller) throw new Error('Synthetic actors missing');
+  const authorization = { Authorization: `Bearer ${manager.accessToken}` };
+  const cases = [
+    ['management_day', 'serviceDate=2199-01-01', 0],
+    ['field_intelligence', 'section=stock&from=2199-01-01&to=2199-01-07', 0],
+    ['scrap_agenda', 'from=2199-01-01&to=2199-01-07&status=pending', 0],
+    ['pilot_metrics', 'from=2199-01-01&to=2199-01-07', 9],
+  ] as const;
+  for (const [view, filters, expectedRows] of cases) {
+    const response = await fetch(`${origin}/api/v1/reports/exports?view=${view}&format=csv&${filters}`, {
+      headers: authorization,
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(response.status, new TextDecoder().decode(bytes)).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/csv');
+    expect(response.headers.get('content-disposition')).toMatch(/^attachment; filename="cirne-[a-z0-9-]+\.csv"$/u);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('x-export-view')).toBe(view);
+    expect(response.headers.get('x-export-row-count')).toBe(String(expectedRows));
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(new TextDecoder().decode(bytes)).toContain('\r\n');
+  }
+
+  const xlsx = await fetch(`${origin}/api/v1/reports/exports?view=pilot_metrics&format=xlsx&from=2199-01-01&to=2199-01-07`, {
+    headers: authorization,
+  });
+  expect(xlsx.status).toBe(200);
+  expect(xlsx.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(Buffer.from(await xlsx.arrayBuffer()) as never);
+  const sheet = workbook.getWorksheet('Indicadores do piloto');
+  expect(sheet?.rowCount).toBe(10);
+  expect(sheet?.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 });
+  expect(sheet?.autoFilter).toBeTruthy();
+  sheet?.eachRow((row) => row.eachCell((cell) => expect(cell.type).not.toBe(ExcelJS.ValueType.Formula)));
+
+  const forbidden = await fetch(`${origin}/api/v1/reports/exports?view=management_day&format=csv&serviceDate=2199-01-01`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(forbidden.status).toBe(403);
+  expect(forbidden.headers.get('content-disposition')).toBeNull();
+
+  for (const query of [
+    'view=management_day&format=pdf&serviceDate=2199-01-01',
+    'view=management_day&view=pilot_metrics&format=csv&serviceDate=2199-01-01',
+    'view=management_day&format=csv&serviceDate=2199-01-01&sort=name',
+  ]) {
+    expect((await fetch(`${origin}/api/v1/reports/exports?${query}`, { headers: authorization })).status).toBe(422);
+  }
+});
+
+it('runs the report export CLI against the production server and writes only the explicit path', async () => {
+  const manager = actorManifest.actors.manager_a;
+  if (!manager) throw new Error('Synthetic manager missing');
+  const directory = await mkdtemp(path.join(tmpdir(), 'cirne-report-export-'));
+  const outputPath = path.join(directory, 'pilot.csv');
+  try {
+    const result = await runWithClosedInput(process.execPath, [
+      '--import', 'tsx', 'apps/cli/src/report-exports-cli.ts', '--url', origin,
+      '--view', 'pilot_metrics', '--format', 'csv', '--from', '2199-01-01', '--to', '2199-01-07',
+      '--output', outputPath, '--json',
+    ], { cwd: root, env: { ...process.env, CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken } });
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: 'ok', outputPath, rowCount: 9 });
+    expect([...new Uint8Array(await readFile(outputPath)).slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    await expect(runWithClosedInput(process.execPath, [
+      '--import', 'tsx', 'apps/cli/src/report-exports-cli.ts', '--url', origin,
+      '--view', 'pilot_metrics', '--format', 'csv', '--from', '2199-01-01', '--to', '2199-01-07',
+      '--output', outputPath,
+    ], { cwd: root, env: { ...process.env, CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken } })).rejects.toMatchObject({ code: 73 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

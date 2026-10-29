@@ -55,6 +55,7 @@
     "ops:field-intelligence": "tsx apps/cli/src/field-intelligence-cli.ts",
     "ops:scrap-agenda": "tsx apps/cli/src/scrap-agenda-cli.ts",
     "ops:pilot-metrics": "tsx apps/cli/src/pilot-metrics-cli.ts",
+    "ops:report:export": "tsx apps/cli/src/report-exports-cli.ts",
     "ops:visit:detail": "tsx apps/cli/src/visit-detail-cli.ts",
     "ops:navigation": "tsx apps/cli/src/navigation-cli.ts",
     "ops:visits": "tsx apps/cli/src/visits-cli.ts",
