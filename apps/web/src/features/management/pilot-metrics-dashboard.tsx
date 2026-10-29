@@ -30,14 +30,16 @@ function query(filters: PilotMetricsFilter, withCursor = false) {
   if (withCursor && filters.cursor) value.set('cursor', filters.cursor);
   return value;
 }
-function localDateTime(value: string | null, timeZone: string) {
-  return value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone }).format(new Date(value))
+function localDateTime(value: string | null, timeZone?: string) {
+  return value ? new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short', timeStyle: 'short', ...(timeZone ? { timeZone } : {}),
+  }).format(new Date(value))
     : 'Sem confirmação no período';
 }
 
 export function PilotMetricsDashboard({ initial, timeZone }: {
   initial: PilotMetricsInitialState;
-  timeZone: string;
+  timeZone?: string;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState(initial.filters);

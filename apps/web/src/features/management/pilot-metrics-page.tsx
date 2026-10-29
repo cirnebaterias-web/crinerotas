@@ -13,10 +13,11 @@ export async function PilotMetricsPage({ searchParams }: {
 }) {
   const parameters = await searchParams;
   const today = new Date().toISOString().slice(0, 10);
-  const timeZone = readServerConfig(process.env).OPERATIONAL_TIME_ZONE;
+  let timeZone: string | undefined;
   let selectedFilters: PilotMetricsFilter = { from: today, to: today };
   let initial: PilotMetricsInitialState;
   try {
+    timeZone = readServerConfig(process.env).OPERATIONAL_TIME_ZONE;
     const keys = ['from', 'to', 'sellerId', 'clientId', 'cursor'] as const;
     if (keys.some((key) => Array.isArray(parameters[key]))) {
       throw new RouteServiceFailure('VALIDATION_FAILED', 'Cada filtro deve ser informado uma única vez.', false);
