@@ -6,6 +6,12 @@ set local lock_timeout = '5s';
 
 grant usage, create on schema api, private to cirne_scrap_executor;
 
+do $ownership$
+begin
+  execute pg_catalog.format('grant cirne_scrap_executor to %I with set true granted by current_user', current_user);
+end
+$ownership$;
+
 create index pickup_schedules_agenda_order
   on api.pickup_schedules(
     desired_date,
@@ -200,5 +206,10 @@ grant execute on function api.get_scrap_agenda(date, date, text, text, uuid, uui
   to authenticated;
 
 revoke create on schema api, private from cirne_scrap_executor;
+do $ownership$
+begin
+  execute pg_catalog.format('revoke cirne_scrap_executor from %I granted by current_user', current_user);
+end
+$ownership$;
 notify pgrst, 'reload schema';
 commit;
