@@ -1,10 +1,13 @@
 import { z } from 'zod';
+import { competitorCommercialActionTypeSchema } from './commercial-action-types';
 export * from './scrap-revisions';
 export * from './client-reference';
 export * from './clients';
 export * from './client-imports';
 export * from './management-day';
 export * from './visit-detail';
+export * from './commercial-action-types';
+export * from './field-intelligence';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
 export type LiveResponse = z.infer<typeof liveResponseSchema>;
@@ -591,15 +594,6 @@ export const competitorPricesResultSchema = z.object({
   }
 });
 export type CompetitorPricesResult = z.infer<typeof competitorPricesResultSchema>;
-
-export const competitorCommercialActionTypeSchema = z.enum([
-  'differentiated_price',
-  'seller_or_driver_incentive',
-  'retailer_incentive',
-  'purchase_combo',
-  'other',
-]);
-export type CompetitorCommercialActionType = z.infer<typeof competitorCommercialActionTypeSchema>;
 
 export const commercialActionSchema = z.object({
   id: z.uuid(),

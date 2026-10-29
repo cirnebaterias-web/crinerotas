@@ -902,7 +902,9 @@ it('runs the real visit API through the CLI with canonical idempotent confirmati
     set local role cirne_visit_executor;
     update api.parameter_sets set status = 'retired'
       where id = '90000000-0000-4000-8000-000000000002' and status = 'published';
-    update api.parameter_sets set status = 'published'
+    update api.parameter_sets set status = 'published',
+      published_at = coalesce(published_at, clock_timestamp()),
+      published_by = coalesce(published_by, '${administrator.id}')
       where id = '90000000-0000-4000-8000-000000000001';
     reset role;
     revoke cirne_visit_executor from postgres granted by current_user;
@@ -1084,4 +1086,37 @@ it('refuses startup with an invalid required configuration without leaking its v
     expect(failure.stderr).toContain('Configuração inválida: APP_BASE_URL');
     expect(failure.stdout + failure.stderr).not.toContain('synthetic-secret-invalid-url');
   }
+});
+
+it('serves all field intelligence recuts only to an authorized scoped manager', async () => {
+  const manager = actorManifest.actors.manager_a;
+  const seller = actorManifest.actors.seller_a;
+  if (!manager || !seller) throw new Error('Synthetic actors missing');
+  const sections = ['stock', 'prices', 'actions', 'scrap', 'results'] as const;
+  for (const section of sections) {
+    const response = await fetch(`${origin}/api/v1/reports/field-intelligence?section=${section}&from=2199-01-01&to=2199-01-07`, {
+      headers: { Authorization: `Bearer ${manager.accessToken}` },
+    });
+    expect(response.status, section).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toMatchObject({ schemaVersion: 1, section, nextCursor: null });
+    expect(body.records).toEqual([]);
+    expect(JSON.stringify(body)).not.toMatch(/latitude|longitude|storagePath|signedUrl|idempotency/i);
+  }
+
+  const forbidden = await fetch(`${origin}/api/v1/reports/field-intelligence?section=stock`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(forbidden.status).toBe(403);
+
+  const invalid = await fetch(`${origin}/api/v1/reports/field-intelligence?section=stock&competitorId=10000000-0000-4000-8000-000000000001`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(invalid.status).toBe(422);
+
+  const duplicated = await fetch(`${origin}/api/v1/reports/field-intelligence?section=stock&section=results`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(duplicated.status).toBe(422);
 });

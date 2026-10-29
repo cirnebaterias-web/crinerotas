@@ -5,8 +5,8 @@
 | Campo | Valor |
 | --- | --- |
 | Produto | Cirne Rotas - Piloto Simplificado |
-| Versão | 0.5 |
-| Data | 20/10/2026 |
+| Versão | 0.6 |
+| Data | 28/10/2026 |
 | Status | Rascunho completo para revisão e aprovação de negócio |
 | Autoria | Morgan (Product Manager) |
 | Fonte principal | `BRIEFING_MESTRE_Cirne_Rotas_v0.1.docx` |
@@ -29,6 +29,7 @@
 | 03/09/2026 | 0.3 | PRD consolidado com requisitos, UX, premissas técnicas, epics, jornadas, dados, critérios de aceite, métricas, riscos, decisões, rastreabilidade e checklist. | Morgan (PM) |
 | 17/09/2026 | 0.4 | `AB-12` encerrada: somente o Gestor altera a composição publicada, com motivo, nova versão e histórico; o Vendedor apenas reordena pendências e não possui fluxo de solicitação no MVP. | Morgan (PM) |
 | 20/10/2026 | 0.5 | `AB-13` encerrada: planilha da Gestão Comercial/Administrativo definida como fonte oficial, atualização variável por upload autorizado, manutenção manual permitida e precedência sobre Orion condicionada à autorização do Gestor. | Morgan (PM) |
+| 28/10/2026 | 0.6 | `AB-16` encerrada: aprovado o corte mínimo de filtros, visões, colunas e periodicidade para inteligência de campo e agenda de sucata; exportação permanece P1. | Morgan (PM) / Gestão comercial |
 
 ## 1. Goals and Background Context
 
@@ -179,7 +180,7 @@ Cada requisito contém ID único, prioridade e maturidade. Regras dependentes de
 - **FR-048 [P0 | CONFIRMADO] - Agenda de sucata:** o Gestor deve consultar pendências por data, cliente, peso estimado e estado, mantendo coletado e agendado em blocos independentes. **Racional/regra:** transformar visita em agenda acionável sem construir logística completa.
 - **FR-049 [P1 | CONFIRMADO] - Exportação:** o sistema deve exportar CSV/XLSX a partir dos relatórios filtrados. **Racional/regra:** permitir análise operacional fora do painel durante o piloto.
 - **FR-050 [P1 | CONFIRMADO] - Mapa gerencial:** o sistema poderá exibir mapa de apoio com OpenStreetMap/Leaflet, sem bloquear planejamento ou análise caso esteja indisponível. **Racional/regra:** mapa é apoio visual e não núcleo do fluxo.
-- **FR-051 [P0 | EM ABERTO | AB-16] - Filtros e colunas:** o primeiro corte de filtros, colunas, periodicidade e exportações deve ser aprovado antes do dashboard final. **Racional/regra:** período, vendedor, cliente, cidade/região, concorrente, tipo de ação e estado do agendamento são candidatos, não uma decisão final de densidade.
+- **FR-051 [P0 | CONFIRMADO] - Filtros, visões e periodicidade:** o primeiro corte usa semana atual por padrão e intervalo personalizado; filtros comuns de período, vendedor e cliente; filtros de seção, concorrente e tipo de ação na inteligência; e data desejada e período manhã/tarde na agenda. Estoque, Preços, Ações, Sucata e Resultados permanecem em visões separadas; kg coletados e agendados nunca compartilham indicador; atualização ocorre ao abrir e por ação manual, com última confirmação do servidor visível. Cidade/região fica adiada até existir dado estruturado confiável, a agenda permanece somente em `Pendente` enquanto `AB-08` estiver aberto e CSV/XLSX continua P1. O acompanhamento é diário, com revisão semanal e consolidado final do piloto. **Racional/regra:** entregar leitura acionável sem aumentar densidade, ativar estados sem dono ou misturar fatos realizados e estimados.
 
 #### Auditoria e preservação histórica
 
@@ -1323,7 +1324,7 @@ Ausência de baseline não bloqueia a medição de adoção e confiabilidade, ma
 | GATE-P07 | Cotas gratuitas verificadas contra a carga estimada, com alertas e resposta a limite. |
 | GATE-P08 | Região, participantes, suporte, janela operacional e ritual semanal definidos. |
 
-`AB-16` pode ser fechado antes do painel correspondente e não precisa bloquear o primeiro teste controlado se o fluxo afetado permanecer desativado. `AB-12` foi encerrado em 17/09/2026.
+`AB-16` foi encerrado em 28/10/2026 pela `DEC-015`; a implementação do painel correspondente segue o corte aprovado sem bloquear o primeiro teste controlado enquanto o fluxo permanecer desativado. `AB-12` foi encerrado em 17/09/2026.
 
 ### 9.8 Final Decision Framework
 
@@ -1390,7 +1391,7 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | DEP-05 | OpenStreetMap/provedor de tiles | Mapa gerencial P1. | Recurso substituível e não bloqueante; observar atribuição e política de uso. |
 | DEP-06 | Dados de clientes | Importação controlada inicial, uploads posteriores autorizados em frequência variável e manutenção manual pelo Gestor. | `AB-13` encerrada; preservar o arquivo real fora do Git, exigir autorização nos uploads e conflitos com Orion e condicionar o uso aos demais gates de dados reais. |
 | DEP-07 | Dispositivos do piloto | Android, navegador, GPS, câmera e armazenamento local. | Definir matriz real e executar testes em AB-14. |
-| DEP-08 | Gestão comercial | Taxonomias, metas, validações e revisão semanal. | Nomear decisores e fechar AB-01/02/03/09/16/17. |
+| DEP-08 | Gestão comercial | Taxonomias, metas, validações e revisão semanal. | Nomear decisores e fechar AB-01/02/03/09/17; aplicar o corte de inteligência aprovado pela DEC-015. |
 | DEP-09 | Responsável pela sucata | Tratamento de pendências e SLA. | Fechar AB-07/08 antes de ativar estados operacionais. |
 | DEP-10 | Privacidade/Jurídico | Finalidade, aviso, retenção e acesso a evidências. | Fechar AB-15 e DATA-05 antes de dados reais. |
 
@@ -1412,6 +1413,7 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | DEC-012 | Piloto usará GitHub, Supabase e Vercel em planos gratuitos. | Decisão do negócio em 03/09/2026 | CONFIRMADO; substitui Hostinger/EasyPanel no piloto |
 | DEC-013 | Somente o Gestor altera a composição de rota publicada; a operação exige motivo, cria nova versão e histórico, preserva visitas iniciadas e atualiza o Vendedor com segurança na reconexão. O Vendedor apenas reordena pendências e não solicita alteração no MVP. | Decisão do negócio em 17/09/2026 (`AB-12`) | CONFIRMADO |
 | DEC-014 | A base oficial de clientes é a planilha atualizada pela Gestão Comercial ou pelo Administrativo. A carga usa a aba `Base clientes`, `CNPJ/CPF` como referência externa e `Endereço completo` como endereço canônico; a frequência é variável por upload autorizado e o Gestor pode cadastrar clientes manualmente. `Carteira Outros`, `Carteira Verificar` e `Sem classificação` ficam fora da carga normalizada; status `0` e `Sim` são ativos. Em conflito com Orion, prevalece a planilha somente mediante autorização do Gestor; não há integração automática com Orion. | Decisão do negócio e arquivo real fornecidos em 20/10/2026 (`AB-13`); detalhamento validado nas Stories 3.11–3.12 | CONFIRMADO |
+| DEC-015 | A inteligência usa semana atual por padrão e intervalo personalizado, com filtros comuns de período, vendedor e cliente; seção, concorrente e tipo de ação complementam a inteligência, enquanto data desejada e manhã/tarde complementam a agenda. Estoque, Preços, Ações, Sucata e Resultados ficam separados; kg coletados e agendados permanecem independentes. A leitura usa somente dados confirmados pelo servidor, atualizados ao abrir e manualmente, com cadência diária, revisão semanal e consolidado final. Cidade/região fica adiada até existir dado estruturado; a agenda mantém apenas `Pendente` até `AB-08`; exportação CSV/XLSX permanece P1 e reutilizará os filtros aprovados. | Decisão do negócio em 28/10/2026 (`AB-16`) | CONFIRMADO |
 
 ### 10.4 Prioritized Open Business Decisions
 
@@ -1432,9 +1434,8 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | Alta | AB-03 | Ações | Taxonomia final e obrigatoriedade de evidência. | Antes do campo | Gestão comercial |
 | Alta | AB-09 | Resultado | Resultados, motivos e campos de pedido/não visita. | Antes do campo | Gestão comercial |
 | Alta | AB-18 | Mídia | Supabase Storage ou alternativa e política de backup/recuperação. | Antes do deploy | Arquitetura + Privacidade |
-| Média | AB-16 | Relatórios | Filtros, colunas, exportações e periodicidade exata. | Antes do dashboard final | Gestão comercial |
 
-`AB-13` foi encerrada em 20/10/2026 pela `DEC-014`. O fechamento define origem e governança da importação, mas não autoriza carregar ou operar dados reais enquanto `AB-15`, perfis sensíveis, retenção, suporte e resposta a incidente permanecerem abertos.
+`AB-13` foi encerrada em 20/10/2026 pela `DEC-014`. O fechamento define origem e governança da importação, mas não autoriza carregar ou operar dados reais enquanto `AB-15`, perfis sensíveis, retenção, suporte e resposta a incidente permanecerem abertos. `AB-16` foi encerrada em 28/10/2026 pela `DEC-015`; exportação continua P1 e estados adicionais da agenda continuam condicionados ao `AB-08`.
 
 ### 10.5 Consolidated Technical and Data Gates
 
@@ -1619,7 +1620,7 @@ O PRD está forte em definição do problema, limites do MVP, jornadas, offline,
 
 #### Medium
 
-- Fechar filtros, colunas e periodicidade dos relatórios (`AB-16`).
+- Aplicar os filtros, visões e periodicidade aprovados na `DEC-015` sem antecipar exportação P1, cidade/região ou estados condicionados ao `AB-08`.
 - Confirmar WCAG 2.2 AA e os padrões UX-A01 a UX-A04.
 - Coletar baselines antes do início oficial.
 
@@ -1723,6 +1724,7 @@ O documento pode seguir para análise arquitetural e fechamento das decisões ab
 | `Docs/PACOTE_VISUAL_Cirne_Rotas_v0.1/` | Referência conceitual de telas, fluxo e identidade visual; dados ilustrativos não usados como requisitos. |
 | Decisão do negócio em 03/09/2026 | Uso de GitHub, Supabase e Vercel em planos gratuitos, substituindo Hostinger/EasyPanel no piloto. |
 | Decisão do negócio e `Base clientes.xlsx` fornecida em 20/10/2026 | Origem oficial, aba/campos canônicos, frequência variável, regras de carteira/status, cadastro manual e precedência autorizada da planilha sobre Orion (`AB-13`). O arquivo real permanece fora do Git. |
+| Decisão do negócio em 28/10/2026 | Corte mínimo de filtros, visões, atualização e periodicidade da inteligência e da agenda (`AB-16`), com exportação mantida como P1 e estados adicionais da agenda condicionados ao `AB-08`. |
 
 ### B.2 Approval Record
 

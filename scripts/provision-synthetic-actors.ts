@@ -278,6 +278,44 @@ async function activeRelationExists(
   return Array.isArray(value) && value.length > 0;
 }
 
+async function readSyntheticParameterSetStatus(
+  fetcher: typeof fetch,
+  status: LocalStatus,
+): Promise<'draft' | 'published' | 'retired' | null> {
+  const query = new URLSearchParams({
+    select: 'status', id: `eq.${syntheticParameterSetId}`, limit: '1',
+  });
+  const response = await fetcher(`${status.API_URL}/rest/v1/parameter_sets?${query}`, {
+    headers: restHeaders(status),
+  });
+  if (!response.ok) throw new Error(`Consulta de parameter_sets falhou (HTTP ${response.status}).`);
+  const value: unknown = await response.json();
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const first = value[0];
+  if (!isRecord(first) || !['draft', 'published', 'retired'].includes(String(first.status))) {
+    throw new Error('Conjunto sintético de parâmetros incompatível.');
+  }
+  return first.status as 'draft' | 'published' | 'retired';
+}
+
+async function readPublishedParameterSetId(
+  fetcher: typeof fetch,
+  status: LocalStatus,
+): Promise<string | null> {
+  const query = new URLSearchParams({ select: 'id', status: 'eq.published', limit: '1' });
+  const response = await fetcher(`${status.API_URL}/rest/v1/parameter_sets?${query}`, {
+    headers: restHeaders(status),
+  });
+  if (!response.ok) throw new Error(`Consulta de parameter_sets falhou (HTTP ${response.status}).`);
+  const value: unknown = await response.json();
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const first = value[0];
+  if (!isRecord(first) || typeof first.id !== 'string') {
+    throw new Error('Conjunto publicado de parâmetros incompatível.');
+  }
+  return first.id;
+}
+
 export async function provisionSyntheticActors(options: {
   fetcher?: typeof fetch;
   runner?: Run;
@@ -359,26 +397,34 @@ export async function provisionSyntheticActors(options: {
     updated_by: actors.manager_a.id,
   }, 'resolution=merge-duplicates,return=minimal');
 
-  await restWrite(fetcher, status, 'parameter_sets?on_conflict=id', {
-    id: syntheticParameterSetId,
-    version: 1,
-    status: 'draft',
-    valid_from: '2026-01-01T00:00:00.000Z',
-    published_at: null,
-    published_by: null,
-  }, 'resolution=merge-duplicates,return=minimal');
+  const parameterSetStatus = await readSyntheticParameterSetStatus(fetcher, status);
+  if (parameterSetStatus === null) {
+    await restWrite(fetcher, status, 'parameter_sets', {
+      id: syntheticParameterSetId,
+      version: 1,
+      status: 'draft',
+      valid_from: '2026-01-01T00:00:00.000Z',
+      published_at: null,
+      published_by: null,
+    });
 
-  await restWrite(fetcher, status, 'parameter_values?on_conflict=id', syntheticPriceParameters,
-    'resolution=merge-duplicates,return=minimal');
+  }
 
-  await restWrite(fetcher, status, 'parameter_sets?on_conflict=id', {
-    id: syntheticParameterSetId,
-    version: 1,
-    status: 'published',
-    valid_from: '2026-01-01T00:00:00.000Z',
-    published_at: '2026-01-01T00:00:00.000Z',
-    published_by: administratorId,
-  }, 'resolution=merge-duplicates,return=minimal');
+  if (parameterSetStatus === null || parameterSetStatus === 'draft') {
+    await restWrite(fetcher, status, 'parameter_values?on_conflict=id', syntheticPriceParameters,
+      'resolution=merge-duplicates,return=minimal');
+    const publishedParameterSetId = await readPublishedParameterSetId(fetcher, status);
+    if (publishedParameterSetId === null || publishedParameterSetId === syntheticParameterSetId) {
+      await restWrite(fetcher, status, 'parameter_sets?on_conflict=id', {
+        id: syntheticParameterSetId,
+        version: 1,
+        status: 'published',
+        valid_from: '2026-01-01T00:00:00.000Z',
+        published_at: '2026-01-01T00:00:00.000Z',
+        published_by: administratorId,
+      }, 'resolution=merge-duplicates,return=minimal');
+    }
+  }
 
   await restWrite(fetcher, status, 'clients?on_conflict=id', syntheticClientIds.map((id, index) => ({
     id,
