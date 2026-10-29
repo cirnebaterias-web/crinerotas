@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import type { CookieMethodsServer } from '@supabase/ssr';
 import { readServerConfig } from '@cirne/config/server';
-import type { PilotMetricsFilter } from '@cirne/contracts';
+import { pilotMetricsFilterSchema, type PilotMetricsFilter } from '@cirne/contracts';
 import { createCallerScopedClient, IdentityRequestError, resolveIdentityRequest } from '../../server/identity';
 import { getPilotMetrics, normalizePilotMetricsFilters } from '../../server/pilot-metrics/service';
 import { SupabasePilotMetricsRepository } from '../../server/pilot-metrics/supabase-repository';
@@ -13,18 +13,21 @@ export async function PilotMetricsPage({ searchParams }: {
 }) {
   const parameters = await searchParams;
   const today = new Date().toISOString().slice(0, 10);
+  const keys = ['from', 'to', 'sellerId', 'clientId', 'cursor'] as const;
+  const requestedFilters = Object.fromEntries(
+    keys.map((key) => [key, parameters[key] as string | undefined]),
+  );
   let timeZone: string | undefined;
   let selectedFilters: PilotMetricsFilter = { from: today, to: today };
   let initial: PilotMetricsInitialState;
   try {
-    timeZone = readServerConfig(process.env).OPERATIONAL_TIME_ZONE;
-    const keys = ['from', 'to', 'sellerId', 'clientId', 'cursor'] as const;
     if (keys.some((key) => Array.isArray(parameters[key]))) {
       throw new RouteServiceFailure('VALIDATION_FAILED', 'Cada filtro deve ser informado uma única vez.', false);
     }
-    const filters = normalizePilotMetricsFilters(
-      Object.fromEntries(keys.map((key) => [key, parameters[key] as string | undefined])), timeZone,
-    );
+    const requested = pilotMetricsFilterSchema.safeParse(requestedFilters);
+    if (requested.success) selectedFilters = requested.data;
+    timeZone = readServerConfig(process.env).OPERATIONAL_TIME_ZONE;
+    const filters = normalizePilotMetricsFilters(requestedFilters, timeZone);
     selectedFilters = filters;
     const store = await cookies();
     const cookieMethods: CookieMethodsServer = {
