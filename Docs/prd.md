@@ -5,8 +5,8 @@
 | Campo | Valor |
 | --- | --- |
 | Produto | Cirne Rotas - Piloto Simplificado |
-| Versão | 0.6 |
-| Data | 28/10/2026 |
+| Versão | 0.7 |
+| Data | 29/10/2026 |
 | Status | Rascunho completo para revisão e aprovação de negócio |
 | Autoria | Morgan (Product Manager) |
 | Fonte principal | `BRIEFING_MESTRE_Cirne_Rotas_v0.1.docx` |
@@ -30,6 +30,7 @@
 | 17/09/2026 | 0.4 | `AB-12` encerrada: somente o Gestor altera a composição publicada, com motivo, nova versão e histórico; o Vendedor apenas reordena pendências e não possui fluxo de solicitação no MVP. | Morgan (PM) |
 | 20/10/2026 | 0.5 | `AB-13` encerrada: planilha da Gestão Comercial/Administrativo definida como fonte oficial, atualização variável por upload autorizado, manutenção manual permitida e precedência sobre Orion condicionada à autorização do Gestor. | Morgan (PM) |
 | 28/10/2026 | 0.6 | `AB-16` encerrada: aprovado o corte mínimo de filtros, visões, colunas e periodicidade para inteligência de campo e agenda de sucata; exportação permanece P1. | Morgan (PM) / Gestão comercial |
+| 29/10/2026 | 0.7 | `DEC-016`: aplicação/PWA e BFF do piloto passam a usar VPS Contabo Linux exclusiva; GitHub e Supabase Cloud permanecem, e a direção Vercel da `DEC-012` é superada somente para hospedagem web. | Morgan (PM) / decisão do negócio |
 
 ## 1. Goals and Background Context
 
@@ -204,10 +205,10 @@ Cada requisito contém ID único, prioridade e maturidade. Regras dependentes de
 - **NFR-013 [P0 | CONFIRMADO] - Integridade de dados:** pesos e valores monetários devem preservar precisão decimal; coordenadas devem ser validadas; eventos offline devem possuir ID do aparelho e confirmação canônica do servidor.
 - **NFR-014 [P0 | CONFIRMADO] - Arquivos privados:** bytes de fotografias não podem ser armazenados no banco nem em sistema de arquivos efêmero; o armazenamento deve ser privado, persistente, isolado e coberto por backup externo testado.
 - **NFR-015 [P0 | EM ABERTO | AB-18] - Provedor de mídia:** o uso de armazenamento de objetos externo já no piloto ou de volume privado com backup externo depende de decisão técnica antes do deploy.
-- **NFR-016 [P0 | CONFIRMADO] - Plataformas do piloto:** o código-fonte e o histórico de versões devem ser mantidos no GitHub; os serviços de dados do piloto devem usar Supabase; e a aplicação web/PWA deve ser publicada na Vercel. **Restrição:** os três serviços devem permanecer em planos gratuitos durante o piloto.
-- **NFR-017 [P0 | CONFIRMADO] - Controle de custos e cotas:** consumo, armazenamento, transferência, execução e demais cotas relevantes dos planos gratuitos devem ser monitorados. Ultrapassagem de cota, ativação de cobrança ou migração para plano pago exige análise de impacto e aprovação explícita do negócio.
+- **NFR-016 [P0 | CONFIRMADO] - Plataformas do piloto:** o código-fonte e o histórico de versões devem ser mantidos no GitHub; PostgreSQL, Auth, RLS e Storage do piloto devem usar Supabase Cloud; e a aplicação web/PWA com seu BFF deve executar em VPS Contabo Linux exclusiva e independente do n8n. Distribuição/versão Linux, plano, região, domínio e credenciais devem ser confirmados no provisionamento e não podem ser presumidos pelo código.
+- **NFR-017 [P0 | CONFIRMADO] - Controle de custos e cotas:** consumo, armazenamento, transferência, execução e demais cotas ou recursos contratados relevantes devem ser monitorados. Ultrapassagem de cota, ativação de cobrança adicional ou migração de plano exige análise de impacto e aprovação explícita do negócio.
 - **NFR-018 [P0 | CONFIRMADO] - Isolamento do n8n:** Cirne Rotas deve usar projetos, dados, credenciais, segredos, armazenamento e fluxos críticos próprios nas plataformas aprovadas; nenhuma operação do piloto pode depender, modificar ou interromper o n8n existente.
-- **NFR-019 [P0 | CONFIRMADO] - Backup e recuperação:** banco e arquivos devem possuir procedimento de cópia e restauração testado compatível com as capacidades dos planos gratuitos, sem dependência do n8n.
+- **NFR-019 [P0 | CONFIRMADO] - Backup e recuperação:** banco e arquivos devem possuir procedimento de cópia e restauração testado compatível com as capacidades aprovadas dos provedores, sem dependência do n8n.
 - **NFR-020 [P0 | CONFIRMADO] - Observabilidade:** a solução deve expor health checks, logs correlacionáveis, métricas de sincronização, armazenamento, consumo de cotas e erros, com alertas operacionais proporcionais ao piloto.
 - **NFR-021 [P0 | EM ABERTO | AB-14] - Compatibilidade:** aparelhos, versões de Android/navegadores, câmera, GPS, instalação PWA e capacidade local mínima devem ser definidos antes do plano final de testes.
 - **NFR-022 [P0 | RECOMENDADO] - Estratégia de testes:** adotar pirâmide com testes unitários, integração e E2E dos fluxos críticos, incluindo cenários online/offline, idempotência, permissões e restauração; a arquitetura detalhará o desenho após aprovação.
@@ -348,7 +349,7 @@ O sistema deve preservar o conteúdo preenchido em erros de validação, conexã
 
 ## 4. Technical Assumptions
 
-Não foi encontrado um arquivo de preferências técnicas adicional no projeto. As premissas abaixo derivam do Briefing Mestre, da decisão posterior sobre GitHub/Supabase/Vercel e da Constituição AIOX. Decisões de arquitetura ainda não aprovadas estão identificadas como recomendações ou gates.
+Não foi encontrado um arquivo de preferências técnicas adicional no projeto. As premissas abaixo derivam do Briefing Mestre, das decisões posteriores sobre GitHub/Supabase e hospedagem do aplicativo em VPS Contabo Linux e da Constituição AIOX. Decisões de arquitetura ainda não aprovadas estão identificadas como recomendações ou gates.
 
 ### 4.1 Repository Structure: Monorepo
 
@@ -374,13 +375,13 @@ Estrutura conceitual sugerida, a ser detalhada pelo Arquiteto:
 | --- | --- | --- | --- |
 | Linguagem | TypeScript | CONFIRMADO pelo briefing | Compartilhamento de contratos e consistência entre PWA e backend. |
 | Frontend | Next.js + React | CONFIRMADO pelo briefing | PWA mobile-first para o Vendedor e painel responsivo para gestão. |
-| Hospedagem web | Vercel, plano gratuito | CONFIRMADO pelo negócio | Publicação da aplicação/PWA sem custo recorrente no piloto; cotas precisam ser monitoradas. |
+| Hospedagem web | VPS Contabo Linux exclusiva | CONFIRMADO pelo negócio (`DEC-016`) | Executa a aplicação/PWA e BFF em container, sem banco local e sem compartilhar infraestrutura com o n8n; plano, região e distribuição serão confirmados no provisionamento. |
 | Repositório | GitHub, plano gratuito | CONFIRMADO pelo negócio | Fonte de verdade para código, revisão, histórico e automações autorizadas. |
 | Banco de dados | PostgreSQL gerenciado pelo Supabase | CONFIRMADO quanto à plataforma | Preserva a direção relacional do briefing; extensões e capacidades necessárias devem ser validadas. |
 | Geodados | PostGIS ou capacidade geoespacial equivalente no Supabase | RECOMENDADO | Suporta distância e consultas geográficas sem criar serviço separado. |
 | Autenticação | Supabase Auth | RECOMENDADO | Reduz infraestrutura própria e mantém identidade integrada à autorização de dados. |
 | Arquivos | Supabase Storage privado | RECOMENDADO | Candidato para fotografias/evidências, condicionado a cotas, privacidade, backup e recuperação. |
-| Backend/API | Supabase-first ou camada Node/Next.js compatível com Vercel | EM ABERTO (`TA-01`) | O NestJS modular previsto no briefing precisa ser reavaliado diante da nova restrição de plataformas gratuitas. |
+| Backend/API | Supabase-first com BFF fino em Next.js | CONFIRMADO pela arquitetura | O NestJS fica fora do runtime do MVP; o BFF executa no mesmo container da aplicação na VPS. |
 | Offline | Service Worker + IndexedDB + fila durável | CONFIRMADO pelo briefing | Rota e visita precisam operar sem conexão e sincronizar com idempotência. |
 | Mapas | Leaflet/OpenStreetMap no painel; Google Maps por URL | CONFIRMADO | Mapa gerencial é P1; navegação é externa; nenhum mapa offline completo. |
 
@@ -388,15 +389,7 @@ Estrutura conceitual sugerida, a ser detalhada pelo Arquiteto:
 
 **Direção de produto:** uma única solução modular, sem microserviços, SaaS multiempresa ou dependência operacional do n8n.
 
-**Recomendação para investigação arquitetural:** arquitetura Supabase-first, com Next.js na Vercel e responsabilidades de dados, autenticação, armazenamento e políticas concentradas no Supabase, usando funções apenas quando regras privilegiadas ou integrações exigirem execução no servidor. Essa direção reduz componentes e tende a se adequar melhor ao limite de planos gratuitos.
-
-**Decisão pendente (`TA-01`):** confirmar se o NestJS será:
-
-1. retirado do piloto e substituído por capacidades Supabase/Next.js;
-2. adaptado para execução compatível com a Vercel; ou
-3. mantido apenas em uma fase posterior, mediante revisão de infraestrutura e custo.
-
-O PRD não escolhe entre essas opções. A decisão pertence à arquitetura e deve respeitar requisitos de autorização, idempotência, auditoria, observabilidade, operação offline e custo zero do piloto.
+**Decisão arquitetural (`TA-01`):** arquitetura Supabase-first, com BFF fino em Next.js no mesmo container da aplicação. Dados, autenticação, armazenamento e políticas permanecem concentrados no Supabase Cloud; NestJS fica fora do runtime do MVP. A decisão respeita autorização, idempotência, auditoria, observabilidade, operação offline e controle explícito de custo.
 
 ### 4.4 CLI-First and Operational Interfaces
 
@@ -444,11 +437,11 @@ Antes de qualquer merge ou entrega, os gates mínimos do projeto são `npm run l
 ### 4.7 Deployment and Environments
 
 - O GitHub será a fonte de verdade do código e das migrações.
-- A Vercel hospedará a aplicação/PWA em plano gratuito.
-- O Supabase hospedará os serviços de dados aprovados em plano gratuito.
+- A VPS Contabo Linux exclusiva hospedará a aplicação/PWA e o BFF em containers, sem banco local e sem qualquer dependência do n8n.
+- O Supabase Cloud hospedará os serviços de dados aprovados; suas cotas e condições vigentes serão conferidas antes do piloto.
 - Deploys devem ser automatizados, reproduzíveis e vinculados a versão/commit.
 - Ambientes de desenvolvimento e piloto não devem compartilhar dados reais ou segredos.
-- A estratégia de preview, staging e produção deve respeitar as quantidades de projetos e cotas disponíveis sem cobrança.
+- Não haverá preview remoto por pull request; desenvolvimento/homologação sintética e piloto devem segregar dados e segredos, com custos/cotas conferidos antes de provisionar recursos remotos.
 - Domínio customizado, se utilizado, deve ser configurado apenas mediante ordem de deploy e sem tornar o produto dependente do endereço histórico do briefing.
 - Nenhum deploy pode modificar ou reiniciar o n8n existente.
 
@@ -458,19 +451,19 @@ Antes de qualquer merge ou entrega, os gates mínimos do projeto são `npm run l
 - Logs devem possuir identificador correlacionável de requisição, visita e sincronização, sem expor segredos.
 - Métricas mínimas devem cobrir erros, latência, filas pendentes, falhas de sincronização, armazenamento e consumo de cotas.
 - Alertas devem priorizar perda/risco de dados, indisponibilidade, falha recorrente de sincronização e aproximação dos limites gratuitos.
-- O consumo dos planos gratuitos deve ser revisado antes do campo e durante o ritual semanal do piloto.
+- O consumo das cotas gratuitas e dos recursos contratados deve ser revisado antes do campo e durante o ritual semanal do piloto.
 - Qualquer necessidade de pagamento deve produzir estimativa, impacto, alternativa e decisão explícita do negócio antes da ativação.
 
 ### 4.9 Technical Gates for Architecture
 
 | ID | Decisão necessária | Gate | Dono proposto |
 | --- | --- | --- | --- |
-| TA-01 | Definir backend do piloto e destino do NestJS após adoção de Supabase/Vercel. | Antes da arquitetura aprovada | Arquiteto + Negócio |
+| TA-01 | Registrar e comprovar o backend Supabase-first com BFF fino Next.js, sem NestJS no MVP. | Resolvida na arquitetura; comprovar no runtime | Arquiteto + DevOps |
 | TA-02 | Confirmar quais serviços do Supabase serão usados: banco, Auth, Storage e/ou funções. | Antes do desenho de segurança | Arquiteto |
 | TA-03 | Confirmar monorepo e organização dos pacotes/aplicações. | Antes do scaffolding | Arquiteto |
-| TA-04 | Levantar cotas vigentes dos planos gratuitos e estimar consumo do piloto. | Antes do go/no-go técnico | Arquiteto + DevOps |
+| TA-04 | Levantar cotas/recursos vigentes de cada provedor e estimar consumo do piloto. | Antes do go/no-go técnico | Arquiteto + DevOps |
 | TA-05 | Definir backup, exportação e teste de restauração compatíveis com o plano gratuito. | Antes de dados reais | Arquiteto + Data Engineer |
-| TA-06 | Validar limites de execução da Vercel para sincronização, processamento de mídia e tarefas assíncronas. | Antes da implementação da API | Arquiteto |
+| TA-06 | Validar recursos e limites do runtime/container na VPS Contabo Linux para sincronização, mídia e operação do BFF. | Antes do primeiro deploy remoto | Arquiteto + DevOps |
 | TA-07 | Validar capacidade, compressão, retenção e recuperação de fotos no armazenamento escolhido. | Antes da política de evidência | Arquiteto + Negócio |
 | TA-08 | Definir ambientes/projetos, previews e segregação de segredos sem gerar cobrança. | Antes do primeiro deploy | DevOps |
 | TA-09 | Validar suporte geoespacial necessário e estratégia de distância/localização. | Antes do modelo físico de dados | Data Engineer + Arquiteto |
@@ -482,7 +475,7 @@ Os epics abaixo representam incrementos sequenciais de produto. Cada um deve ter
 
 | Epic | Título | Objetivo | Resultado implantável | Dependência |
 | --- | --- | --- | --- | --- |
-| Epic 1 | Fundação segura e acesso operacional | Estabelecer a base do produto no GitHub, Supabase e Vercel, com autenticação, papéis, migrações, CLI, qualidade, observabilidade e um fluxo mínimo verificável. | Aplicação publicada com health check/canário, login individual, autorização básica e operação reproduzível sem afetar o n8n. | Nenhuma |
+| Epic 1 | Fundação segura e acesso operacional | Estabelecer a base do produto no GitHub e Supabase, portável para VPS Linux, com autenticação, papéis, migrações, CLI, qualidade, observabilidade e um fluxo mínimo verificável. | Imagem de produção validada com health check/canário, login individual, autorização básica e operação reproduzível sem afetar o n8n. | Nenhuma |
 | Epic 2 | Planejamento e execução da rota diária | Permitir ao Gestor preparar/publicar a rota e ao Vendedor consultar clientes, escolher a próxima visita e abrir navegação externa. | Uma rota real pode ser importada/preparada, publicada, carregada no celular, consultada offline e executada em ordem flexível com histórico. | Epic 1 |
 | Epic 3 | Visita completa e sincronização confiável | Transformar cada atendimento em um registro único com início, Estoque, Concorrência, Sucata, Resultado, revisão, conclusão, exceções e sincronização idempotente. | O Vendedor conclui a visita online ou offline sem perder nem duplicar dados, e recebe confirmação coerente com o estado do servidor. | Epics 1-2 |
 | Epic 4 | Gestão, inteligência e avaliação do piloto | Consolidar execução, detalhes, mercado, sucata, administração essencial e indicadores para o Gestor avaliar o piloto e agir sobre pendências. | A gestão acompanha o dia, consulta visitas e inteligência, separa kg coletados/agendados, acompanha a agenda e mede os critérios de sucesso. | Epics 1-3 |
@@ -494,7 +487,7 @@ Os epics abaixo representam incrementos sequenciais de produto. Cada um deve ter
 **Escopo de produto em alto nível:**
 
 - repositório e fluxo de qualidade no GitHub;
-- ambientes e publicação da aplicação na Vercel;
+- imagem reproduzível e preparação da publicação da aplicação em VPS Linux exclusiva;
 - projeto de dados no Supabase;
 - login, bloqueio e papéis Vendedor/Gestor/Administrador;
 - base de autorização e auditoria;
@@ -1173,11 +1166,11 @@ Os critérios abaixo validam o comportamento do produto, não uma solução téc
 
 ### 8.8 Platform, Cost and Resilience
 
-#### AC-034 - Plano gratuito sem cobrança implícita
+#### AC-034 - Custo e cotas sem cobrança implícita
 
 **Rastreia:** NFR-016, NFR-017, TA-04.
 
-- **Dado** o ambiente do piloto em GitHub, Supabase e Vercel,
+- **Dado** o ambiente do piloto em GitHub, Supabase Cloud e VPS Contabo Linux,
 - **Quando** o consumo se aproximar de uma cota relevante ou uma mudança puder gerar cobrança,
 - **Então** a equipe deve receber sinalização e nenhuma ativação paga deve ocorrer sem análise de impacto e aprovação explícita.
 
@@ -1193,7 +1186,7 @@ Os critérios abaixo validam o comportamento do produto, não uma solução téc
 
 **Rastreia:** NFR-019, TA-05.
 
-- **Dado** o procedimento de backup aprovado para os planos gratuitos,
+- **Dado** o procedimento de backup aprovado para as capacidades vigentes dos provedores,
 - **Quando** um teste de restauração for executado em ambiente seguro,
 - **Então** banco, relacionamentos e arquivos necessários devem ser recuperados e a evidência do teste registrada.
 
@@ -1217,7 +1210,7 @@ Os critérios abaixo validam o comportamento do produto, não uma solução téc
 | Carga diária | 5-8 clientes por Vendedor/dia | REFERÊNCIA, não limite rígido |
 | Cobertura | Região limitada | EM ABERTO (`AB-17`) |
 | Revisão | Ritual semanal de dados, erros, preenchimento e ajustes | CONFIRMADO |
-| Plataformas | GitHub, Supabase e Vercel em planos gratuitos | CONFIRMADO pelo negócio |
+| Plataformas | GitHub, Supabase Cloud e VPS Contabo Linux exclusiva | CONFIRMADO pelo negócio (`DEC-016`) |
 | Suporte | Responsável, canal e horário a definir | EM ABERTO (`AB-17`) |
 
 ### 9.2 Metric Definitions
@@ -1263,7 +1256,7 @@ Estas métricas não possuem meta aprovada; servem para explicar os resultados e
 | LM-07 | Resultado comercial | Pedidos, oportunidades, reagendamentos e próximos passos por visita | Avaliar contribuição comercial sem atribuir causalidade não comprovada. |
 | LM-08 | Controles paralelos | Quantidade de planilhas, mensagens ou retrabalho ainda necessários | Avaliar redução de fragmentação. |
 | LM-09 | Saúde offline | Tamanho da fila, tempo pendente, tentativas, erros e recuperações | Avaliar robustez em campo. |
-| LM-10 | Consumo dos planos gratuitos | Uso e tendência das cotas relevantes por provedor | Antecipar bloqueio, degradação ou necessidade de aprovação de custo. |
+| LM-10 | Consumo de cotas e recursos | Uso e tendência das cotas/recursos relevantes por provedor | Antecipar bloqueio, degradação ou necessidade de aprovação de custo. |
 
 ### 9.5 Baselines Required Before the Pilot
 
@@ -1386,7 +1379,7 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | --- | --- | --- | --- |
 | DEP-01 | GitHub | Repositório, revisão e automação do projeto. | Conta/projeto, responsáveis, branch protection e CI/CD definidos em TA-10. |
 | DEP-02 | Supabase | Banco e serviços aprovados para o piloto. | Fechar TA-02/04/05/07/09 e manter projeto isolado. |
-| DEP-03 | Vercel | Publicação da PWA e eventual execução server-side aprovada. | Fechar TA-01/04/06/08 e validar canário. |
+| DEP-03 | Contabo | VPS Linux exclusiva para aplicação/PWA, BFF e Caddy; sem banco e sem n8n no host. | Confirmar plano/região/distribuição/domínio, fechar TA-04/05/06/08/10 e validar canário/rollback. |
 | DEP-04 | Google Maps | Navegação externa por URL. | Tratar indisponibilidade sem impedir o registro da visita. |
 | DEP-05 | OpenStreetMap/provedor de tiles | Mapa gerencial P1. | Recurso substituível e não bloqueante; observar atribuição e política de uso. |
 | DEP-06 | Dados de clientes | Importação controlada inicial, uploads posteriores autorizados em frequência variável e manutenção manual pelo Gestor. | `AB-13` encerrada; preservar o arquivo real fora do Git, exigir autorização nos uploads e conflitos com Orion e condicionar o uso aos demais gates de dados reais. |
@@ -1410,10 +1403,11 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 | DEC-009 | Localização será coletada em eventos necessários, sem rastreamento contínuo. | Briefing v0.1 | CONFIRMADO |
 | DEC-010 | Google Maps será aberto externamente; navegação dentro do app está fora do MVP. | Briefing v0.1 | CONFIRMADO |
 | DEC-011 | n8n não será compartilhado nem afetado pelo Cirne Rotas. | Briefing v0.1 | CONFIRMADO |
-| DEC-012 | Piloto usará GitHub, Supabase e Vercel em planos gratuitos. | Decisão do negócio em 03/09/2026 | CONFIRMADO; substitui Hostinger/EasyPanel no piloto |
+| DEC-012 | Piloto usará GitHub, Supabase e Vercel em planos gratuitos. | Decisão do negócio em 03/09/2026 | HISTÓRICO; superada pela `DEC-016` somente quanto à hospedagem web/Vercel |
 | DEC-013 | Somente o Gestor altera a composição de rota publicada; a operação exige motivo, cria nova versão e histórico, preserva visitas iniciadas e atualiza o Vendedor com segurança na reconexão. O Vendedor apenas reordena pendências e não solicita alteração no MVP. | Decisão do negócio em 17/09/2026 (`AB-12`) | CONFIRMADO |
 | DEC-014 | A base oficial de clientes é a planilha atualizada pela Gestão Comercial ou pelo Administrativo. A carga usa a aba `Base clientes`, `CNPJ/CPF` como referência externa e `Endereço completo` como endereço canônico; a frequência é variável por upload autorizado e o Gestor pode cadastrar clientes manualmente. `Carteira Outros`, `Carteira Verificar` e `Sem classificação` ficam fora da carga normalizada; status `0` e `Sim` são ativos. Em conflito com Orion, prevalece a planilha somente mediante autorização do Gestor; não há integração automática com Orion. | Decisão do negócio e arquivo real fornecidos em 20/10/2026 (`AB-13`); detalhamento validado nas Stories 3.11–3.12 | CONFIRMADO |
 | DEC-015 | A inteligência usa semana atual por padrão e intervalo personalizado, com filtros comuns de período, vendedor e cliente; seção, concorrente e tipo de ação complementam a inteligência, enquanto data desejada e manhã/tarde complementam a agenda. Estoque, Preços, Ações, Sucata e Resultados ficam separados; kg coletados e agendados permanecem independentes. A leitura usa somente dados confirmados pelo servidor, atualizados ao abrir e manualmente, com cadência diária, revisão semanal e consolidado final. Cidade/região fica adiada até existir dado estruturado; a agenda mantém apenas `Pendente` até `AB-08`; exportação CSV/XLSX permanece P1 e reutilizará os filtros aprovados. | Decisão do negócio em 28/10/2026 (`AB-16`) | CONFIRMADO |
+| DEC-016 | A aplicação web/PWA e o BFF do piloto executarão em VPS Contabo Linux exclusiva; GitHub permanece como fonte do código e Supabase Cloud permanece responsável por PostgreSQL, Auth, RLS e Storage. Não haverá banco ou n8n na VPS. Distribuição/versão Linux, plano, região, domínio e credenciais serão confirmados no provisionamento. | Decisão do negócio em 29/10/2026 | CONFIRMADO; substitui Vercel na `DEC-012` sem autorizar contratação, deploy ou dados reais |
 
 ### 10.4 Prioritized Open Business Decisions
 
@@ -1441,7 +1435,7 @@ O resultado do piloto autoriza apenas a decisão de próxima fase. Ele não auto
 
 Além das decisões `AB-*`, permanecem abertos:
 
-- `TA-01` a `TA-10`: arquitetura Supabase/Vercel, serviços, monorepo, cotas, backup, funções, mídia, ambientes, geodados e CI/CD.
+- `TA-01` a `TA-10`: runtime Supabase/VPS, serviços, monorepo, cotas, backup, funções, mídia, ambientes, geodados e CI/CD; decisões resolvidas em arquitetura ainda exigem evidência executável quando indicado.
 - `DATA-01` a `DATA-05`: visitas duplicadas, tolerância de horário, concorrência de edição, histórico de campos e descarte/anonimização.
 
 Esses gates podem ser resolvidos durante a arquitetura, desde que nenhum dado real, implementação afetada ou entrada em campo ocorra antes do respectivo limite.
@@ -1538,7 +1532,7 @@ Mudanças que introduzam plano pago, integração com Orion, logística completa
 | NFR-013 | 14.2 | Testes de validação e idempotência | 1, 3 |
 | NFR-014 | 15.3 | AC-026, AC-036 | 1, 3 |
 | NFR-015 | 15.3; AB-18 | TA-07 + GATE-P05 | 1, 3 |
-| NFR-016 | Decisão de 03/09/2026 | Canário em GitHub/Supabase/Vercel | 1 |
+| NFR-016 | `DEC-016`, decisão de 29/10/2026 | Canário em GitHub/Supabase Cloud/VPS Contabo Linux | 1, 4 |
 | NFR-017 | Decisão de 03/09/2026 | AC-034, LM-10 | 1-4 |
 | NFR-018 | 1.3; decisão preservada | AC-035 | 1-4 |
 | NFR-019 | 16 Backup | AC-036 | 1 |
@@ -1595,7 +1589,7 @@ O PRD está forte em definição do problema, limites do MVP, jornadas, offline,
 | 4. Functional Requirements | 89% | PARTIAL | Taxonomias e validações de campo permanecem abertas; `AB-12` foi encerrada e pode seguir para story detalhada. |
 | 5. Non-Functional Requirements | 82% | PARTIAL | Metas de desempenho, retenção, compatibilidade e capacidade das cotas ainda precisam de valores aprovados. |
 | 6. Epic & Story Structure | 68% | PARTIAL | Epics estão definidos; stories e critérios por story aguardam aprovação do PRD e autoridade do SM/PO. |
-| 7. Technical Guidance | 84% | PARTIAL | `TA-01` precisa resolver a divergência NestJS versus Supabase/Vercel. |
+| 7. Technical Guidance | 90% | PARTIAL | `TA-01` foi resolvida; faltam evidências remotas de provisionamento, backup, monitor, SMTP e rollback. |
 | 8. Cross-Functional Requirements | 88% | PARTIAL | Importação real, mídia, suporte, agenda e política de dados ainda dependem de gates. |
 | 9. Clarity & Communication | 91% | PASS | Aprovação formal e nomes dos responsáveis ainda não registrados. |
 
@@ -1603,7 +1597,7 @@ O PRD está forte em definição do problema, limites do MVP, jornadas, offline,
 
 #### Blockers
 
-1. **Arquitetura do backend (`TA-01`):** definir o papel de NestJS, Next.js e Supabase dentro da restrição Vercel/Supabase gratuitos.
+1. **Entrada remota (`TA-05/06/08/10`):** comprovar VPS Contabo, domínio, SMTP, segredos, backup externo, monitor, digest promovido e rollback antes do primeiro deploy/piloto.
 2. **Privacidade e retenção (`AB-15`, `DATA-05`):** aprovar finalidade, aviso, acesso, retenção, anonimização e descarte antes de dados reais.
 3. **Evidência e localização (`AB-10`, `AB-11`):** definir fotografia, raio, regra sem GPS e validação de exceções.
 4. **Dispositivos/offline (`AB-14`):** fechar aparelhos, navegadores e capacidade local para os testes finais.
@@ -1650,13 +1644,13 @@ O PRD está forte em definição do problema, limites do MVP, jornadas, offline,
 - As fronteiras de segurança, dados, offline e observabilidade estão claras.
 - O modelo conceitual suporta o piloto sem exigir microserviços.
 - O PRD evita contratos físicos prematuros e preserva decisões para o Arquiteto/Data Engineer.
-- O uso de planos gratuitos é restrição real, não premissa de capacidade ilimitada.
+- Cotas gratuitas e recursos contratados são restrições reais, não premissa de capacidade ilimitada.
 - A arquitetura deve produzir prova técnica do fluxo canário, idempotência, arquivo privado, RLS/autorização, backup e isolamento antes do desenvolvimento amplo.
 
 ### 12.6 Recommendations
 
 1. Realizar workshop curto de decisões de negócio para fechar os blockers `AB-*`.
-2. Encaminhar o PRD ao Arquiteto para resolver `TA-01` e produzir arquitetura Supabase/Vercel compatível com custo zero.
+2. Implementar e ensaiar a arquitetura Supabase Cloud + VPS Contabo Linux, sem promover remotamente antes dos gates da seção 20 da arquitetura.
 3. Validar privacidade, retenção, localização e fotografias antes de usar dados reais.
 4. Obter amostra do cadastro real e a matriz de dispositivos do piloto.
 5. Executar prova de conceito do caminho offline → reenvio → confirmação sem duplicidade.
@@ -1689,7 +1683,7 @@ O documento pode seguir para análise arquitetural e fechamento das decisões ab
 
 ### 13.3 Architect Prompt
 
-> Use o PRD `Docs/prd.md` para elaborar a arquitetura do piloto Cirne Rotas. Priorize CLI → observabilidade → UI; respeite GitHub, Supabase e Vercel em planos gratuitos; resolva `TA-01`; preserve PWA/offline, idempotência, auditoria, privacidade, backup, RLS/autorização e isolamento do n8n. Não implemente, não escolha regras de negócio abertas e registre decisões, trade-offs e validações de capacidade.
+> Use o PRD `Docs/prd.md` para manter a arquitetura do piloto Cirne Rotas. Priorize CLI → observabilidade → UI; respeite GitHub, Supabase Cloud e VPS Contabo Linux exclusiva; preserve PWA/offline, idempotência, auditoria, privacidade, backup, RLS/autorização e isolamento do n8n. Não escolha regras de negócio abertas e registre decisões, trade-offs e validações de capacidade.
 
 ### 13.4 Product Owner / Scrum Master Prompt
 
@@ -1725,6 +1719,7 @@ O documento pode seguir para análise arquitetural e fechamento das decisões ab
 | Decisão do negócio em 03/09/2026 | Uso de GitHub, Supabase e Vercel em planos gratuitos, substituindo Hostinger/EasyPanel no piloto. |
 | Decisão do negócio e `Base clientes.xlsx` fornecida em 20/10/2026 | Origem oficial, aba/campos canônicos, frequência variável, regras de carteira/status, cadastro manual e precedência autorizada da planilha sobre Orion (`AB-13`). O arquivo real permanece fora do Git. |
 | Decisão do negócio em 28/10/2026 | Corte mínimo de filtros, visões, atualização e periodicidade da inteligência e da agenda (`AB-16`), com exportação mantida como P1 e estados adicionais da agenda condicionados ao `AB-08`. |
+| Decisão do negócio em 29/10/2026 | Aplicação/PWA e BFF em VPS Contabo Linux exclusiva, mantendo GitHub e Supabase Cloud e superando a direção Vercel apenas para hospedagem web (`DEC-016`). |
 
 ### B.2 Approval Record
 

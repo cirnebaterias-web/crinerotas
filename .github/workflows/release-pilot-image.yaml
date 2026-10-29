@@ -1,0 +1,143 @@
+name: Release pilot image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-pilot
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  NEXT_TELEMETRY_DISABLED: "1"
+  APP_BASE_URL: http://127.0.0.1:3000
+  OPERATIONAL_TIME_ZONE: America/Sao_Paulo
+
+jobs:
+  release:
+    name: Validate and publish immutable image
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    steps:
+      - name: Checkout trusted commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install exact lockfile
+        run: |
+          npm install --global npm@11.17.0 --no-audit --no-fund
+          npm ci
+
+      - name: Run constitutional quality gates
+        run: |
+          npm run validate:port-denylist
+          npm run security:secrets
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Build image once for validation and publication
+        run: docker build --build-arg "CIRNE_RELEASE_SHA=$GITHUB_SHA" --target runtime --tag cirne-rotas-web:release-candidate --file infrastructure/docker/Dockerfile .
+
+      - name: Prepare synthetic pilot runtime
+        shell: bash
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/pilot.env"
+          printf '%s\n' \
+            'APP_BASE_URL=http://localhost:8080' \
+            'APP_DOMAIN=http://localhost' \
+            'ACME_EMAIL=ci@example.invalid' \
+            'OPERATIONAL_TIME_ZONE=America/Sao_Paulo' \
+            'NODE_ENV=production' \
+            'LOG_LEVEL=info' \
+            'SUPABASE_PUBLIC_URL=http://127.0.0.1:54321' \
+            'SUPABASE_PUBLISHABLE_KEY=sb_publishable_synthetic_ci_value' \
+            > "$RUNNER_TEMP/pilot.env"
+
+      - name: Start isolated pilot topology
+        env:
+          CIRNE_APP_IMAGE: cirne-rotas-web:release-candidate
+          CIRNE_ENV_FILE: ${{ runner.temp }}/pilot.env
+          APP_DOMAIN: http://localhost
+          ACME_EMAIL: ci@example.invalid
+          CIRNE_HTTP_PORT: "8080"
+          CIRNE_HTTPS_PORT: "8443"
+        run: docker compose -p cirne-rotas-release -f infrastructure/compose/compose.pilot.yaml up --wait --wait-timeout 120
+
+      - name: Verify proxy, privileges and canary
+        env:
+          CIRNE_APP_IMAGE: cirne-rotas-web:release-candidate
+          CIRNE_ENV_FILE: ${{ runner.temp }}/pilot.env
+          APP_DOMAIN: http://localhost
+          ACME_EMAIL: ci@example.invalid
+          CIRNE_HTTP_PORT: "8080"
+          CIRNE_HTTPS_PORT: "8443"
+        run: |
+          marker='synthetic-must-not-appear'
+          curl --fail --silent --show-error \
+            --header 'Host: localhost' \
+            --header "Authorization: Bearer $marker" \
+            "http://127.0.0.1:8080/api/v1/health/live?token=$marker"
+          docker compose -p cirne-rotas-release -f infrastructure/compose/compose.pilot.yaml exec -T app node -e "const fs=require('node:fs'); if(process.getuid()===0 || fs.existsSync('/var/run/docker.sock')) process.exit(1)"
+          docker compose -p cirne-rotas-release -f infrastructure/compose/compose.pilot.yaml exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          access_logs="$(docker compose -p cirne-rotas-release -f infrastructure/compose/compose.pilot.yaml logs --no-color caddy)"
+          case "$access_logs" in *"$marker"*) echo 'Sensitive marker reached Caddy logs.' >&2; exit 1;; esac
+          case "$access_logs" in *'"request_path":"/api/v1/health/live"'*) ;;
+            *) echo 'Sanitized access log was not emitted.' >&2; exit 1;; esac
+
+      - name: Publish commit image and capture digest
+        id: publish
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker tag cirne-rotas-web:release-candidate "$image"
+          docker push "$image"
+          immutable="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')"
+          case "$immutable" in
+            ghcr.io/*@sha256:*) ;;
+            *) echo 'Registry did not return an immutable digest.' >&2; exit 1 ;;
+          esac
+          echo "image=$immutable" >> "$GITHUB_OUTPUT"
+          echo "### Pilot image" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$immutable\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pilot topology diagnostics
+        if: failure()
+        env:
+          CIRNE_APP_IMAGE: cirne-rotas-web:release-candidate
+          CIRNE_ENV_FILE: ${{ runner.temp }}/pilot.env
+          APP_DOMAIN: http://localhost
+          ACME_EMAIL: ci@example.invalid
+          CIRNE_HTTP_PORT: "8080"
+          CIRNE_HTTPS_PORT: "8443"
+        run: docker compose -p cirne-rotas-release -f infrastructure/compose/compose.pilot.yaml logs --tail 100
+
+      - name: Stop isolated pilot topology
+        if: always()
+        env:
+          CIRNE_APP_IMAGE: cirne-rotas-web:release-candidate
+          CIRNE_ENV_FILE: ${{ runner.temp }}/pilot.env
+          APP_DOMAIN: http://localhost
+          ACME_EMAIL: ci@example.invalid
+          CIRNE_HTTP_PORT: "8080"
+          CIRNE_HTTPS_PORT: "8443"
+        run: docker compose -p cirne-rotas-release -f infrastructure/compose/compose.pilot.yaml down --volumes --remove-orphans

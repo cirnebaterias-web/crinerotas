@@ -1,0 +1,57 @@
+schema: 1
+story: '4.6'
+story_title: 'Preparação do ambiente de piloto na VPS Contabo Linux'
+gate: PASS
+status_reason: 'Os 12 critérios foram rastreados em produto, arquitetura, runtime, preflight, workflow e runbooks; os dois achados major do CodeRabbit foram corrigidos e a revisão final terminou sem findings. Todos os gates locais passaram, sem converter dependências remotas em aprovação do piloto.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'worktree-sha256:b26771186888396efcde4ba22cbf53025b7a9bcf805dabb098284c16d6e0f24d'
+updated: '2026-10-29T10:25:10-03:00'
+expires: '2026-11-12T10:25:10-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1282
+  risks_identified: 0
+  current_run:
+    unit_passed: 432
+    unit_skipped: 1
+    pgtap_passed: 750
+    integration_passed: 25
+    e2e_passed: 75
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    port_denylist: PASS
+    secretlint: PASS
+    actionlint: PASS
+    compose_caddy_canary: PASS
+    non_root_no_docker_socket: PASS
+    isolated_network_and_egress: PASS
+    sanitized_access_log: PASS
+    graceful_stop_and_controlled_return: PASS
+    coderabbit: 'PASS: primeira revisão encontrou 2 major válidos, ambos corrigidos; segunda revisão encerrou com 0 findings.'
+    architect_gate: PASS
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Somente Caddy publica 80/443; aplicação não-root, sem socket, sem segredo no artefato/log e preflight fail-closed para digest, commit e evidências externas.'
+  performance:
+    status: PASS
+    notes: 'Limites de CPU/memória/PIDs e rotação de logs estão declarados; capacidade real permanece corretamente condicionada à medição da VPS provisionada.'
+  reliability:
+    status: PASS
+    notes: 'Health checks, restart, encerramento gracioso, imagem anterior compatível e runbooks foram exercitados localmente sem reversão destrutiva de schema.'
+  maintainability:
+    status: PASS
+    notes: 'Compose, Caddy, preflight tipado/testado, workflow manual e runbooks têm responsabilidades separadas e saídas operacionais observáveis.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Executar o preflight de deploy e fechar VPS, DNS/TLS, SMTP, segredos, backup/restauração, monitor, cotas e rollback remoto antes do go/no-go.'
+      refs:
+        - 'Docs/runbooks/pilot-readiness-contabo.md'
+        - 'Docs/runbooks/deploy-contabo.md'
