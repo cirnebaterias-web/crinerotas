@@ -11,6 +11,8 @@ import {
   filterManagementRoutes, managementAttentionQueue, resolvedStopCount, routeClosureLabel, routeDailyState,
 } from './management-day-model';
 import { ReportExportActions } from './report-export-actions';
+import { ManagementMapPanel } from './management-map-panel';
+import type { ManagementMapPublicConfig } from '@cirne/config/server';
 
 export type ManagementDayInitialState =
   | { kind: 'ready' | 'empty'; serviceDate: string; result: ManagementDayResponse }
@@ -94,7 +96,10 @@ function StopInspector({ route, selectedStopId, selectedVisitId, open, onSelect,
   </aside>;
 }
 
-export function ManagementDayDashboard({ initial }: { initial: ManagementDayInitialState }) {
+export function ManagementDayDashboard({ initial, mapConfig = { enabled: false, reason: 'unconfigured' } }: {
+  initial: ManagementDayInitialState;
+  mapConfig?: ManagementMapPublicConfig;
+}) {
   const router = useRouter();
   const [selectedDate, setSelectedDate] = useState(initial.serviceDate);
   const [confirmed, setConfirmed] = useState(initial.kind === 'ready' || initial.kind === 'empty' ? initial.result : null);
@@ -228,6 +233,8 @@ export function ManagementDayDashboard({ initial }: { initial: ManagementDayInit
         <article className="management-summary-attention"><span>Requer atenção</span><strong>{attentionQueue.length}</strong></article>
       </section>
       <div className="management-freshness"><p>Última atualização conhecida: <strong>{localDateTime(confirmed.lastKnownUpdateAt)}</strong></p><p>{confirmed.serverVisibilityNote}</p></div>
+      <ManagementMapPanel key={`${confirmed.serviceDate}:${confirmed.generatedAt}`}
+        serviceDate={confirmed.serviceDate} config={mapConfig} />
       {confirmed.availability === 'empty' ? <section className="seller-state" aria-live="polite"><h2>Nenhuma rota publicada nesta data</h2><p>Selecione outra data ou atualize após a publicação das rotas.</p></section>
         : confirmed.schemaVersion === 1 ? <LegacyRoutes result={confirmed} />
           : <><section className="management-local-filters" aria-label="Filtros locais"><label>Buscar vendedor ou cliente<input type="search" value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Digite um nome" /></label><label className="management-attention-toggle"><input type="checkbox" checked={onlyAttention} onChange={(event) => {

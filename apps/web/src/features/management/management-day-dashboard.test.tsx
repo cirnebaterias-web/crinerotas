@@ -55,6 +55,8 @@ describe('management day dashboard', () => {
     expect(html).toContain('Requer atenção');
     expect(html).toContain('1 envio pendente');
     expect(html).toContain('itens ainda apenas no aparelho não são visíveis');
+    expect(html).toContain('Mapa de apoio');
+    expect(html).toContain('Mostrar mapa');
     expect(html).not.toContain('latitude');
     expect(html).not.toContain('photoUrl');
     expect(html).not.toContain('payload');

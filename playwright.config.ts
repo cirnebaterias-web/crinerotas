@@ -28,6 +28,8 @@ export default defineConfig({
       APP_BASE_URL: baseURL,
       PORT: String(port),
       NEXT_TELEMETRY_DISABLED: '1',
+      MANAGEMENT_MAP_TILE_URL: 'https://tiles.example.test/{z}/{x}/{y}.png',
+      MANAGEMENT_MAP_ATTRIBUTION: 'Tiles sintéticos E2E',
     },
   },
 });

@@ -5,6 +5,7 @@ export * from './client-reference';
 export * from './clients';
 export * from './client-imports';
 export * from './management-day';
+export * from './management-map';
 export * from './visit-detail';
 export * from './commercial-action-types';
 export * from './field-intelligence';

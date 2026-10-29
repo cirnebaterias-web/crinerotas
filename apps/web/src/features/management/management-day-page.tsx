@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import type { CookieMethodsServer } from '@supabase/ssr';
 import { managementServiceDateSchema } from '@cirne/contracts';
-import { readServerConfig } from '@cirne/config/server';
+import { readManagementMapConfig, readServerConfig } from '@cirne/config/server';
 import { createCallerScopedClient, IdentityRequestError, resolveIdentityRequest } from '../../server/identity';
 import { getManagementDay, managementCurrentDate } from '../../server/management-day/service';
 import { SupabaseManagementDayRepository } from '../../server/management-day/supabase-repository';
@@ -54,5 +54,5 @@ export async function ManagementDayPage({
   const dashboardKey = initial.kind === 'ready' || initial.kind === 'empty'
     ? `${initial.serviceDate}:${initial.result.generatedAt}`
     : `${initial.serviceDate}:${initial.kind}`;
-  return <ManagementDayDashboard key={dashboardKey} initial={initial} />;
+  return <ManagementDayDashboard key={dashboardKey} initial={initial} mapConfig={readManagementMapConfig(process.env)} />;
 }

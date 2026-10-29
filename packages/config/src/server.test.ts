@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readEvidenceConfig, readIdentityConfig, readServerConfig } from './server';
+import { readEvidenceConfig, readIdentityConfig, readManagementMapConfig, readServerConfig } from './server';
 import * as publicConfig from './public';
 
 describe('configuration boundaries', () => {
@@ -51,5 +51,25 @@ describe('configuration boundaries', () => {
       .toMatchObject({ EVIDENCE_REMOTE_SYNC_ENABLED: true });
     expect(() => readEvidenceConfig({ EVIDENCE_REMOTE_SYNC_ENABLED: 'yes' }))
       .toThrow('EVIDENCE_REMOTE_SYNC_ENABLED');
+  });
+  it('validates the optional credential-free HTTPS map provider as an atomic pair', () => {
+    expect(readManagementMapConfig({})).toEqual({ enabled: false, reason: 'unconfigured' });
+    expect(readManagementMapConfig({
+      MANAGEMENT_MAP_TILE_URL: 'https://tiles.example.test/{z}/{x}/{y}.png',
+      MANAGEMENT_MAP_ATTRIBUTION: 'Dados cartográficos de exemplo',
+    })).toEqual({ enabled: true, tileUrl: 'https://tiles.example.test/{z}/{x}/{y}.png',
+      attribution: 'Dados cartográficos de exemplo' });
+    const credentialedTileUrl = `https://${['user', 'secret'].join(':')}@tiles.example.test/{z}/{x}/{y}.png`;
+    for (const tileUrl of [
+      'http://tiles.example.test/{z}/{x}/{y}.png',
+      credentialedTileUrl,
+      'https://tiles.example.test/{z}/{x}.png',
+      'https://tiles.example.test/{z}/{x}/{y}.png?token=secret',
+    ]) expect(readManagementMapConfig({
+      MANAGEMENT_MAP_TILE_URL: tileUrl, MANAGEMENT_MAP_ATTRIBUTION: 'Exemplo',
+    })).toEqual({ enabled: false, reason: 'invalid' });
+    expect(readManagementMapConfig({
+      MANAGEMENT_MAP_TILE_URL: 'https://tiles.example.test/{z}/{x}/{y}.png',
+    })).toEqual({ enabled: false, reason: 'invalid' });
   });
 });

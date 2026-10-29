@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { productName } from '@cirne/config/public';
+import 'leaflet/dist/leaflet.css';
 import './styles.css';
 
 export const metadata = {
