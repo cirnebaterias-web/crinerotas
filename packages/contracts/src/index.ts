@@ -781,6 +781,41 @@ export const pickupScheduleSchema = z.object({
 }).strict();
 export type PickupSchedule = z.infer<typeof pickupScheduleSchema>;
 
+const scrapAgendaCursorSchema = z.string().regex(/^[A-Za-z0-9_-]{8,1024}$/u);
+const scrapAgendaFilterObjectSchema = z.object({
+  from: z.iso.date(),
+  to: z.iso.date(),
+  status: z.literal('pending').default('pending'),
+  period: scrapPeriodSchema.optional(),
+  sellerId: z.uuid().optional(),
+  clientId: z.uuid().optional(),
+  cursor: scrapAgendaCursorSchema.optional(),
+}).strict();
+export const scrapAgendaFilterSchema = scrapAgendaFilterObjectSchema.superRefine((filters, context) => {
+  if (filters.from > filters.to) {
+    context.addIssue({ code: 'custom', path: ['to'], message: 'A data final deve ser igual ou posterior à inicial.' });
+  }
+});
+export type ScrapAgendaFilter = z.infer<typeof scrapAgendaFilterSchema>;
+
+export const scrapAgendaResponseSchema = z.object({
+  schemaVersion: z.literal(1),
+  filters: scrapAgendaFilterObjectSchema.omit({ cursor: true }),
+  generatedAt: z.iso.datetime({ offset: true }),
+  lastServerConfirmedAt: z.iso.datetime({ offset: true }).nullable(),
+  indicators: z.object({
+    records: z.number().int().nonnegative(),
+    scheduledKg: nonNegativeDecimalSchema,
+  }).strict(),
+  records: z.array(pickupScheduleSchema).max(50),
+  nextCursor: scrapAgendaCursorSchema.nullable(),
+  serverVisibilityNote: z.literal(
+    'Somente agendamentos recebidos e confirmados pelo servidor estão incluídos; conteúdo ainda apenas no aparelho não é conhecido.',
+  ),
+}).strict();
+export type ScrapAgendaResponse = z.infer<typeof scrapAgendaResponseSchema>;
+export const scrapAgendaPath = '/api/v1/pickup-schedules';
+
 export const confirmScrapReceiptRequestSchema = z.object({
   schemaVersion: z.literal(1), expectedVersion: z.number().int().positive(),
   receivedWeightKg: positiveScrapWeightSchema,

@@ -1120,3 +1120,48 @@ it('serves all field intelligence recuts only to an authorized scoped manager', 
   });
   expect(duplicated.status).toBe(422);
 });
+
+it('serves the pending scrap agenda to authorized operational readers with strict filters', async () => {
+  const manager = actorManifest.actors.manager_a;
+  const seller = actorManifest.actors.seller_a;
+  const administrator = actorManifest.actors.administrator;
+  const logistics = actorManifest.actors.logistics_a;
+  if (!manager || !seller || !administrator || !logistics) throw new Error('Synthetic actors missing');
+
+  for (const actor of [manager, administrator, logistics]) {
+    const response = await fetch(`${origin}/api/v1/pickup-schedules?from=2199-01-01&to=2199-01-07&period=morning`, {
+      headers: { Authorization: `Bearer ${actor.accessToken}` },
+    });
+    const responseText = await response.text();
+    expect(response.status, responseText).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    const body = JSON.parse(responseText) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      schemaVersion: 1,
+      filters: { from: '2199-01-01', to: '2199-01-07', status: 'pending', period: 'morning' },
+      indicators: { records: 0, scheduledKg: '0' },
+      records: [], nextCursor: null,
+    });
+    expect(JSON.stringify(body)).not.toMatch(/actualWeight|receivedWeight|latitude|longitude|storagePath|signedUrl|payload|idempotency/i);
+  }
+
+  const forbidden = await fetch(`${origin}/api/v1/pickup-schedules`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(forbidden.status).toBe(403);
+
+  const invalidState = await fetch(`${origin}/api/v1/pickup-schedules?status=completed`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(invalidState.status).toBe(422);
+
+  const duplicated = await fetch(`${origin}/api/v1/pickup-schedules?period=morning&period=afternoon`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(duplicated.status).toBe(422);
+
+  const unknown = await fetch(`${origin}/api/v1/pickup-schedules?sort=weight`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(unknown.status).toBe(422);
+});

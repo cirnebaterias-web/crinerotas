@@ -52,6 +52,7 @@
     "ops:clients": "tsx apps/cli/src/clients-cli.ts",
     "ops:management:day": "tsx apps/cli/src/management-day-cli.ts",
     "ops:field-intelligence": "tsx apps/cli/src/field-intelligence-cli.ts",
+    "ops:scrap-agenda": "tsx apps/cli/src/scrap-agenda-cli.ts",
     "ops:visit:detail": "tsx apps/cli/src/visit-detail-cli.ts",
     "ops:navigation": "tsx apps/cli/src/navigation-cli.ts",
     "ops:visits": "tsx apps/cli/src/visits-cli.ts",
