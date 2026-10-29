@@ -60,4 +60,21 @@ test.describe('pilot metrics manager journey', () => {
     await expect(alert).toBeFocused();
     await expect(page.getByLabel('Nove métricas do piloto').locator('article')).toHaveCount(9);
   });
+
+  test('remounts the dashboard and removes stale cards when the normalized filter changes', async ({ page }) => {
+    await page.route('**/api/v1/reports/pilot-metrics?*', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+    });
+    await page.goto('/management/pilot?from=2026-10-26&to=2026-11-01');
+    await page.getByRole('button', { name: 'Atualizar agora' }).click();
+    await expect(page.getByLabel('Nove métricas do piloto').locator('article')).toHaveCount(9);
+
+    await page.getByLabel('Data inicial').fill('2026-10-27');
+    await page.getByLabel('Data final').fill('2026-11-02');
+    await page.getByRole('button', { name: 'Aplicar filtros' }).click();
+
+    await expect(page).toHaveURL(/from=2026-10-27&to=2026-11-02/);
+    await expect(page.getByLabel('Nove métricas do piloto')).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.locator('.seller-notice.seller-error')).toContainText('Acesso não autorizado.');
+  });
 });

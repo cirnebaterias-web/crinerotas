@@ -46,5 +46,8 @@ export async function PilotMetricsPage({ searchParams }: {
         : 'As métricas do piloto estão temporariamente indisponíveis. Tente novamente.';
     initial = { kind: forbidden ? 'forbidden' : 'recoverable_error', filters: selectedFilters, message };
   }
-  return <PilotMetricsDashboard initial={initial} />;
+  const key = initial.kind === 'ready' || initial.kind === 'empty'
+    ? `${initial.filters.from}:${initial.filters.to}:${initial.filters.sellerId ?? ''}:${initial.filters.clientId ?? ''}:${initial.result.generatedAt}`
+    : `${initial.filters.from}:${initial.filters.to}:${initial.filters.sellerId ?? ''}:${initial.filters.clientId ?? ''}:${initial.kind}`;
+  return <PilotMetricsDashboard key={key} initial={initial} />;
 }
