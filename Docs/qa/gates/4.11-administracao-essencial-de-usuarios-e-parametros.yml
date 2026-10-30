@@ -1,0 +1,54 @@
+schema: 1
+story: '4.11'
+story_title: 'Administração essencial de usuários e parâmetros'
+gate: PASS
+status_reason: 'Os 12 critérios estão cobertos por projeção sanitizada, RPCs caller-scoped, concorrência/idempotência/auditoria, CLI e workspace desktop-first. Auth e edição de taxonomias permanecem fechados; não restou achado CodeRabbit nem vulnerabilidade produtiva conhecida.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'product-tree-sha256:8c5549338936af4cddad2da4d31def77ea76ab63e6e393370ab682dd619ebdfa'
+updated: '2026-10-30T13:17:35Z'
+expires: '2026-11-13T13:17:35Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1453
+  risks_identified: 0
+  current_run:
+    lint: PASS
+    typecheck: PASS
+    unit_passed: 491
+    unit_skipped: 1
+    production_build: PASS
+    pgtap_passed: 848
+    administration_pgtap_passed: 43
+    integration_passed: 29
+    e2e_scenarios_covered: 85
+    e2e_administration_passed: 3
+    migration_rollback_reapply: PASS
+    secretlint: PASS
+    production_audit_vulnerabilities: 0
+    git_diff_check: PASS
+    coderabbit: 'PASS: 5 achados válidos corrigidos; revisão final terminou com 0 findings em 27 arquivos.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Administrador ativo e identity.manage são exigidos no serviço e na RPC. Executor não autentica nem ignora RLS; projeção exclui Auth, segredos e dados de campo.'
+  performance:
+    status: PASS
+    notes: 'Consulta única e projeção limitada; busca e agrupamento são locais. Lista e editor desktop não dependem de service-role nem chamadas por linha.'
+  reliability:
+    status: PASS
+    notes: 'Versão otimista, idempotência, lock do conjunto administrativo, auditoria e reload em conflito evitam sobrescrita silenciosa. Falha preserva o último snapshot confirmado.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato, serviço, repositório, handlers, CLI, estado de UI, workspace, migração e rollback têm responsabilidades separadas e testes em camadas.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Definir SMTP, política de convite e recuperação antes de incluir provisionamento real de Auth.'
+      refs: ['Docs/stories/4.11.story.md']
+    - action: 'Somente liberar edição/publicação das taxonomias após fechar AB-02, AB-03 e AB-09.'
+      refs: ['Docs/stories/4.11.story.md']
