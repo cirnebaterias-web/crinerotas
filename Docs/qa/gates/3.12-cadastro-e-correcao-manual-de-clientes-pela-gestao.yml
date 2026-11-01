@@ -4,7 +4,7 @@ story_title: 'Cadastro e correção manual de clientes pela gestão'
 gate: CONCERNS
 status_reason: 'O hardening pós-merge está funcionalmente aprovado e não possui achados de revisão. O audit tem 0 vulnerabilidades críticas, mas conserva 5 altas herdadas da cadeia Serwist/Zod cuja correção automática é incompatível.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'de9836cadbc7ffd829df983ef0b44f124f3d3613'
+reviewed_revision: 'fbfa18b95d75de5414ea45eadf7cb5695c78c04d'
 updated: '2026-11-01T17:01:34-03:00'
 expires: '2026-11-15T17:01:34-03:00'
 top_issues:
@@ -20,12 +20,12 @@ top_issues:
 waiver: { active: false }
 quality_score: 90
 evidence:
-  tests_reviewed: 488
+  tests_reviewed: 1192
   code_review: 'CodeRabbit full review: 0 findings across 8 changed files'
   current_run:
     unit_passed: 432
     unit_skipped: 1
-    pgtap_passed: 47
+    pgtap_passed: 751
     controlled_e2e_passed: 9
     lint: PASS
     typecheck: PASS
