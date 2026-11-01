@@ -1,43 +1,67 @@
 schema: 1
 story: '3.12'
 story_title: 'Cadastro e correção manual de clientes pela gestão'
-gate: PASS
-status_reason: 'A busca e a paginação server-side eliminam o limite operacional dos primeiros 100 clientes sem ampliar o escopo autorizado. Contratos, banco, integração e jornada visual estão aprovados, inclusive para cliente além da centésima posição.'
+gate: CONCERNS
+status_reason: 'O hardening pós-merge está funcionalmente aprovado e não possui achados de revisão. O audit tem 0 vulnerabilidades críticas, mas conserva 5 altas herdadas da cadeia Serwist/Zod cuja correção automática é incompatível.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'sha256:68fdea2f5f1b225c1d21ebce22b3290a255169c058c1a579f6e115f9af0fdaea'
-updated: '2026-10-20T11:24:00-03:00'
-expires: '2026-11-03T11:24:00-03:00'
-top_issues: []
+reviewed_revision: 'de9836cadbc7ffd829df983ef0b44f124f3d3613'
+updated: '2026-11-01T17:01:34-03:00'
+expires: '2026-11-15T17:01:34-03:00'
+top_issues:
+  - id: 'SEC-DEPENDENCIES-001'
+    severity: high
+    finding: 'npm audit reporta 5 vulnerabilidades altas e 18 moderadas herdadas, concentradas em @serwist/next, @serwist/cli e dependências transitivas Zod/glob; não há vulnerabilidade crítica.'
+    suggested_action: 'Validar uma atualização compatível do Serwist ou override seguro de Zod em story de dependências; não aplicar o downgrade/major automático sem regressão específica de PWA.'
+    suggested_owner: devops
+    refs:
+      - 'package.json'
+      - 'apps/web/package.json'
+      - 'package-lock.json'
 waiver: { active: false }
-quality_score: 100
+quality_score: 90
 evidence:
-  tests_reviewed: 959
-  code_review: 'CodeRabbit full review: 0 findings across 10 changed files'
+  tests_reviewed: 488
+  code_review: 'CodeRabbit full review: 0 findings across 8 changed files'
+  current_run:
+    unit_passed: 432
+    unit_skipped: 1
+    pgtap_passed: 47
+    controlled_e2e_passed: 9
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    port_denylist: PASS
+    secret_scan: PASS
+    critical_vulnerabilities: 0
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     ac_gaps: []
 risk_summary:
   totals:
     critical: 0
-    high: 0
+    high: 1
     medium: 0
     low: 0
-  highest: null
+  highest: high
 nfr_validation:
   security:
-    status: PASS
-    notes: 'A nova RPC exige clients.read, preserva o recorte por papel e scopeIds, mantém grants mínimos e não expõe clientes fora da abrangência.'
+    status: CONCERNS
+    notes: 'O patch preserva autorização e escopo, limita expectedVersion antes da conversão integer e executa em Next.js 16.4.3. O audit tem 0 críticos, 5 altos e 18 moderados herdados da cadeia Serwist/Zod.'
   performance:
     status: PASS
     notes: 'Busca e contagem ocorrem no servidor; páginas são limitadas a 100 itens e a UI usa 25, atendendo a base real acima de 700 clientes sem resposta irrestrita.'
   reliability:
     status: PASS
-    notes: 'Metadados de paginação são validados, a compatibilidade com limit foi preservada e falha de recarga não apaga a confirmação de persistência do formulário.'
+    notes: 'Falha de recarga não apaga a confirmação de persistência; falha inicial não é apresentada como lista vazia; contrato e banco rejeitam versão fora do limite integer.'
   maintainability:
     status: PASS
     notes: 'Contrato compartilhado, handler fino, RPC dedicada e testes unitários, pgTAP, integração e E2E mantêm a mudança observável e isolada.'
 recommendations:
-  immediate: []
+  immediate:
+    - action: 'Abrir uma story de dependências para validar atualização/override compatível do Serwist e eliminar SEC-DEPENDENCIES-001 sem regressão de PWA.'
+      refs:
+        - 'package.json'
+        - 'apps/web/package.json'
   future:
     - action: 'Monitorar a latência da busca e considerar índices especializados somente se o volume crescer materialmente além da base atual.'
       refs:
