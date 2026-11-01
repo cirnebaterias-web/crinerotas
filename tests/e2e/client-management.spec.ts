@@ -307,8 +307,10 @@ test.describe('manual client management', () => {
   });
 
   test('does not present a failed initial load as an empty client base', async ({ page }) => {
+    let listCalls = 0;
     await page.route('**/api/v1/**', async (route) => {
-      const pathname = new URL(route.request().url()).pathname;
+      const url = new URL(route.request().url());
+      const pathname = url.pathname;
       if (pathname === '/api/v1/me') {
         await route.fulfill({ json: {
           id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
@@ -321,10 +323,13 @@ test.describe('manual client management', () => {
         return;
       }
       if (pathname === '/api/v1/clients') {
-        await route.fulfill({
-          status: 503,
-          json: { error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Lista indisponível.' } },
-        });
+        listCalls += 1;
+        await route.fulfill(listCalls === 1
+          ? {
+              status: 503,
+              json: { error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Lista indisponível.' } },
+            }
+          : { json: clientListPayload([originalClient], url) });
         return;
       }
       await route.abort();
@@ -336,6 +341,10 @@ test.describe('manual client management', () => {
       .toContainText('Não foi possível confirmar a operação.');
     await expect(page.getByRole('heading', { name: 'Clientes cadastrados' })).toBeHidden();
     await expect(page.getByText('Nenhum cliente encontrado na sua abrangência para esta busca.')).toBeHidden();
+    await page.getByRole('button', { name: 'Tentar carregar clientes novamente' }).click();
+    await expect(page.getByRole('heading', { name: 'Clientes cadastrados' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: originalClient.name })).toBeVisible();
+    expect(listCalls).toBe(2);
   });
 
   test('keeps the client list available when the seller directory fails', async ({ page }) => {

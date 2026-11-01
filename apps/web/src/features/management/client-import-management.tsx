@@ -209,6 +209,17 @@ export function ClientImportManagement() {
     } finally { setListBusy(false); }
   }
 
+  async function retryInitialClients() {
+    setListBusy(true); setMessage('');
+    try {
+      await loadClients('', 1);
+      setSearchInput('');
+      setMessage('Clientes carregados.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível consultar clientes.');
+    } finally { setListBusy(false); }
+  }
+
   const issues = batch?.issues ?? preview?.issues ?? [];
   const accessDenied = !loading && identity !== null && !canManage && !canImport;
 
@@ -220,6 +231,12 @@ export function ClientImportManagement() {
     {loading && <p className="seller-notice" role="status">Carregando clientes…</p>}
     {accessDenied && <p className="seller-notice" role="alert">Seu perfil não tem acesso à gestão de clientes.</p>}
     {message && !accessDenied && <p className="seller-notice" role="status">{message}</p>}
+    {!loading && !clientsLoaded && identity !== null && !accessDenied && <button
+      type="button"
+      className="seller-button seller-secondary"
+      disabled={listBusy}
+      onClick={() => void retryInitialClients()}
+    >{listBusy ? 'Tentando novamente…' : 'Tentar carregar clientes novamente'}</button>}
 
     {canManage && !creating && !editing && <button
       type="button"
