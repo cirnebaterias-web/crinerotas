@@ -332,9 +332,45 @@ test.describe('manual client management', () => {
 
     await page.goto('/management/clients');
 
-    await expect(page.getByRole('status')).toContainText('Não foi possível confirmar a operação.');
+    await expect(page.locator('.seller-notice[role="status"]'))
+      .toContainText('Não foi possível confirmar a operação.');
     await expect(page.getByRole('heading', { name: 'Clientes cadastrados' })).toBeHidden();
     await expect(page.getByText('Nenhum cliente encontrado na sua abrangência para esta busca.')).toBeHidden();
+  });
+
+  test('keeps the client list available when the seller directory fails', async ({ page }) => {
+    await page.route('**/api/v1/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.pathname === '/api/v1/me') {
+        await route.fulfill({ json: {
+          id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
+          roles: ['manager'], capabilities: ['clients.read', 'clients.manage'], scopeIds: [], status: 'active',
+        } });
+        return;
+      }
+      if (url.pathname === '/api/v1/clients/sellers') {
+        await route.fulfill({
+          status: 503,
+          json: { error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Vendedores indisponíveis.' } },
+        });
+        return;
+      }
+      if (url.pathname === '/api/v1/clients' && request.method() === 'GET') {
+        await route.fulfill({ json: clientListPayload([originalClient], url) });
+        return;
+      }
+      await route.abort();
+    });
+
+    await page.goto('/management/clients');
+
+    await expect(page.locator('.seller-notice[role="status"]'))
+      .toContainText('Não foi possível confirmar a operação.');
+    await expect(page.getByRole('heading', { name: 'Clientes cadastrados' })).toBeVisible();
+    await expect(page.getByLabel('Pesquisar clientes')).toBeVisible();
+    await expect(page.getByRole('heading', { name: originalClient.name })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Editar cliente' })).toBeVisible();
   });
 
   test('shows access denied without exposing management actions', async ({ page }) => {

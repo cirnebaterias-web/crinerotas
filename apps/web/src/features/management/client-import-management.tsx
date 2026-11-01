@@ -90,18 +90,38 @@ export function ClientImportManagement() {
           setMessage('Seu perfil não tem acesso à gestão de clientes.');
           return;
         }
-        const [clientResult, sellerResult] = await Promise.all([
+        const [clientResult, sellerResult] = await Promise.allSettled([
           scrapRequest(clientListUrl('', 1)),
           canManage ? scrapRequest(clientSellersPath) : Promise.resolve(null),
         ]);
         if (!active) return;
-        const clientList = clientListResponseSchema.parse(clientResult);
-        setClients(clientList.clients);
-        setAppliedQuery(clientList.query);
-        setPagination(clientList.pagination);
-        setClientsLoaded(true);
-        if (sellerResult) {
-          setSellers(clientSellerListResponseSchema.parse(sellerResult).sellers);
+        const loadErrors: string[] = [];
+        if (clientResult.status === 'fulfilled') {
+          try {
+            const clientList = clientListResponseSchema.parse(clientResult.value);
+            setClients(clientList.clients);
+            setAppliedQuery(clientList.query);
+            setPagination(clientList.pagination);
+            setClientsLoaded(true);
+          } catch (error) {
+            loadErrors.push(error instanceof Error ? error.message : 'Não foi possível consultar clientes.');
+          }
+        } else {
+          loadErrors.push(clientResult.reason instanceof Error
+            ? clientResult.reason.message : 'Não foi possível consultar clientes.');
+        }
+        if (sellerResult.status === 'fulfilled' && sellerResult.value) {
+          try {
+            setSellers(clientSellerListResponseSchema.parse(sellerResult.value).sellers);
+          } catch (error) {
+            loadErrors.push(error instanceof Error ? error.message : 'Não foi possível consultar vendedores.');
+          }
+        } else if (sellerResult.status === 'rejected') {
+          loadErrors.push(sellerResult.reason instanceof Error
+            ? sellerResult.reason.message : 'Não foi possível consultar vendedores.');
+        }
+        if (loadErrors.length > 0) {
+          setMessage([...new Set(loadErrors)].join(' '));
         }
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : 'Não foi possível consultar clientes.');
