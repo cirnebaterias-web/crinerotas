@@ -71,6 +71,10 @@ insert into api.clients (id, external_reference, name, address, portfolio_refere
 values ('10000000-0000-4000-8000-000000000099', 'PRICE-099', 'Cliente Precos', 'Endereco sintetico', 'CARTEIRA-PRECOS')
 on conflict (id) do update set name = excluded.name;
 
+insert into api.client_seller_scopes (client_id, seller_id, assigned_by)
+values ('10000000-0000-4000-8000-000000000099', :'seller_a_id', :'manager_a_id')
+on conflict do nothing;
+
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.create_route_draft(jsonb_build_object(

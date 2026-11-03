@@ -5,6 +5,6 @@ import base from './playwright.config';
 export default defineConfig({
   ...base,
   testIgnore: [],
-  testMatch: ['**/seller-real.spec.ts', '**/scrap-agenda-real.spec.ts'],
+  testMatch: ['**/seller-real.spec.ts', '**/scrap-agenda-real.spec.ts', '**/route-planning-real.spec.ts'],
   use: { ...base.use, trace: 'off' },
 });

@@ -124,7 +124,7 @@ export function mapRouteRequestError(error: unknown) {
     const status = error.code === 'AUTH_REQUIRED' ? 401
       : error.code === 'FORBIDDEN' ? 403
         : error.code === 'NOT_FOUND' ? 404
-          : error.code === 'VERSION_CONFLICT' ? 409
+          : error.code === 'VERSION_CONFLICT' || error.code === 'IDEMPOTENCY_KEY_REUSED' ? 409
             : error.code === 'VALIDATION_FAILED' ? 422
               : error.code === 'DEPENDENCY_UNAVAILABLE' ? 503 : 500;
     return new RouteRequestError(status, error.code, publicRouteMessage(error.code), error.recoverable);

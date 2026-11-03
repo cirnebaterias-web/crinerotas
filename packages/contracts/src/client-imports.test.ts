@@ -39,10 +39,14 @@ describe('clientImportPreviewSchema', () => {
 
 describe('client list pagination contracts', () => {
   it('normalizes query parameters and keeps the legacy limit alias', () => {
+    const sellerId = '11111111-1111-4111-8111-111111111111';
     expect(clientListQuerySchema.parse({ q: '  Cliente  ', page: '3', pageSize: '25' }))
       .toEqual({ q: 'Cliente', page: 3, pageSize: 25 });
     expect(clientListQuerySchema.parse({ limit: '100' }))
       .toEqual({ q: '', page: 1, pageSize: 100 });
+    expect(clientListQuerySchema.parse({ sellerId }))
+      .toEqual({ q: '', page: 1, pageSize: 25, sellerId });
+    expect(clientListQuerySchema.safeParse({ sellerId: 'invalid' }).success).toBe(false);
     expect(clientListQuerySchema.safeParse({ page: '0' }).success).toBe(false);
     expect(clientListQuerySchema.safeParse({ pageSize: '101' }).success).toBe(false);
   });

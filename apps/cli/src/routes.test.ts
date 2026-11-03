@@ -77,7 +77,7 @@ function initialPublishedTodayRoute(executionVersion = 2) {
       stops: [
         { routeVersionStopId: firstStopId, plannedOrder: 1, executionOrder: 1, priority: 1,
           status: 'pending', executionVersion: 1, client: client(firstClientId, '01') },
-        { routeVersionStopId: secondStopId, plannedOrder: 3, executionOrder: 2, priority: 0,
+        { routeVersionStopId: secondStopId, plannedOrder: 2, executionOrder: 2, priority: 0,
           status: 'pending', executionVersion: 1, client: client(retainedClientId, '02') },
       ],
     },

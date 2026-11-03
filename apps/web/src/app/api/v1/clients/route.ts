@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       p_query: parsed.data.q,
       p_page: parsed.data.page,
       p_page_size: parsed.data.pageSize,
+      p_seller_id: parsed.data.sellerId ?? null,
     });
     return Response.json(clientListResponseSchema.parse(result), { headers });
   });

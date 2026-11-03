@@ -32,6 +32,10 @@ values ('92000000-0000-4000-8000-000000000001', 201, 'published', '2099-01-01T00
 insert into api.clients (id, external_reference, name, address, portfolio_reference)
 values ('92000000-0000-4000-8000-000000000002', 'DETAIL-01', 'Cliente Detalhe', 'Endereco historico', 'DETAIL');
 
+insert into api.client_seller_scopes (client_id, seller_id, assigned_by)
+values ('92000000-0000-4000-8000-000000000002', :'seller_a_id', :'manager_a_id')
+on conflict do nothing;
+
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.create_route_draft(jsonb_build_object(

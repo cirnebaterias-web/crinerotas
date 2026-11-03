@@ -625,6 +625,8 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
     route: {
       routeId: string;
       executionVersion: number;
+      serviceDate: string;
+      seller: { id: string };
       stops: Array<{ routeVersionStopId: string; status: string }>;
     };
   };
@@ -656,6 +658,26 @@ it('enforces route scope at the BFF while preserving the published aggregate', a
   });
   expect(managerRoute.status).toBe(200);
   expect(await managerRoute.json()).toMatchObject({ routeId: publishedRouteId, status: 'published' });
+
+  const planning = await fetch(`${origin}/api/v1/routes?${new URLSearchParams({
+    serviceDate: ownRouteBody.route.serviceDate,
+    sellerId: seller.id,
+  })}`, { headers: { Authorization: `Bearer ${manager.accessToken}` } });
+  expect(planning.status).toBe(200);
+  expect(await planning.json()).toMatchObject({
+    schemaVersion: 1,
+    availability: 'available',
+    route: { routeId: publishedRouteId, state: 'published', seller: { id: seller.id } },
+  });
+  expect(planning.headers.get('cache-control')).toContain('no-store');
+
+  const portfolio = await fetch(`${origin}/api/v1/clients?${new URLSearchParams({
+    sellerId: seller.id, page: '1', pageSize: '25', q: 'SYN-',
+  })}`, { headers: { Authorization: `Bearer ${manager.accessToken}` } });
+  expect(portfolio.status).toBe(200);
+  const portfolioBody = await portfolio.json() as { clients: Array<{ sellerId: string; status: string }> };
+  expect(portfolioBody.clients.length).toBeGreaterThan(0);
+  expect(portfolioBody.clients.every((client) => client.sellerId === seller.id && client.status === 'active')).toBe(true);
 
   const forbiddenComposition = await fetch(`${origin}/api/v1/routes/${publishedRouteId}`, {
     method: 'PATCH',

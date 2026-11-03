@@ -161,17 +161,17 @@ it('creates a prices event after stock without inventing catalog values', () => 
   expect(toSyncCommand(mutation.event)).toMatchObject({ operation: 'visit.prices.saved.v1', sequence: 3, payload: values });
 });
 
-it('normalizes a valid route draft while preserving non-contiguous business order', () => {
+it('normalizes a valid route draft with contiguous business order', () => {
   const normalized = normalizeRouteDraft({
     schemaVersion: 1,
     serviceDate: '2026-09-15',
     sellerId: '11111111-1111-4111-8111-111111111111',
     stops: [
-      { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', plannedOrder: 3, priority: 0 },
+      { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', plannedOrder: 2, priority: 0 },
       { clientId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', plannedOrder: 1, priority: 1 },
     ],
   });
-  expect(normalized.stops.map(({ plannedOrder }) => plannedOrder)).toEqual([1, 3]);
+  expect(normalized.stops.map(({ plannedOrder }) => plannedOrder)).toEqual([1, 2]);
   expect(() => normalizeRouteDraft({
     ...normalized,
     stops: [normalized.stops[0]!, { ...normalized.stops[1]!, plannedOrder: 1 }],

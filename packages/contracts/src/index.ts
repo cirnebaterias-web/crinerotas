@@ -39,6 +39,12 @@ export const routePath = (routeId: string) => `${routesPath}/${routeId}`;
 export const routePublishPath = (routeId: string) => `${routePath(routeId)}/publish`;
 export const routeExecutionOrderPath = (routeId: string) => `${routePath(routeId)}/execution-order`;
 
+export const routePlanningQuerySchema = z.object({
+  serviceDate: z.iso.date(),
+  sellerId: z.uuid(),
+}).strict();
+export type RoutePlanningQuery = z.infer<typeof routePlanningQuerySchema>;
+
 export const routeErrorCodeSchema = z.enum([
   'AUTH_REQUIRED',
   'FORBIDDEN',
@@ -57,24 +63,35 @@ export const routeStopInputSchema = z.object({
   priority: z.number().int().min(0).max(9),
 }).strict();
 
+function validateRouteStops(
+  stops: Array<{ clientId: string; plannedOrder: number }>,
+  context: z.RefinementCtx,
+) {
+  const clients = new Set<string>();
+  const orders = new Set<number>();
+  stops.forEach((stop, index) => {
+    const clientId = stop.clientId.toLowerCase();
+    if (clients.has(clientId)) {
+      context.addIssue({ code: 'custom', path: ['stops', index, 'clientId'], message: 'Cliente repetido na rota.' });
+    }
+    if (orders.has(stop.plannedOrder)) {
+      context.addIssue({ code: 'custom', path: ['stops', index, 'plannedOrder'], message: 'Ordem planejada repetida.' });
+    }
+    clients.add(clientId);
+    orders.add(stop.plannedOrder);
+  });
+  if (orders.size === stops.length && stops.some((stop) => stop.plannedOrder > stops.length)) {
+    context.addIssue({ code: 'custom', path: ['stops'], message: 'A ordem planejada deve ser contígua e iniciar em 1.' });
+  }
+}
+
 export const createRouteDraftRequestSchema = z.object({
   schemaVersion: z.literal(1),
   serviceDate: z.iso.date(),
   sellerId: z.uuid(),
   stops: z.array(routeStopInputSchema).min(1).max(50),
 }).strict().superRefine(({ stops }, context) => {
-  const clients = new Set<string>();
-  const orders = new Set<number>();
-  stops.forEach((stop, index) => {
-    if (clients.has(stop.clientId)) {
-      context.addIssue({ code: 'custom', path: ['stops', index, 'clientId'], message: 'Cliente repetido na rota.' });
-    }
-    if (orders.has(stop.plannedOrder)) {
-      context.addIssue({ code: 'custom', path: ['stops', index, 'plannedOrder'], message: 'Ordem planejada repetida.' });
-    }
-    clients.add(stop.clientId);
-    orders.add(stop.plannedOrder);
-  });
+  validateRouteStops(stops, context);
 });
 export type CreateRouteDraftRequest = z.infer<typeof createRouteDraftRequestSchema>;
 
@@ -94,25 +111,20 @@ export const routeDraftSchema = z.object({
 }).strict();
 export type RouteDraft = z.infer<typeof routeDraftSchema>;
 
+export const updateRouteDraftRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  expectedVersion: z.number().int().positive(),
+  stops: z.array(routeStopInputSchema).min(1).max(50),
+}).strict().superRefine(({ stops }, context) => validateRouteStops(stops, context));
+export type UpdateRouteDraftRequest = z.infer<typeof updateRouteDraftRequestSchema>;
+
 export const changeRouteCompositionRequestSchema = z.object({
   schemaVersion: z.literal(1),
   expectedVersion: z.number().int().positive(),
   reason: z.string().trim().min(1).max(500),
   stops: z.array(routeStopInputSchema).min(1).max(50),
 }).strict().superRefine(({ stops }, context) => {
-  const clients = new Set<string>();
-  const orders = new Set<number>();
-  stops.forEach((stop, index) => {
-    const clientId = stop.clientId.toLowerCase();
-    if (clients.has(clientId)) {
-      context.addIssue({ code: 'custom', path: ['stops', index, 'clientId'], message: 'Cliente repetido na rota.' });
-    }
-    if (orders.has(stop.plannedOrder)) {
-      context.addIssue({ code: 'custom', path: ['stops', index, 'plannedOrder'], message: 'Ordem planejada repetida.' });
-    }
-    clients.add(clientId);
-    orders.add(stop.plannedOrder);
-  });
+  validateRouteStops(stops, context);
 });
 export type ChangeRouteCompositionRequest = z.infer<typeof changeRouteCompositionRequestSchema>;
 
@@ -192,6 +204,41 @@ export const routeClientSnapshotSchema = z.object({
   longitude: nullableDecimalSchema,
   portfolioReference: z.string().trim().min(1).max(120).nullable(),
 }).strict();
+export const routePlanningClientSchema = routeClientSnapshotSchema.extend({
+  active: z.boolean(),
+}).strict();
+export const routePlanningStopSchema = z.object({
+  routeVersionStopId: z.uuid(),
+  plannedOrder: z.number().int().positive().max(50),
+  priority: z.number().int().min(0).max(9),
+  client: routePlanningClientSchema,
+}).strict();
+export const routePlanningRouteSchema = z.object({
+  routeId: z.uuid(),
+  routeVersionId: z.uuid(),
+  versionNumber: z.number().int().positive(),
+  expectedVersion: z.number().int().positive(),
+  serviceDate: z.iso.date(),
+  state: z.enum(['initial_draft', 'published', 'successor_draft']),
+  seller: routeSellerSnapshotSchema,
+  publishedVersionNumber: z.number().int().positive().nullable(),
+  changeReason: z.string().trim().min(1).max(500).nullable(),
+  stops: z.array(routePlanningStopSchema).min(1).max(50),
+}).strict();
+export const routePlanningResponseSchema = z.discriminatedUnion('availability', [
+  z.object({
+    schemaVersion: z.literal(1),
+    availability: z.literal('empty'),
+    serviceDate: z.iso.date(),
+    sellerId: z.uuid(),
+  }).strict(),
+  z.object({
+    schemaVersion: z.literal(1),
+    availability: z.literal('available'),
+    route: routePlanningRouteSchema,
+  }).strict(),
+]);
+export type RoutePlanningResponse = z.infer<typeof routePlanningResponseSchema>;
 export const canonicalRouteStopSchema = z.object({
   routeVersionStopId: z.uuid(),
   plannedOrder: z.number().int().positive().max(50),

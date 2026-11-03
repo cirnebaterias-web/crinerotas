@@ -34,6 +34,13 @@ values
   ('41000000-0000-4000-8000-000000000004', 'MGT-004', 'Cliente Novo D', 'Endereco sintetico D', 'MGT')
 on conflict (id) do update set status = 'active', archived_at = null;
 
+insert into api.client_seller_scopes (client_id, seller_id, assigned_by)
+select client.id, :'seller_a_id', :'manager_a_id' from api.clients client
+where client.id in (
+  '41000000-0000-4000-8000-000000000001', '41000000-0000-4000-8000-000000000002',
+  '41000000-0000-4000-8000-000000000003', '41000000-0000-4000-8000-000000000004'
+) on conflict do nothing;
+
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.create_route_draft(jsonb_build_object(

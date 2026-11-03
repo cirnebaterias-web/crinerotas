@@ -7,14 +7,17 @@ import type {
   RoutePublication,
   RouteCompositionDraft,
   RouteTodayResponse,
+  RoutePlanningResponse,
   ReorderRouteExecutionResult,
 } from '@cirne/contracts';
 import {
   createRouteDraft,
   changeRouteComposition,
   getMyRouteForDate,
+  getRoutePlanning,
   publishRoute,
   reorderRouteExecution,
+  updateRouteDraft,
   type RouteRepository,
 } from './service';
 
@@ -23,7 +26,7 @@ const command: CreateRouteDraftRequest = {
   serviceDate: '2026-09-15',
   sellerId: '11111111-1111-4111-8111-111111111111',
   stops: [
-    { clientId: '10000000-0000-4000-8000-000000000002', plannedOrder: 3, priority: 0 },
+    { clientId: '10000000-0000-4000-8000-000000000002', plannedOrder: 2, priority: 0 },
     { clientId: '10000000-0000-4000-8000-000000000001', plannedOrder: 1, priority: 1 },
   ],
 };
@@ -78,12 +81,22 @@ function repository(overrides: Partial<RouteRepository> = {}): RouteRepository {
         routeVersionStopId: `70000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
       })),
     })),
+    updateDraft: vi.fn(async (_routeId, request) => draftFor({
+      ...command,
+      stops: request.stops,
+    })),
     publish: vi.fn(async () => publication),
     getById: vi.fn(async () => ({} as CanonicalRoute)),
     getForDate: vi.fn(async (serviceDate): Promise<RouteTodayResponse> => ({
       schemaVersion: 2,
       availability: 'empty',
       serviceDate,
+    })),
+    getPlanning: vi.fn(async (query): Promise<RoutePlanningResponse> => ({
+      schemaVersion: 1,
+      availability: 'empty',
+      serviceDate: query.serviceDate,
+      sellerId: query.sellerId,
     })),
     reorder: vi.fn(async (routeId, request): Promise<ReorderRouteExecutionResult> => ({
       schemaVersion: 1,
@@ -150,6 +163,30 @@ describe('route application services', () => {
       schemaVersion: 2,
       availability: 'empty',
       serviceDate: '2026-09-15',
+    });
+  });
+
+  it('forwards a normalized initial draft update with idempotency metadata', async () => {
+    const target = repository();
+    const context = { idempotencyKey: '60000000-0000-4000-8000-000000000001', origin: 'web' as const };
+    const request = { schemaVersion: 1 as const, expectedVersion: 1, stops: [...command.stops] };
+    await updateRouteDraft(draftFor().routeId, request, context, target);
+    expect(target.updateDraft).toHaveBeenCalledWith(
+      draftFor().routeId,
+      { ...request, stops: [command.stops[1], command.stops[0]] },
+      context,
+    );
+  });
+
+  it('validates and forwards the manager planning lookup', async () => {
+    const target = repository();
+    await expect(getRoutePlanning({ serviceDate: command.serviceDate, sellerId: command.sellerId }, target))
+      .resolves.toEqual({
+        schemaVersion: 1, availability: 'empty',
+        serviceDate: command.serviceDate, sellerId: command.sellerId,
+      });
+    expect(target.getPlanning).toHaveBeenCalledWith({
+      serviceDate: command.serviceDate, sellerId: command.sellerId,
     });
   });
 
