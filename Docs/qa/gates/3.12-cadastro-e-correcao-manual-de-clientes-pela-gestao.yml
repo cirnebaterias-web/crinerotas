@@ -1,31 +1,27 @@
 schema: 1
 story: '3.12'
 story_title: 'Cadastro e correção manual de clientes pela gestão'
-gate: CONCERNS
-status_reason: 'O hardening pós-merge está funcionalmente aprovado e não possui achados de revisão. O audit tem 0 vulnerabilidades críticas, mas conserva 5 altas herdadas da cadeia Serwist/Zod cuja correção automática é incompatível.'
+gate: PASS
+status_reason: 'O hardening pós-merge permanece funcionalmente aprovado e a Story 4.12 eliminou SEC-DEPENDENCIES-001: instalação limpa, árvore Zod deduplicada e audit no nível high passam com 0 vulnerabilidades high/critical. Restam apenas findings moderados já rastreados.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: '0397e84e1a74e9bc003b31af645be40917935abf'
-updated: '2026-11-01T17:01:34-03:00'
-expires: '2026-11-15T17:01:34-03:00'
-top_issues:
-  - id: 'SEC-DEPENDENCIES-001'
-    severity: high
-    finding: 'npm audit reporta 5 vulnerabilidades altas e 18 moderadas herdadas, concentradas em @serwist/next, @serwist/cli e dependências transitivas Zod/glob; não há vulnerabilidade crítica.'
-    suggested_action: 'Validar uma atualização compatível do Serwist ou override seguro de Zod em story de dependências; não aplicar o downgrade/major automático sem regressão específica de PWA.'
-    suggested_owner: devops
-    refs:
-      - 'package.json'
-      - 'apps/web/package.json'
-      - 'package-lock.json'
+reviewed_revision: 'e4c713a5ee95482c12ce7c67e10e6edecd8c64c7'
+updated: '2026-11-03T10:09:55-03:00'
+expires: '2026-11-17T10:09:55-03:00'
+top_issues: []
 waiver: { active: false }
-quality_score: 90
+quality_score: 95
 evidence:
   tests_reviewed: 1193
-  code_review: 'CodeRabbit reviewed 9 changed files; 1 major and 1 minor finding were fixed. Final confirmation call was OSS rate-limited.'
+  code_review: 'CodeRabbit reviewed 9 changed files; 1 major and 1 minor finding were fixed. A confirmação final foi limitada pela cota OSS, sem achado aberto conhecido.'
   current_run:
+    clean_install: PASS
+    zod_tree: 'PASS: somente Zod 4.6.6 na árvore de configuração, contratos e Serwist.'
+    audit_high: 'PASS: 0 critical, 0 high, 22 moderate.'
+    audit_production_high: 'PASS: 0 critical, 0 high, 12 moderate.'
     unit_passed: 432
     unit_skipped: 1
     pgtap_passed: 751
+    pgtap_context: 'Última execução descartável limpa da branch; a tentativa atual no banco local compartilhado foi descartada por fixtures preexistentes duplicadas. O CI isolado da PR é o gate remoto final.'
     controlled_e2e_passed: 10
     lint: PASS
     typecheck: PASS
@@ -33,20 +29,22 @@ evidence:
     port_denylist: PASS
     secret_scan: PASS
     critical_vulnerabilities: 0
+    high_vulnerabilities: 0
+    moderate_vulnerabilities: 22
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     ac_gaps: []
 risk_summary:
   totals:
     critical: 0
-    high: 1
-    medium: 0
+    high: 0
+    medium: 1
     low: 0
-  highest: high
+  highest: medium
 nfr_validation:
   security:
-    status: CONCERNS
-    notes: 'O patch preserva autorização e escopo, limita expectedVersion antes da conversão integer e executa em Next.js 16.4.3. O audit tem 0 críticos, 5 altos e 18 moderados herdados da cadeia Serwist/Zod.'
+    status: PASS
+    notes: 'O patch preserva autorização e escopo, limita expectedVersion antes da conversão integer e executa em Next.js 16.4.3. A Story 4.12 fixa Zod 4.6.6 na cadeia Serwist; o audit tem 0 críticos, 0 altos e 22 moderados rastreados.'
   performance:
     status: PASS
     notes: 'Busca e contagem ocorrem no servidor; páginas são limitadas a 100 itens e a UI usa 25, atendendo a base real acima de 700 clientes sem resposta irrestrita.'
@@ -57,12 +55,12 @@ nfr_validation:
     status: PASS
     notes: 'Contrato compartilhado, handler fino, RPC dedicada e testes unitários, pgTAP, integração e E2E mantêm a mudança observável e isolada.'
 recommendations:
-  immediate:
-    - action: 'Abrir uma story de dependências para validar atualização/override compatível do Serwist e eliminar SEC-DEPENDENCIES-001 sem regressão de PWA.'
-      refs:
-        - 'package.json'
-        - 'apps/web/package.json'
+  immediate: []
   future:
+    - action: 'Reavaliar glob, minimatch e fast-uri quando houver versões compatíveis dos consumidores, sem downgrade do Serwist/ESLint ou npm audit fix --force.'
+      refs:
+        - 'package-lock.json'
+        - 'Docs/stories/4.12.story.md'
     - action: 'Monitorar a latência da busca e considerar índices especializados somente se o volume crescer materialmente além da base atual.'
       refs:
         - 'supabase/migrations/20261020140000_client_management_search_pagination.sql'
