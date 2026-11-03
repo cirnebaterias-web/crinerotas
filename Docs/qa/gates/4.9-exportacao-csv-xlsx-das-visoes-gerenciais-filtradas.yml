@@ -1,0 +1,50 @@
+schema: 1
+story: '4.9'
+story_title: 'Exportação CSV/XLSX das visões gerenciais filtradas'
+gate: PASS
+status_reason: 'Os 12 critérios estão cobertos por contratos estritos, reaproveitamento dos casos de uso autorizados, paginação server-side, geração CSV/XLSX segura, CLI e ações nas quatro telas. Não restou achado CodeRabbit ou lacuna funcional local.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'product-tree-sha256:27f9660fb322c14e53225ec74001649ae8842d5f55b32fda1a12043c96c22fb6'
+updated: '2026-10-29T22:14:51Z'
+expires: '2026-11-12T22:14:51Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1356
+  risks_identified: 0
+  current_run:
+    lint: PASS
+    typecheck: PASS
+    unit_passed: 464
+    unit_skipped: 1
+    production_build: PASS
+    pgtap_passed: 786
+    integration_passed: 27
+    e2e_mocked_passed: 79
+    secretlint: PASS
+    git_diff_check: PASS
+    coderabbit: 'PASS: duas rodadas encontraram 2 achados menores válidos, ambos corrigidos; rodada final terminou com 0 findings em 30 arquivos.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'O endpoint reutiliza identidade, capacidade, papel, escopo e cliente Supabase do chamador; formatos/visões/filtros são fechados, fórmulas são neutralizadas e arquivos/logs não carregam dados proibidos.'
+  performance:
+    status: PASS
+    notes: 'Inteligência e Agenda são percorridas no servidor por cursor, com detecção de ciclo e limite de 10.000 linhas antes da geração; adequado ao piloto local.'
+  reliability:
+    status: PASS
+    notes: 'Falhas nunca retornam arquivo parcial, downloads são privados/no-store, clique duplicado é bloqueado e a leitura atual permanece intacta em erro.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato, projeção tabular, serialização, orquestração, handler, CLI e UI têm responsabilidades separadas e testes em camadas.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Medir tempo e consumo de memória de exportações próximas ao limite com o volume real antes do deploy na VPS.'
+      refs: ['Docs/prd.md#nfr-009', 'Docs/runbooks/pilot-readiness-contabo.md']
+    - action: 'Executar smoke de download com contas e escopos reais somente após backup, preflight e provisionamento da VPS.'
+      refs: ['Docs/runbooks/pilot-readiness-contabo.md']

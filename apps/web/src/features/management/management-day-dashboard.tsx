@@ -10,6 +10,7 @@ import {
 import {
   filterManagementRoutes, managementAttentionQueue, resolvedStopCount, routeClosureLabel, routeDailyState,
 } from './management-day-model';
+import { ReportExportActions } from './report-export-actions';
 
 export type ManagementDayInitialState =
   | { kind: 'ready' | 'empty'; serviceDate: string; result: ManagementDayResponse }
@@ -214,6 +215,7 @@ export function ManagementDayDashboard({ initial }: { initial: ManagementDayInit
       <label>Data operacional<input type="date" required value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} disabled={state === 'loading'} /></label>
       <button className="seller-button seller-primary" disabled={state === 'loading'}>Aplicar data</button>
       <button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button>
+      {confirmed && <ReportExportActions view="management_day" filters={{ serviceDate: confirmed.serviceDate }} disabled={state === 'loading'} />}
     </form>
     {state === 'loading' && <p role="status" aria-live="polite">Atualizando a visão confirmada…</p>}
     {(state === 'recoverable_error' || state === 'forbidden') && <div className="seller-notice seller-error" role="alert" tabIndex={-1} ref={alertRef}><strong>{state === 'forbidden' ? 'Acesso não autorizado.' : 'Atualização não concluída.'}</strong><p>{message}</p>{state === 'recoverable_error' && <button type="button" className="seller-button seller-secondary" onClick={() => void refresh()}>Tentar novamente</button>}</div>}

@@ -14,7 +14,7 @@ export const fieldIntelligenceSectionSchema = z.enum([
   'results',
 ]);
 
-const fieldIntelligenceFilterObjectSchema = z.object({
+export const fieldIntelligenceFilterObjectSchema = z.object({
   section: fieldIntelligenceSectionSchema,
   from: z.iso.date(),
   to: z.iso.date(),

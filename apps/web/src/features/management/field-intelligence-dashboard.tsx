@@ -9,6 +9,7 @@ import {
   type FieldIntelligenceResponse, type FieldIntelligenceSection,
 } from '@cirne/contracts';
 import { ScrapShell } from '../scrap/scrap-ui';
+import { ReportExportActions } from './report-export-actions';
 
 export type FieldIntelligenceInitialState =
   | { kind: 'ready' | 'empty'; filters: FieldIntelligenceFilter; result: FieldIntelligenceResponse }
@@ -122,7 +123,7 @@ export function FieldIntelligenceDashboard({ initial, timeZone }: {
       <label>Vendedor (ID)<input value={draft.sellerId ?? ''} onChange={(event) => setDraft({ ...draft, sellerId: event.target.value || undefined })} /></label><label>Cliente (ID)<input value={draft.clientId ?? ''} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || undefined })} /></label>
       {['prices', 'actions'].includes(draft.section) && <label>Concorrente (ID)<input value={draft.competitorId ?? ''} onChange={(event) => setDraft({ ...draft, competitorId: event.target.value || undefined })} /></label>}
       {draft.section === 'actions' && <label>Tipo de ação<select value={draft.actionType ?? ''} onChange={(event) => setDraft({ ...draft, actionType: (event.target.value || undefined) as FieldIntelligenceFilter['actionType'] })}><option value="">Todos</option>{Object.entries(actionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
-      <div className="field-intelligence-actions"><button className="seller-button seller-primary">Aplicar filtros</button><button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button></div>
+      <div className="field-intelligence-actions"><button className="seller-button seller-primary">Aplicar filtros</button><button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button>{confirmed && <ReportExportActions view="field_intelligence" filters={{ ...confirmed.filters }} disabled={state === 'loading'} />}</div>
     </form>
     {state === 'loading' && <p role="status" aria-live="polite">Atualizando dados confirmados…</p>}
     {(state === 'recoverable_error' || state === 'forbidden') && <div className="seller-notice seller-error" role="alert" tabIndex={-1} ref={alertRef}><strong>{state === 'forbidden' ? 'Acesso não autorizado.' : 'Atualização não concluída.'}</strong><p>{message}</p>{state === 'recoverable_error' && <button type="button" className="seller-button seller-secondary" onClick={() => void refresh()}>Tentar novamente</button>}</div>}

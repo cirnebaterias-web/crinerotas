@@ -8,6 +8,7 @@ export * from './management-day';
 export * from './visit-detail';
 export * from './commercial-action-types';
 export * from './field-intelligence';
+export * from './report-exports';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
 export type LiveResponse = z.infer<typeof liveResponseSchema>;
@@ -829,7 +830,7 @@ export const pickupScheduleSchema = z.object({
 export type PickupSchedule = z.infer<typeof pickupScheduleSchema>;
 
 const scrapAgendaCursorSchema = z.string().regex(/^[A-Za-z0-9_-]{8,1024}$/u);
-const scrapAgendaFilterObjectSchema = z.object({
+export const scrapAgendaFilterObjectSchema = z.object({
   from: z.iso.date(),
   to: z.iso.date(),
   status: z.literal('pending').default('pending'),
@@ -872,7 +873,7 @@ export const pilotMetricCoverageSchema = z.enum([
 export const pilotMetricAssessmentSchema = z.enum([
   'provisional_met', 'provisional_not_met', 'not_evaluable',
 ]);
-const pilotMetricsFilterObjectSchema = z.object({
+export const pilotMetricsFilterObjectSchema = z.object({
   from: z.iso.date(), to: z.iso.date(), sellerId: z.uuid().optional(), clientId: z.uuid().optional(),
   cursor: scrapAgendaCursorSchema.optional(),
 }).strict();

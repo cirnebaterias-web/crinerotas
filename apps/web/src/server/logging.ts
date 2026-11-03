@@ -14,3 +14,14 @@ export function logRequest(logger: ReturnType<typeof createLogger>, fields: Requ
   const { requestId, routeTemplate, method, status, durationMs } = fields;
   logger.info({ requestId, routeTemplate, method, status, durationMs }, 'http_request');
 }
+
+type ReportExportLog = RequestLog & {
+  view: string | null;
+  format: string | null;
+  rowCount: number | null;
+};
+
+export function logReportExport(logger: ReturnType<typeof createLogger>, fields: ReportExportLog) {
+  const { requestId, routeTemplate, method, status, durationMs, view, format, rowCount } = fields;
+  logger.info({ requestId, routeTemplate, method, status, durationMs, view, format, rowCount }, 'report_export');
+}
