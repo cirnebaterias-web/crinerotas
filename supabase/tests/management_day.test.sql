@@ -1,6 +1,6 @@
 begin;
 
-select plan(31);
+select plan(35);
 
 select has_view('api', 'management_day_v', 'canonical management projection exists');
 select has_function('api', 'get_management_day', array['date', 'text'], 'narrow management reader exists');
@@ -138,8 +138,12 @@ $route_owner$;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'manager_a_id', true);
 select api.get_management_day('2099-10-20', 'America/Recife') as management_result \gset
+select is((:'management_result')::jsonb ->> 'schemaVersion', '2', 'command center returns the versioned v2 document');
 select is((:'management_result')::jsonb ->> 'availability', 'available', 'manager receives the available state');
 select is(jsonb_array_length((:'management_result')::jsonb -> 'routes'), 1, 'only the scoped seller route is returned');
+select is(jsonb_array_length((:'management_result')::jsonb #> '{routes,0,stops}'), 3, 'all current stops are returned individually');
+select is((:'management_result')::jsonb #>> '{routes,0,stops,0,executionOrder}', '1', 'stops preserve the operational execution order');
+select ok(length((:'management_result')::jsonb #>> '{routes,0,stops,0,nonVisitReason,label}') > 0, 'non-visit exposes a sanitized reason label');
 select is((:'management_result')::jsonb #>> '{totals,planned}', '3', 'only current composition contributes to planned');
 select is((:'management_result')::jsonb #>> '{totals,pending}', '2', 'new and retained pending stops are counted once');
 select is((:'management_result')::jsonb #>> '{totals,notVisited}', '1', 'retained non-visit remains distinct');

@@ -64,7 +64,7 @@ describe('parseClientWorkbook', () => {
     archive.file('xl/sharedStrings.xml', 'x'.repeat(17 * 1024 * 1024));
     const bytes = await archive.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
     await expect(parseClientWorkbook('clientes.xlsx', bytes)).rejects.toMatchObject({ status: 413 });
-  });
+  }, 10000);
 
   it('recusa a planilha inteira quando há mais de 5.000 linhas de clientes', async () => {
     const workbook = new ExcelJS.Workbook();

@@ -564,10 +564,10 @@ it('returns the scoped management day through the real API and CLI', async () =>
     serviceDate: string;
     availability: string;
     totals: { planned: number };
-    routes: Array<{ routeId: string; seller: { id: string } }>;
+    routes: Array<{ routeId: string; seller: { id: string }; stops: unknown[] }>;
   };
   expect(body).toMatchObject({
-    schemaVersion: 1,
+    schemaVersion: 2,
     availability: 'available',
     routes: expect.arrayContaining([
       expect.objectContaining({
@@ -577,6 +577,7 @@ it('returns the scoped management day through the real API and CLI', async () =>
     ]),
   });
   expect(body.totals.planned).toBeGreaterThan(0);
+  expect(body.routes[0]?.stops).toHaveLength(body.totals.planned);
   expect(body.routes.some((route) => route.seller.id === sellerB.id)).toBe(false);
 
   const forbidden = await fetch(`${origin}/api/v1/management/day?serviceDate=${body.serviceDate}`, {
@@ -602,7 +603,7 @@ it('returns the scoped management day through the real API and CLI', async () =>
     },
   });
   expect(JSON.parse(result.stdout)).toMatchObject({
-    schemaVersion: 1,
+    schemaVersion: 2,
     serviceDate: body.serviceDate,
     availability: 'available',
   });

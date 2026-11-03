@@ -73,6 +73,21 @@ test.describe('seller visual MVP', () => {
     expect(await page.evaluate(() => Object.values(localStorage).join(' '))).not.toContain('synthetic-password');
   });
 
+  test('manager login enters the operational command center', async ({ page }) => {
+    const manager: MeResponse = {
+      id: id(90), displayName: 'Gestora Sintética', roles: ['manager'],
+      capabilities: ['identity.read_self', 'route.read_scoped'], scopeIds: [id(1)], status: 'active',
+    };
+    await page.route('**/api/v1/auth/session', (route) => route.fulfill({ json: manager }));
+    await page.route('**/api/v1/me', (route) => route.fulfill({ json: manager }));
+    await page.goto('/login');
+    await page.getByLabel('E-mail', { exact: true }).fill('manager@example.test');
+    await page.getByLabel('Senha', { exact: true }).fill('synthetic-password');
+    await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+    await expect(page).toHaveURL(/\/management\/day$/);
+    await expect(page.getByRole('heading', { name: 'Rotas e atividades do dia' })).toBeVisible();
+  });
+
   for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000 }]) {
     test(`reorders, cancels and confirms canonical state at ${viewport.width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
