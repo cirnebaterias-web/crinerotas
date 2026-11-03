@@ -1,0 +1,52 @@
+schema: 1
+story: '4.10'
+story_title: 'Mapa gerencial não bloqueante das rotas'
+gate: PASS
+status_reason: 'Os 12 critérios estão cobertos por uma projeção scoped do snapshot publicado, contrato estreito, carregamento lazy e alternativa textual. O mapa falha sem bloquear a Central, não expõe GPS observado e não restou achado CodeRabbit ou vulnerabilidade produtiva conhecida.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'product-tree-sha256:d32f2fb4a8db727c3a06ef6a5179da41b604226f6d3bd53581ba8e8c2f9df87b'
+updated: '2026-10-29T23:08:00Z'
+expires: '2026-11-12T23:08:00Z'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1392
+  risks_identified: 0
+  current_run:
+    lint: PASS
+    typecheck: PASS
+    unit_passed: 476
+    unit_skipped: 1
+    production_build: PASS
+    pgtap_passed: 805
+    integration_passed: 28
+    e2e_mocked_passed: 82
+    migration_rollback_reapply: PASS
+    secretlint: PASS
+    production_audit_vulnerabilities: 0
+    git_diff_check: PASS
+    coderabbit: 'PASS: 2 achados menores válidos corrigidos; revisão final terminou com 0 findings em 33 arquivos.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Identidade, papel, capability e escopo são exigidos no serviço e novamente na RPC; somente snapshot cadastral é projetado. URL de tiles é HTTPS, sem credenciais, query ou fragmento; auditoria produtiva zerada.'
+  performance:
+    status: PASS
+    notes: 'Leaflet, endpoint e tiles só são carregados após comando explícito. A Central e sua lista são renderizadas primeiro e permanecem canônicas.'
+  reliability:
+    status: PASS
+    notes: 'Configuração ausente/inválida, falha de API, componente ou tiles produz estado explícito sem apagar dados confirmados. Refresh invalida a projeção anterior.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato, RPC, serviço, repositório, handler, CLI, configuração, painel e mapa têm responsabilidades separadas e testes em camadas.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Escolher e documentar o provedor de tiles e seus limites/licença antes do deploy produtivo na VPS Contabo.'
+      refs: ['Docs/runbooks/pilot-readiness-contabo.md', '.env.example']
+    - action: 'Executar smoke do mapa com dados e escopos reais somente após backup, preflight e provisionamento da VPS.'
+      refs: ['Docs/runbooks/pilot-readiness-contabo.md']

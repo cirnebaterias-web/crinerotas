@@ -571,9 +571,42 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .management-stop-index small { color: var(--cirne-muted); white-space: nowrap; }
 .management-route-cards { display: none; }
 
+/* Story 4.10: opt-in operational map; the list remains the primary source of truth. */
+.management-map-panel { margin: 22px 0; overflow: hidden; border: 1px solid #ccd8d1; border-radius: 15px; background: #fff; box-shadow: 0 5px 18px rgb(10 47 32 / 5%); }
+.management-map-panel .management-section-title p { margin: 5px 0 0; color: var(--cirne-muted); font-size: 12px; }
+.management-map-content { display: grid; gap: 14px; padding: 18px 20px 20px; }
+.management-map-content > p { margin: 0; }
+.management-map-summary { display: grid; grid-template-columns: repeat(3, minmax(120px, 190px)); gap: 10px; margin: 0; }
+.management-map-summary div { padding: 12px 14px; border: 1px solid #d7e1db; border-radius: 10px; background: #f5f8f6; }
+.management-map-summary dt { color: var(--cirne-muted); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.management-map-summary dd { margin: 4px 0 0; color: var(--cirne-forest); font-size: 24px; font-weight: 850; font-variant-numeric: tabular-nums; }
+.management-map-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 360px); gap: 16px; align-items: start; min-width: 0; }
+.management-map-canvas-wrap { min-width: 0; }
+.management-map-canvas { z-index: 0; width: 100%; height: 560px; border: 1px solid #bdcbc3; border-radius: 12px; background: #e7ece9; }
+.management-map-attribution, .management-map-disclaimer { margin: 7px 0 0; color: #65756c; font-size: 10px; }
+.management-map-list { max-height: 560px; padding: 14px; border: 1px solid #d2ddd6; border-radius: 12px; overflow-y: auto; background: #f8faf9; }
+.management-map-list > h3 { margin: 0 0 12px; color: var(--cirne-forest); font-size: 16px; }
+.management-map-list section + section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #d9e2dd; }
+.management-map-list h4 { display: flex; gap: 8px; align-items: center; margin: 0 0 7px; color: #2b4336; font-size: 12px; }
+.management-map-list h4 span { flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%; }
+.management-map-list ol { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.management-map-list li > button, .management-map-list li > div { display: flex; justify-content: space-between; gap: 10px; width: 100%; min-height: 44px; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; background: #fff; color: #263c31; text-align: left; }
+.management-map-list li > button { cursor: pointer; }
+.management-map-list li > button:hover, .management-map-list li > button[aria-pressed="true"] { border-color: #4b9c6e; background: #eaf6ee; }
+.management-map-list strong { font-size: 11px; line-height: 1.35; }
+.management-map-list small { color: var(--cirne-muted); font-size: 10px; white-space: nowrap; }
+.management-map-empty { padding: 24px; border: 1px dashed #b8c7bf; border-radius: 11px; background: #f7f9f8; text-align: center; }
+.management-map-empty h3 { margin: 0 0 8px; color: var(--cirne-forest); }
+.management-map-empty p { margin: 0; color: var(--cirne-muted); }
+.management-map-marker-shell { border: 0; background: transparent; }
+.management-map-marker { display: grid; place-items: center; width: 34px; height: 34px; border: 3px solid #fff; border-radius: 50%; background: var(--marker-color); box-shadow: 0 2px 8px rgb(0 0 0 / 35%); color: #fff; font-size: 12px; font-weight: 900; }
+.management-map-canvas .leaflet-popup-content { min-width: 200px; margin: 13px 16px; }
+.management-map-canvas .leaflet-popup-content p { margin: 6px 0 0; color: #52645a; font-size: 11px; }
+
 @media (max-width: 1180px) {
   .management-command-grid { grid-template-columns: minmax(0, 1fr); }
   .management-inspector { position: static; max-height: none; }
+  .management-map-layout { grid-template-columns: minmax(0, 1fr) minmax(250px, 310px); }
 }
 @media (max-width: 820px) {
   .management-shell { display: block; }
@@ -599,6 +632,17 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .management-inspector-close { display: block; margin: 0 0 10px auto; padding: 7px 9px; border: 1px solid #c7d3cc; border-radius: 7px; background: #fff; color: var(--cirne-forest); }
   .management-inspector-backdrop { position: fixed; z-index: 40; inset: 0; border: 0; background: rgb(0 0 0 / 44%); }
   .management-inspector-backdrop[data-open="true"] { display: block; }
+  .management-map-panel .management-section-title { align-items: stretch; flex-direction: column; }
+  .management-map-panel .management-section-title button { width: 100%; }
+  .management-map-summary { grid-template-columns: repeat(3, 1fr); }
+  .management-map-layout { grid-template-columns: 1fr; }
+  .management-map-canvas { height: 420px; }
+  .management-map-list { max-height: 420px; }
+}
+@media (max-width: 520px) {
+  .management-map-content { padding: 14px 12px 16px; }
+  .management-map-summary { grid-template-columns: 1fr; }
+  .management-map-canvas { height: 360px; }
 }
 
 /* Story 4.8: desktop route planning workspace. */

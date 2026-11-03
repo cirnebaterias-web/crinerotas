@@ -33,6 +33,31 @@ const evidenceSchema = z.object({
   EVIDENCE_STORAGE_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9_-]{2,62}$/).default('visit-evidence'),
 });
 
+const mapTileUrl = z.string().trim().min(1).max(500).refine((value) => {
+  try {
+    const url = new URL(value);
+    const pathname = decodeURIComponent(url.pathname);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash &&
+      ['{z}', '{x}', '{y}'].every((placeholder) => pathname.includes(placeholder));
+  } catch { return false; }
+});
+const managementMapSchema = z.object({
+  MANAGEMENT_MAP_TILE_URL: z.preprocess((value) => value === '' ? undefined : value, mapTileUrl.optional()),
+  MANAGEMENT_MAP_ATTRIBUTION: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().trim().min(1).max(300).optional(),
+  ),
+}).superRefine((value, context) => {
+  if (Boolean(value.MANAGEMENT_MAP_TILE_URL) !== Boolean(value.MANAGEMENT_MAP_ATTRIBUTION)) {
+    context.addIssue({ code: 'custom', path: ['MANAGEMENT_MAP_TILE_URL'],
+      message: 'URL e atribuição do mapa devem ser configuradas juntas.' });
+  }
+});
+
+export type ManagementMapPublicConfig =
+  | { enabled: true; tileUrl: string; attribution: string }
+  | { enabled: false; reason: 'unconfigured' | 'invalid' };
+
 export function readServerConfig(env: Record<string, string | undefined>) {
   const result = schema.safeParse(env);
   if (!result.success) {
@@ -59,4 +84,17 @@ export function readEvidenceConfig(env: Record<string, string | undefined>) {
     throw new Error(`Configuração de evidências inválida: ${keys}. Confira o exemplo de ambiente.`);
   }
   return result.data;
+}
+
+export function readManagementMapConfig(env: Record<string, string | undefined>): ManagementMapPublicConfig {
+  const result = managementMapSchema.safeParse(env);
+  if (!result.success) return { enabled: false, reason: 'invalid' };
+  if (!result.data.MANAGEMENT_MAP_TILE_URL || !result.data.MANAGEMENT_MAP_ATTRIBUTION) {
+    return { enabled: false, reason: 'unconfigured' };
+  }
+  return {
+    enabled: true,
+    tileUrl: result.data.MANAGEMENT_MAP_TILE_URL,
+    attribution: result.data.MANAGEMENT_MAP_ATTRIBUTION,
+  };
 }

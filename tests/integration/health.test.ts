@@ -611,6 +611,53 @@ it('returns the scoped management day through the real API and CLI', async () =>
   expect(output).not.toContain(manager.accessToken);
 });
 
+it('returns the scoped route map through the real API and CLI without observed GPS', async () => {
+  const seller = actorManifest.actors.seller_a;
+  const manager = actorManifest.actors.manager_a;
+  if (!seller || !manager || !publishedRouteId) throw new Error('Published synthetic route or actors missing');
+
+  const response = await fetch(`${origin}/api/v1/management/map`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  const body = await response.json() as {
+    schemaVersion: number; serviceDate: string; availability: string;
+    totals: { routes: number; stops: number; positioned: number; unpositioned: number };
+    routes: Array<{ routeId: string; seller: { id: string }; stops: unknown[] }>;
+  };
+  expect(body).toMatchObject({
+    schemaVersion: 1, availability: 'available',
+    routes: expect.arrayContaining([expect.objectContaining({
+      routeId: publishedRouteId, seller: expect.objectContaining({ id: seller.id }),
+    })]),
+  });
+  expect(body.totals.positioned + body.totals.unpositioned).toBe(body.totals.stops);
+  expect(JSON.stringify(body)).not.toMatch(/observed|accuracy|distance|photo|payload|token/i);
+
+  const forbidden = await fetch(`${origin}/api/v1/management/map?serviceDate=${body.serviceDate}`, {
+    headers: { Authorization: `Bearer ${seller.accessToken}` },
+  });
+  expect(forbidden.status).toBe(403);
+  const invalid = await fetch(`${origin}/api/v1/management/map?serviceDate=${body.serviceDate}&actorId=${seller.id}`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(invalid.status).toBe(422);
+
+  const result = await runWithClosedInput(process.execPath, [
+    '--import', 'tsx', 'apps/cli/src/management-map-cli.ts',
+    '--url', origin, '--date', body.serviceDate, '--json',
+  ], {
+    cwd: root,
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+      CIRNE_MANAGER_ACCESS_TOKEN: manager.accessToken },
+  });
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    schemaVersion: 1, serviceDate: body.serviceDate, availability: 'available',
+  });
+  expect(result.stdout + result.stderr).not.toContain(manager.accessToken);
+});
+
 it('enforces route scope at the BFF while preserving the published aggregate', async () => {
   const seller = actorManifest.actors.seller_a;
   const sellerB = actorManifest.actors.seller_b;
