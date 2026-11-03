@@ -1,0 +1,54 @@
+schema: 1
+story: '4.12'
+story_title: 'Remediação da dependência transitiva Zod no Serwist'
+gate: PASS
+status_reason: 'A árvore Serwist foi deduplicada em Zod 4.6.6, instalação limpa e audit no nível high passaram com zero high/critical, e build/PWA permaneceram verdes. O único finding do CodeRabbit contradiz o lock e a instalação reproduzida e foi rejeitado com evidência objetiva.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'uncommitted-security-diff-2026-11-01'
+updated: '2026-11-01T19:20:00-03:00'
+expires: '2026-11-15T19:20:00-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 95
+evidence:
+  tests_reviewed: 436
+  risks_identified: 2
+  current_run:
+    clean_install: PASS
+    zod_tree: 'PASS: somente 4.6.6; quatro cópias aninhadas vulneráveis removidas.'
+    audit_high: 'PASS: 0 critical, 0 high, 22 moderate.'
+    audit_production_high: 'PASS: 0 critical, 0 high, 12 moderate.'
+    unit_passed: 432
+    unit_skipped: 1
+    focused_offline_e2e_passed: 3
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    serwist_service_worker: PASS
+    port_denylist: PASS
+    secretlint: PASS
+    diff_check: PASS
+    coderabbit: 'PASS_WITH_JUSTIFIED_DISMISSAL: 1 finding sobre lock desatualizado; npm ci, npm ls e o diff provam que o lock está atualizado.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'GHSA-mrhx-c7xc-m3w5 removido da árvore; zero high/critical. Findings moderados de glob/minimatch/fast-uri permanecem rastreados porque a correção integral sugerida exige downgrade incompatível.'
+  performance:
+    status: PASS
+    notes: 'Nenhum código de runtime ou política de cache mudou; Zod permanece na mesma major e versão já usada pelos workspaces.'
+  reliability:
+    status: PASS
+    notes: 'npm ci, build com Serwist e três cenários offline reproduziram instalação, geração do Service Worker e persistência local.'
+  maintainability:
+    status: PASS
+    notes: 'Mudança centralizada em override e lock; sem fork, patch manual de node_modules ou npm audit fix --force.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Reavaliar glob, minimatch e fast-uri quando houver versões compatíveis dos consumidores, sem downgrade do Serwist/ESLint ou npm audit fix --force.'
+      refs:
+        - 'package-lock.json'
+        - 'Docs/stories/4.12.story.md'
