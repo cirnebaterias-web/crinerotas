@@ -1368,3 +1368,66 @@ it('runs the report export CLI against the production server and writes only the
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it('administers existing users through the real caller-scoped API and CLI without leaking credentials', async () => {
+  const administrator = actorManifest.actors.administrator;
+  const manager = actorManifest.actors.manager_a;
+  if (!administrator || !manager) throw new Error('Synthetic administrator or manager missing');
+  const authorization = { Authorization: `Bearer ${administrator.accessToken}` };
+
+  const response = await fetch(`${origin}/api/v1/administration`, { headers: authorization });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  const text = await response.text();
+  expect(text).not.toMatch(/email|password|access.?token|refresh.?token|raw_user_meta/i);
+  const snapshot = JSON.parse(text) as {
+    schemaVersion: number;
+    users: Array<{ id: string; updatedAt: string; status: 'active' | 'inactive';
+      roles: string[]; sellerScopeIds: string[] }>;
+    parameters: { mutationAvailability: string; blockers: string[] };
+  };
+  expect(snapshot).toMatchObject({ schemaVersion: 1, parameters: {
+    mutationAvailability: 'blocked_pending_business_approval', blockers: ['AB-02', 'AB-03', 'AB-09'],
+  } });
+  const target = snapshot.users.find((user) => user.id === manager.id);
+  if (!target) throw new Error('Synthetic manager missing from administration projection');
+
+  const forbidden = await fetch(`${origin}/api/v1/administration`, {
+    headers: { Authorization: `Bearer ${manager.accessToken}` },
+  });
+  expect(forbidden.status).toBe(403);
+  expect((await fetch(`${origin}/api/v1/administration`)).status).toBe(401);
+
+  const command = { schemaVersion: 1, expectedUpdatedAt: target.updatedAt, status: target.status,
+    roles: target.roles, sellerScopeIds: target.sellerScopeIds,
+    reason: 'Validação real da administração caller-scoped pelo teste de integração',
+    idempotencyKey: crypto.randomUUID() };
+  const updatedResponse = await fetch(`${origin}/api/v1/administration/users/${target.id}`, {
+    method: 'PUT', headers: { ...authorization, origin, 'content-type': 'application/json',
+      'x-csrf-token': 'cirne-route-v1' }, body: JSON.stringify(command),
+  });
+  expect(updatedResponse.status).toBe(200);
+  const updated = await updatedResponse.json() as { schemaVersion: number; replayed: boolean;
+    user: typeof target & { displayName: string } };
+  expect(updated).toMatchObject({ schemaVersion: 1, replayed: false, user: { id: target.id } });
+
+  const cliList = await runWithClosedInput(process.execPath, [
+    '--import', 'tsx', 'apps/cli/src/administration-cli.ts', '--url', origin, '--json',
+  ], { cwd: root, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+    CIRNE_ADMIN_ACCESS_TOKEN: administrator.accessToken } });
+  expect(JSON.parse(cliList.stdout)).toMatchObject({ schemaVersion: 1 });
+  expect(cliList.stdout + cliList.stderr).not.toContain(administrator.accessToken);
+
+  const cliUpdate = await runWithClosedInput(process.execPath, [
+    '--import', 'tsx', 'apps/cli/src/administration-cli.ts', '--url', origin,
+    '--user', target.id, '--status', updated.user.status,
+    '--roles', updated.user.roles.join(','), '--seller-scopes', updated.user.sellerScopeIds.join(','),
+    '--reason', 'Validação real da mutação administrativa pela CLI do piloto',
+    '--expected-updated-at', updated.user.updatedAt, '--json',
+  ], { cwd: root, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+    CIRNE_ADMIN_ACCESS_TOKEN: administrator.accessToken } });
+  expect(JSON.parse(cliUpdate.stdout)).toMatchObject({ schemaVersion: 1, replayed: false,
+    user: { id: target.id } });
+  expect(cliUpdate.stdout + cliUpdate.stderr).not.toContain(administrator.accessToken);
+  expect(output).not.toContain(administrator.accessToken);
+});

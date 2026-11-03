@@ -17,6 +17,7 @@ const items: Item[] = [
   { href: '/management/clients', label: 'Clientes', capability: 'clients.read' },
   { href: '/management/scrap', label: 'Operação de sucata', capability: 'scrap.read_operations' },
   { href: '/management/scrap/agenda', label: 'Agenda de coletas', capability: 'scrap.read_operations' },
+  { href: '/management/administration', label: 'Administração', capability: 'identity.manage' },
 ];
 
 function ManagementNavigation({ identity, onNavigate }: { identity: MeResponse | null; onNavigate?: () => void }) {

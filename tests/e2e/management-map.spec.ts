@@ -84,6 +84,7 @@ test.describe('management route map', () => {
       .toContainText('Loja Centro');
     await expect(page.getByRole('complementary', { name: 'Paradas representadas no mapa' })
       .getByText('Loja Sem Coordenada')).toBeVisible();
+    await expect(page.locator('.management-map-marker')).toHaveCount(1);
     expect(requests).toBe(1);
     await page.getByRole('complementary', { name: 'Paradas representadas no mapa' })
       .getByRole('button', { name: /1\. Loja Centro/ }).click();
