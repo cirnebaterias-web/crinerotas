@@ -116,4 +116,61 @@ test.describe('controlled client import management', () => {
     expect(importCalls).toBe(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
+
+  test('keeps a confirmed import successful when the client list refresh fails', async ({ page }) => {
+    let listCalls = 0;
+    let importCalls = 0;
+    await page.route('**/api/v1/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const pathname = url.pathname;
+      if (pathname === '/api/v1/me') {
+        await route.fulfill({ json: {
+          id: '31100000-0000-4000-8000-000000000004', displayName: 'Gestor E2E',
+          roles: ['manager'], capabilities: ['clients.read', 'clients.import'], scopeIds: [], status: 'active',
+        } });
+        return;
+      }
+      if (pathname === '/api/v1/clients') {
+        listCalls += 1;
+        await route.fulfill(listCalls === 1
+          ? { json: clientListPayload([], url) }
+          : { status: 503, json: { error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Lista indisponível.' } } });
+        return;
+      }
+      if (pathname === '/api/v1/client-imports' && request.method() === 'POST') {
+        importCalls += 1;
+        await route.fulfill({ status: 201, json: {
+          schemaVersion: 1, id: '31100000-0000-4000-8000-000000000005', sourceName: 'clientes-e2e.xlsx',
+          sourceChecksum: 'b'.repeat(64), status: 'completed', totalCount: 1, acceptedCount: 1,
+          rejectedCount: 0, importedAt: '2026-11-01T12:00:00.000Z',
+          completedAt: '2026-11-01T12:00:01.000Z', replayed: false, issues: [],
+        } });
+        return;
+      }
+      await route.continue();
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Clientes');
+    sheet.addRow(['referencia_externa', 'nome', 'endereco', 'latitude', 'longitude',
+      'referencia_carteira', 'vendedor_email', 'status']);
+    sheet.addRow([client.externalReference, client.name, client.address, client.latitude, client.longitude,
+      client.portfolioReference, client.sellerEmail, client.status]);
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await page.goto('/management/clients');
+    await page.getByLabel('Planilha Excel').setInputFiles({
+      name: 'clientes-e2e.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer,
+    });
+    await page.getByRole('button', { name: 'Importar linhas válidas' }).click();
+
+    await expect(page.locator('.seller-notice[role="status"]'))
+      .toContainText('Base de clientes atualizada. A lista não pôde ser atualizada.');
+    await expect(page.getByText(/Total: 1/)).toContainText('Aceitas: 1');
+    expect(importCalls).toBe(1);
+    expect(listCalls).toBe(2);
+  });
 });

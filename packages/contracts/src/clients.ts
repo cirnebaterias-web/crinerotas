@@ -39,7 +39,7 @@ export const createClientRequestSchema = z.object({
 
 export const updateClientRequestSchema = z.object({
   schemaVersion: z.literal(1),
-  expectedVersion: z.number().int().positive(),
+  expectedVersion: z.number().int().positive().max(2_147_483_647),
   reason: z.string().trim().min(1).max(500),
   ...clientMutableFields,
 }).strict().superRefine(coordinatesArePaired);

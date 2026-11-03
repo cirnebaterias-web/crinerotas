@@ -132,6 +132,9 @@ select is((:'updated')::jsonb->'client'->>'status','archived','authorized correc
 select throws_ok(format('select api.update_client(%L::uuid,%L::jsonb,%L::uuid)',:'client_id',
   (:'update_command')::text,'32000000-0000-4000-8000-000000000021'),
   'P0001','VERSION_CONFLICT','stale expected version cannot overwrite the client');
+select throws_ok(format('select api.update_client(%L::uuid,(%L::jsonb || %L::jsonb),%L::uuid)',:'client_id',
+  (:'update_command')::text,'{"expectedVersion":2147483648}','32000000-0000-4000-8000-000000000023'),
+  'P0001','VALIDATION_FAILED','database rejects expected versions above the integer range');
 reset role;
 
 select ok(exists(select 1 from api.client_seller_scopes where client_id=:'client_id' and seller_id=:'seller_a'

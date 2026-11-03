@@ -2,17 +2,35 @@ schema: 1
 story: '3.12'
 story_title: 'Cadastro e correção manual de clientes pela gestão'
 gate: PASS
-status_reason: 'A busca e a paginação server-side eliminam o limite operacional dos primeiros 100 clientes sem ampliar o escopo autorizado. Contratos, banco, integração e jornada visual estão aprovados, inclusive para cliente além da centésima posição.'
+status_reason: 'O hardening pós-merge permanece funcionalmente aprovado e a Story 4.12 eliminou SEC-DEPENDENCIES-001: instalação limpa, árvore Zod deduplicada e audit no nível high passam com 0 vulnerabilidades high/critical. Restam apenas findings moderados já rastreados.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'sha256:68fdea2f5f1b225c1d21ebce22b3290a255169c058c1a579f6e115f9af0fdaea'
-updated: '2026-10-20T11:24:00-03:00'
-expires: '2026-11-03T11:24:00-03:00'
+reviewed_revision: 'e4c713a5ee95482c12ce7c67e10e6edecd8c64c7'
+updated: '2026-11-03T10:09:55-03:00'
+expires: '2026-11-17T10:09:55-03:00'
 top_issues: []
 waiver: { active: false }
-quality_score: 100
+quality_score: 95
 evidence:
-  tests_reviewed: 959
-  code_review: 'CodeRabbit full review: 0 findings across 10 changed files'
+  tests_reviewed: 1193
+  code_review: 'CodeRabbit reviewed 9 changed files; 1 major and 1 minor finding were fixed. A confirmação final foi limitada pela cota OSS, sem achado aberto conhecido.'
+  current_run:
+    clean_install: PASS
+    zod_tree: 'PASS: somente Zod 4.6.6 na árvore de configuração, contratos e Serwist.'
+    audit_high: 'PASS: 0 critical, 0 high, 22 moderate.'
+    audit_production_high: 'PASS: 0 critical, 0 high, 12 moderate.'
+    unit_passed: 432
+    unit_skipped: 1
+    pgtap_passed: 751
+    pgtap_context: 'Última execução descartável limpa da branch; a tentativa atual no banco local compartilhado foi descartada por fixtures preexistentes duplicadas. O CI isolado da PR é o gate remoto final.'
+    controlled_e2e_passed: 10
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    port_denylist: PASS
+    secret_scan: PASS
+    critical_vulnerabilities: 0
+    high_vulnerabilities: 0
+    moderate_vulnerabilities: 22
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     ac_gaps: []
@@ -20,25 +38,29 @@ risk_summary:
   totals:
     critical: 0
     high: 0
-    medium: 0
+    medium: 1
     low: 0
-  highest: null
+  highest: medium
 nfr_validation:
   security:
     status: PASS
-    notes: 'A nova RPC exige clients.read, preserva o recorte por papel e scopeIds, mantém grants mínimos e não expõe clientes fora da abrangência.'
+    notes: 'O patch preserva autorização e escopo, limita expectedVersion antes da conversão integer e executa em Next.js 16.4.3. A Story 4.12 fixa Zod 4.6.6 na cadeia Serwist; o audit tem 0 críticos, 0 altos e 22 moderados rastreados.'
   performance:
     status: PASS
     notes: 'Busca e contagem ocorrem no servidor; páginas são limitadas a 100 itens e a UI usa 25, atendendo a base real acima de 700 clientes sem resposta irrestrita.'
   reliability:
     status: PASS
-    notes: 'Metadados de paginação são validados, a compatibilidade com limit foi preservada e falha de recarga não apaga a confirmação de persistência do formulário.'
+    notes: 'Falha de recarga não apaga a confirmação de persistência; clientes e vendedores carregam de modo independente; falha inicial não é apresentada como lista vazia e oferece retry acionável.'
   maintainability:
     status: PASS
     notes: 'Contrato compartilhado, handler fino, RPC dedicada e testes unitários, pgTAP, integração e E2E mantêm a mudança observável e isolada.'
 recommendations:
   immediate: []
   future:
+    - action: 'Reavaliar glob, minimatch e fast-uri quando houver versões compatíveis dos consumidores, sem downgrade do Serwist/ESLint ou npm audit fix --force.'
+      refs:
+        - 'package-lock.json'
+        - 'Docs/stories/4.12.story.md'
     - action: 'Monitorar a latência da busca e considerar índices especializados somente se o volume crescer materialmente além da base atual.'
       refs:
         - 'supabase/migrations/20261020140000_client_management_search_pagination.sql'

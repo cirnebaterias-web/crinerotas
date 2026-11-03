@@ -31,6 +31,9 @@ describe('client management contracts', () => {
     expect(updateClientRequestSchema.safeParse({ ...base, expectedVersion: 1, reason: '' }).success)
       .toBe(false);
     expect(updateClientRequestSchema.safeParse({
+      ...base, expectedVersion: 2_147_483_648, reason: 'Correção autorizada',
+    }).success).toBe(false);
+    expect(updateClientRequestSchema.safeParse({
       ...base, expectedVersion: 1, reason: 'Correção autorizada', latitude: -5.79, longitude: -35.21,
     }).success).toBe(true);
   });
