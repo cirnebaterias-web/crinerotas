@@ -112,6 +112,61 @@ test.describe('manual client management', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 
+  test('keeps a confirmed save successful when the client list refresh fails', async ({ page }) => {
+    let listCalls = 0;
+    let createCalls = 0;
+    await page.route('**/api/v1/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const pathname = url.pathname;
+      if (pathname === '/api/v1/me') {
+        await route.fulfill({ json: {
+          id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
+          roles: ['manager'], capabilities: ['clients.read', 'clients.manage'], scopeIds: [], status: 'active',
+        } });
+        return;
+      }
+      if (pathname === '/api/v1/clients/sellers') {
+        await route.fulfill({ json: { schemaVersion: 1, sellers: [seller] } });
+        return;
+      }
+      if (pathname === '/api/v1/clients' && request.method() === 'GET') {
+        listCalls += 1;
+        await route.fulfill(listCalls === 1
+          ? { json: clientListPayload([originalClient], url) }
+          : { status: 503, json: { error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Lista indisponível.' } } });
+        return;
+      }
+      if (pathname === '/api/v1/clients' && request.method() === 'POST') {
+        createCalls += 1;
+        const body = request.postDataJSON();
+        await route.fulfill({ status: 201, json: { schemaVersion: 1, replayed: false, client: {
+          ...originalClient,
+          id: '31200000-0000-4000-8000-000000000005',
+          externalReference: body.externalReference,
+          name: body.name,
+          address: body.address,
+        } } });
+        return;
+      }
+      await route.abort();
+    });
+
+    await page.goto('/management/clients');
+    await page.getByRole('button', { name: 'Novo cliente' }).click();
+    await page.getByLabel('Referência externa').fill('cliente refresh falhou');
+    await page.getByLabel('Nome').fill('Cliente Persistido');
+    await page.getByLabel('Endereço completo').fill('Rua Persistida, 1');
+    await page.getByLabel('Vendedor responsável').selectOption(seller.email);
+    await page.getByRole('button', { name: 'Salvar cliente' }).click();
+
+    await expect(page.locator('.seller-notice[role="status"]'))
+      .toContainText('Cliente salvo. A lista não pôde ser atualizada.');
+    await expect(page.getByRole('button', { name: 'Salvar cliente' })).toBeHidden();
+    expect(createCalls).toBe(1);
+    expect(listCalls).toBe(2);
+  });
+
   test('turns an authorized duplicate into an actionable correction', async ({ page }) => {
     await page.route('**/api/v1/**', async (route) => {
       const request = route.request();
@@ -249,6 +304,82 @@ test.describe('manual client management', () => {
     await page.getByRole('button', { name: 'Editar cliente' }).click();
     await expect(page.getByRole('heading', { name: 'Corrigir cliente' })).toBeVisible();
     await expect(page.getByLabel('Referência externa')).toHaveValue(target.externalReference);
+  });
+
+  test('does not present a failed initial load as an empty client base', async ({ page }) => {
+    let listCalls = 0;
+    await page.route('**/api/v1/**', async (route) => {
+      const url = new URL(route.request().url());
+      const pathname = url.pathname;
+      if (pathname === '/api/v1/me') {
+        await route.fulfill({ json: {
+          id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
+          roles: ['manager'], capabilities: ['clients.read', 'clients.manage'], scopeIds: [], status: 'active',
+        } });
+        return;
+      }
+      if (pathname === '/api/v1/clients/sellers') {
+        await route.fulfill({ json: { schemaVersion: 1, sellers: [seller] } });
+        return;
+      }
+      if (pathname === '/api/v1/clients') {
+        listCalls += 1;
+        await route.fulfill(listCalls === 1
+          ? {
+              status: 503,
+              json: { error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Lista indisponível.' } },
+            }
+          : { json: clientListPayload([originalClient], url) });
+        return;
+      }
+      await route.abort();
+    });
+
+    await page.goto('/management/clients');
+
+    await expect(page.locator('.seller-notice[role="status"]'))
+      .toContainText('Não foi possível confirmar a operação.');
+    await expect(page.getByRole('heading', { name: 'Clientes cadastrados' })).toBeHidden();
+    await expect(page.getByText('Nenhum cliente encontrado na sua abrangência para esta busca.')).toBeHidden();
+    await page.getByRole('button', { name: 'Tentar carregar clientes novamente' }).click();
+    await expect(page.getByRole('heading', { name: 'Clientes cadastrados' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: originalClient.name })).toBeVisible();
+    expect(listCalls).toBe(2);
+  });
+
+  test('keeps the client list available when the seller directory fails', async ({ page }) => {
+    await page.route('**/api/v1/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.pathname === '/api/v1/me') {
+        await route.fulfill({ json: {
+          id: '31200000-0000-4000-8000-000000000003', displayName: 'Gestor Sintético',
+          roles: ['manager'], capabilities: ['clients.read', 'clients.manage'], scopeIds: [], status: 'active',
+        } });
+        return;
+      }
+      if (url.pathname === '/api/v1/clients/sellers') {
+        await route.fulfill({
+          status: 503,
+          json: { error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Vendedores indisponíveis.' } },
+        });
+        return;
+      }
+      if (url.pathname === '/api/v1/clients' && request.method() === 'GET') {
+        await route.fulfill({ json: clientListPayload([originalClient], url) });
+        return;
+      }
+      await route.abort();
+    });
+
+    await page.goto('/management/clients');
+
+    await expect(page.locator('.seller-notice[role="status"]'))
+      .toContainText('Não foi possível confirmar a operação.');
+    await expect(page.getByRole('heading', { name: 'Clientes cadastrados' })).toBeVisible();
+    await expect(page.getByLabel('Pesquisar clientes')).toBeVisible();
+    await expect(page.getByRole('heading', { name: originalClient.name })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Editar cliente' })).toBeVisible();
   });
 
   test('shows access denied without exposing management actions', async ({ page }) => {

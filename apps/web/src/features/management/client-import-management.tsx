@@ -59,6 +59,7 @@ export function ClientImportManagement() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [clientsLoaded, setClientsLoaded] = useState(false);
   const [listBusy, setListBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -71,6 +72,7 @@ export function ClientImportManagement() {
     setClients(result.clients);
     setAppliedQuery(result.query);
     setPagination(result.pagination);
+    setClientsLoaded(true);
     return result;
   }, []);
 
@@ -88,17 +90,38 @@ export function ClientImportManagement() {
           setMessage('Seu perfil não tem acesso à gestão de clientes.');
           return;
         }
-        const [clientResult, sellerResult] = await Promise.all([
+        const [clientResult, sellerResult] = await Promise.allSettled([
           scrapRequest(clientListUrl('', 1)),
           canManage ? scrapRequest(clientSellersPath) : Promise.resolve(null),
         ]);
         if (!active) return;
-        const clientList = clientListResponseSchema.parse(clientResult);
-        setClients(clientList.clients);
-        setAppliedQuery(clientList.query);
-        setPagination(clientList.pagination);
-        if (sellerResult) {
-          setSellers(clientSellerListResponseSchema.parse(sellerResult).sellers);
+        const loadErrors: string[] = [];
+        if (clientResult.status === 'fulfilled') {
+          try {
+            const clientList = clientListResponseSchema.parse(clientResult.value);
+            setClients(clientList.clients);
+            setAppliedQuery(clientList.query);
+            setPagination(clientList.pagination);
+            setClientsLoaded(true);
+          } catch (error) {
+            loadErrors.push(error instanceof Error ? error.message : 'Não foi possível consultar clientes.');
+          }
+        } else {
+          loadErrors.push(clientResult.reason instanceof Error
+            ? clientResult.reason.message : 'Não foi possível consultar clientes.');
+        }
+        if (sellerResult.status === 'fulfilled' && sellerResult.value) {
+          try {
+            setSellers(clientSellerListResponseSchema.parse(sellerResult.value).sellers);
+          } catch (error) {
+            loadErrors.push(error instanceof Error ? error.message : 'Não foi possível consultar vendedores.');
+          }
+        } else if (sellerResult.status === 'rejected') {
+          loadErrors.push(sellerResult.reason instanceof Error
+            ? sellerResult.reason.message : 'Não foi possível consultar vendedores.');
+        }
+        if (loadErrors.length > 0) {
+          setMessage([...new Set(loadErrors)].join(' '));
         }
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : 'Não foi possível consultar clientes.');
@@ -131,10 +154,16 @@ export function ClientImportManagement() {
     setBusy(true); setMessage('');
     try {
       const result = clientImportBatchSchema.parse(await sendFile(clientImportsPath, file));
-      setBatch(result); setPreview(null); await loadClients(appliedQuery, 1);
-      setMessage(result.replayed
+      setBatch(result); setPreview(null);
+      const successMessage = result.replayed
         ? 'Este conteúdo já havia sido importado; o resultado anterior foi recuperado.'
-        : 'Base de clientes atualizada.');
+        : 'Base de clientes atualizada.';
+      try {
+        await loadClients(appliedQuery, 1);
+        setMessage(successMessage);
+      } catch {
+        setMessage(`${successMessage} A lista não pôde ser atualizada. Atualize a página para consultar o estado mais recente.`);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Não foi possível importar.');
     } finally { setBusy(false); }
@@ -142,10 +171,14 @@ export function ClientImportManagement() {
 
   async function saved(client: ClientDetail) {
     setSearchInput(client.externalReference);
-    await loadClients(client.externalReference, 1);
     setCreating(false);
     setEditing(null);
-    setMessage('Cliente salvo e lista atualizada.');
+    try {
+      await loadClients(client.externalReference, 1);
+      setMessage('Cliente salvo e lista atualizada.');
+    } catch {
+      setMessage('Cliente salvo. A lista não pôde ser atualizada. Atualize a página para consultar o estado mais recente.');
+    }
   }
 
   async function searchClients(event: FormEvent) {
@@ -176,6 +209,17 @@ export function ClientImportManagement() {
     } finally { setListBusy(false); }
   }
 
+  async function retryInitialClients() {
+    setListBusy(true); setMessage('');
+    try {
+      await loadClients('', 1);
+      setSearchInput('');
+      setMessage('Clientes carregados.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível consultar clientes.');
+    } finally { setListBusy(false); }
+  }
+
   const issues = batch?.issues ?? preview?.issues ?? [];
   const accessDenied = !loading && identity !== null && !canManage && !canImport;
 
@@ -187,6 +231,12 @@ export function ClientImportManagement() {
     {loading && <p className="seller-notice" role="status">Carregando clientes…</p>}
     {accessDenied && <p className="seller-notice" role="alert">Seu perfil não tem acesso à gestão de clientes.</p>}
     {message && !accessDenied && <p className="seller-notice" role="status">{message}</p>}
+    {!loading && !clientsLoaded && identity !== null && !accessDenied && <button
+      type="button"
+      className="seller-button seller-secondary"
+      disabled={listBusy}
+      onClick={() => void retryInitialClients()}
+    >{listBusy ? 'Tentando novamente…' : 'Tentar carregar clientes novamente'}</button>}
 
     {canManage && !creating && !editing && <button
       type="button"
@@ -230,7 +280,7 @@ export function ClientImportManagement() {
       </section>}
     </section>}
 
-    {!loading && !accessDenied && <section aria-labelledby="client-list" aria-busy={listBusy}>
+    {!loading && clientsLoaded && !accessDenied && <section aria-labelledby="client-list" aria-busy={listBusy}>
       <h2 id="client-list">Clientes cadastrados</h2>
       <form className="seller-stock-card seller-stock-form" role="search" onSubmit={searchClients}>
         <label htmlFor="client-search">Pesquisar clientes</label>
