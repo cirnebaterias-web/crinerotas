@@ -17,6 +17,7 @@ export default function ManagementRouteMap({ result, tileUrl, attribution }: {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markersRef = useRef(new Map<string, Marker>());
+  const pendingStopIdRef = useRef<string | null>(null);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [tileFailure, setTileFailure] = useState(false);
   const [loadFailure, setLoadFailure] = useState(false);
@@ -59,6 +60,13 @@ export default function ManagementRouteMap({ result, tileUrl, attribution }: {
           marker.addTo(map);
           markersRef.current.set(stop.routeVersionStopId, marker);
         }
+        const pendingStopId = pendingStopIdRef.current;
+        const pendingMarker = pendingStopId ? markersRef.current.get(pendingStopId) : undefined;
+        if (pendingMarker) {
+          pendingMarker.openPopup();
+          map.panTo(pendingMarker.getLatLng());
+          pendingStopIdRef.current = null;
+        }
         for (const [routeIndex, route] of result.routes.entries()) {
           const points = route.stops.flatMap((stop) => stop.location
             ? [[Number(stop.location.latitude), Number(stop.location.longitude)] as [number, number]] : []);
@@ -83,10 +91,12 @@ export default function ManagementRouteMap({ result, tileUrl, attribution }: {
 
   function selectStop(stopId: string) {
     setSelectedStopId(stopId);
+    pendingStopIdRef.current = stopId;
     const marker = markersRef.current.get(stopId);
     if (marker) {
       marker.openPopup();
       mapRef.current?.panTo(marker.getLatLng());
+      pendingStopIdRef.current = null;
     }
   }
 
