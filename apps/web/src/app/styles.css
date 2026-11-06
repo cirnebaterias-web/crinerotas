@@ -1,3 +1,54 @@
+/* Story 4.14: online client sales reads, independent from route composition. */
+.client-sales-trigger { min-height: 44px; min-width: 44px; padding: 5px 0; border: 0; background: transparent; color: var(--cirne-forest); font: inherit; font-weight: 750; text-align: left; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.client-sales-dialog.seller-app { width: min(900px, calc(100% - 32px)); max-width: none; min-height: 0; max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid var(--cirne-border); border-radius: 16px; background: var(--cirne-surface); color: var(--cirne-ink); overflow-y: auto; }
+.client-sales-dialog::backdrop { background: rgb(3 24 15 / 62%); }
+.client-sales-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px; background: white; border-bottom: 1px solid var(--cirne-border); }
+.client-sales-header > div { min-width: 0; }
+.client-sales-header h2 { margin: 4px 0; font-size: clamp(22px, 4vw, 30px); overflow-wrap: anywhere; }
+.client-sales-header button { flex-shrink: 0; }
+.client-sales-body { padding: 24px; }
+.client-sales-coverage { color: var(--cirne-muted); font-size: 13px; line-height: 1.6; }
+.client-sales-coverage p { margin: 0 0 10px; }
+.client-sales-warning { padding: 10px; border: 1px solid currentColor; border-radius: 8px; }
+.client-sales-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 22px 0 14px; }
+.client-sales-metrics > div { min-width: 0; padding: 16px; border: 1px solid var(--cirne-border); border-radius: 12px; background: white; overflow-wrap: anywhere; }
+.client-sales-metrics dt { color: var(--cirne-muted); font-size: 13px; }
+.client-sales-metrics dd { margin: 10px 0; color: var(--cirne-forest); font-size: 22px; line-height: 1.3; font-weight: 750; }
+.client-sales-metrics small { display: block; color: var(--cirne-muted); line-height: 1.6; }
+.client-sales-cycle { font-size: 13px; line-height: 1.6; }
+.client-sales-section { min-width: 0; margin-top: 20px; padding: 20px; border: 1px solid var(--cirne-border); border-radius: 12px; background: white; }
+.client-sales-section h3 { margin: 0 0 10px; color: var(--cirne-forest); font-size: 18px; line-height: 1.4; overflow-wrap: anywhere; }
+.client-sales-section > p { color: var(--cirne-muted); font-size: 13px; line-height: 1.6; }
+.client-sales-chart { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 20px 0; }
+.client-sales-chart-month { min-width: 0; text-align: center; color: var(--cirne-forest); font-size: 12px; overflow-wrap: anywhere; }
+.client-sales-chart-month strong { font-size: 13px; }
+.client-sales-bar-track { position: relative; height: 160px; margin: 8px 0; background: linear-gradient(to bottom, transparent calc(50% - 1px), var(--cirne-muted) 50%, transparent calc(50% + 1px)); }
+.client-sales-bar { position: absolute; bottom: 50%; left: 25%; width: 50%; min-width: 8px; background: var(--cirne-green-text); border: 1px solid var(--cirne-forest); }
+.client-sales-bar.is-negative { top: 50%; bottom: auto; background: var(--cirne-muted); border-style: dashed; }
+.client-sales-values { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; table-layout: fixed; }
+.client-sales-values caption { text-align: left; margin-bottom: 8px; font-weight: 700; }
+.client-sales-values th, .client-sales-values td { padding: 10px 6px; border-bottom: 1px solid var(--cirne-border); overflow-wrap: anywhere; }
+.client-sales-products { display: grid; gap: 0; margin: 0; padding: 0; list-style-position: inside; }
+.client-sales-products li { min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--cirne-border); overflow-wrap: anywhere; }
+.client-sales-products li > strong, .client-sales-products li > span { display: block; }
+.client-sales-products li > span { margin-top: 4px; font-size: 13px; color: var(--cirne-muted); }
+.client-sales-products li > small { display: block; margin-top: 6px; }
+.client-sales-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; font-size: 13px; }
+.client-sales-planner-controls { padding: 14px; border-bottom: 1px solid var(--cirne-border); }
+.client-sales-planner-controls label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; }
+.client-sales-planner-controls select { width: 100%; min-height: 44px; padding: 8px; color: var(--cirne-forest); border: 1px solid var(--cirne-border); border-radius: 8px; background: white; }
+.client-sales-planner-controls > p { color: var(--cirne-muted); font-size: 13px; line-height: 1.5; }
+.route-planner-client-list .client-sales-trigger, .route-planner-stop-info .client-sales-trigger { min-width: 0; width: 100%; border: 0; background: transparent; padding: 5px 0; font-size: 13px; }
+.route-planner-client-list .client-sales-signal { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--cirne-border); color: var(--cirne-muted); font-size: 12px; line-height: 1.6; }
+@media (max-width: 700px) {
+  .client-sales-dialog.seller-app { width: calc(100% - 16px); max-height: calc(100dvh - 16px); border-radius: 12px; }
+  .client-sales-header, .client-sales-body { padding: 16px; }
+  .client-sales-header { flex-wrap: wrap; }
+  .client-sales-metrics { grid-template-columns: 1fr; }
+  .client-sales-section { padding: 14px; }
+  .client-sales-chart { gap: 4px; }
+  .client-sales-chart-month { font-size: 11px; }
+}
 .seller-scrap-flow form { display: grid; gap: 16px; margin: 20px 0; }
 .seller-scrap-flow form > label { display: grid; gap: 8px; font-weight: 600; }
 .seller-scrap-flow input:not([type="checkbox"]):not([type="radio"]), .seller-scrap-flow select, .seller-scrap-flow textarea { width: 100%; min-height: 48px; padding: 12px; border: 1px solid var(--cirne-border); border-radius: 10px; background: var(--cirne-surface); color: var(--cirne-ink); font: inherit; }
@@ -497,7 +548,7 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .management-brand small { color: #9ec0b0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .management-nav { display: grid; gap: 4px; margin-top: 24px; }
 .management-nav > p { margin: 0 10px 8px; color: #8eac9f; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-.management-nav a { display: flex; gap: 10px; align-items: center; min-height: 42px; padding: 9px 11px; border-radius: 9px; color: #dce9e2; text-decoration: none; font-size: 13px; font-weight: 650; }
+.management-nav a { display: flex; gap: 10px; align-items: center; min-height: 44px; padding: 9px 11px; border-radius: 9px; color: #dce9e2; text-decoration: none; font-size: 13px; font-weight: 650; }
 .management-nav a:hover { background: #163f30; }
 .management-nav a[aria-current="page"] { background: #fff; color: #073421; }
 .management-nav a span { color: #57c985; font-size: 10px; }
@@ -512,6 +563,7 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .management-page-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
 .management-page-heading h1 { margin-bottom: 8px; font-size: clamp(28px, 3vw, 42px); letter-spacing: -.04em; }
 .management-page-heading > div > p:last-child { color: var(--cirne-muted); }
+.management-page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .management-freshness { display: flex; justify-content: space-between; gap: 20px; margin: 0 0 24px; padding: 12px 16px; border: 1px solid #d2dcd6; border-radius: 10px; background: #fff; color: var(--cirne-muted); font-size: 12px; }
 .management-freshness p { margin: 0; }
 .management-local-filters { display: flex; align-items: end; gap: 18px; margin: 18px 0; padding: 14px 16px; border: 1px solid #d2dcd6; border-radius: 12px; background: #fff; }
@@ -612,11 +664,13 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .management-shell { display: block; }
   .management-sidebar { display: none; }
   .management-mobile-header { position: sticky; z-index: 20; top: 0; display: flex; justify-content: space-between; align-items: center; min-height: 64px; padding: 10px 16px; border-bottom: 1px solid #d1dcd5; background: #fff; }
-  .management-mobile-header > button { min-height: 42px; padding: 8px 12px; border: 1px solid #bdccc3; border-radius: 8px; background: #fff; }
+  .management-mobile-header > button { min-height: 44px; padding: 8px 12px; border: 1px solid #bdccc3; border-radius: 8px; background: #fff; }
   .management-drawer { position: absolute; top: 64px; right: 10px; left: 10px; padding: 16px; border: 1px solid #c6d3cb; border-radius: 12px; background: #0a3223; box-shadow: 0 10px 30px rgb(0 0 0 / 18%); color: #fff; }
-  .management-drawer-close { display: block; margin: 0 0 8px auto; padding: 7px 9px; border: 1px solid #6b8c7d; border-radius: 7px; background: transparent; color: #fff; }
+  .management-drawer-close { display: block; min-height: 44px; margin: 0 0 8px auto; padding: 7px 9px; border: 1px solid #6b8c7d; border-radius: 7px; background: transparent; color: #fff; }
   .management-drawer .management-home-link { display: block; margin-top: 14px; }
   .management-page-heading, .management-freshness, .management-local-filters { align-items: stretch; flex-direction: column; }
+  .management-page-actions { width: 100%; flex-direction: column; }
+  .management-page-actions .seller-button { width: 100%; }
   .management-shell .manager-day-page { padding: 24px 16px 42px; }
   .management-table-scroll { display: none; }
   .management-route-cards { display: grid; gap: 10px; padding: 12px; }
@@ -660,6 +714,7 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .route-planner-state span, .route-planner-state small { color: var(--cirne-muted); font-size: 10px; }
 .route-planner-message { margin: 0 0 14px; padding: 11px 14px; border: 1px solid #bad6c5; border-radius: 9px; background: #edf8f1; color: #175b38; }
 .route-planner-message.is-conflict { border-color: #dda952; background: #fff6e5; color: #754500; }
+.route-planner-shortcuts { display: none; }
 .route-planner-workspace { display: grid; grid-template-columns: minmax(300px, .82fr) minmax(460px, 1.3fr) minmax(270px, 330px); gap: 16px; align-items: start; }
 .route-planner-clients, .route-planner-composition, .route-planner-actions { min-width: 0; border: 1px solid #cbd8d0; border-radius: 15px; background: #fff; box-shadow: 0 5px 18px rgb(10 47 32 / 5%); }
 .route-planner-section-title { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid #e0e8e3; }
@@ -698,14 +753,15 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .route-planner-publish { background: #0a5b36 !important; color: #fff !important; }
 .route-planner-help { color: #697970; font-size: 10px; line-height: 1.45; }
 .route-planner-page button:disabled { opacity: .5; cursor: not-allowed; }
-.route-planner-review-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(3 24 15 / 62%); }
-.route-planner-review { width: min(620px, 100%); max-height: 90vh; padding: 24px; border-radius: 16px; overflow-y: auto; background: #fff; box-shadow: 0 20px 60px rgb(0 0 0 / 30%); }
+.route-planner-review { width: min(620px, calc(100% - 32px)); max-height: 90vh; margin: auto; padding: 24px; border: 0; border-radius: 16px; overflow-y: auto; background: #fff; color: #24382e; box-shadow: 0 20px 60px rgb(0 0 0 / 30%); }
+.route-planner-review::backdrop { background: rgb(3 24 15 / 62%); }
 .route-planner-review h2 { margin: 5px 0 10px; color: var(--cirne-forest); font-size: 25px; }
 .route-planner-review ol { display: grid; gap: 5px; max-height: 330px; margin: 16px 0; padding: 0; overflow-y: auto; list-style: none; }
 .route-planner-review li { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; background: #f2f6f3; font-size: 12px; }
 .route-planner-review li span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #d9ebdf; font-weight: 850; }
 .route-planner-review li small { color: var(--cirne-muted); }
 .route-planner-review > div { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.route-planner-discard { min-height: 44px; padding: 8px 11px; border: 1px solid #9a352f; border-radius: 8px; background: #9a352f; color: #fff; font-weight: 800; cursor: pointer; }
 
 @media (max-width: 1380px) {
   .route-planner-workspace { grid-template-columns: minmax(300px, .8fr) minmax(430px, 1.2fr); }
@@ -719,6 +775,8 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .route-planner-workspace { grid-template-columns: 1fr; }
   .route-planner-actions { grid-column: auto; }
   .route-planner-client-list, .route-planner-stop-list { max-height: none; }
+  .route-planner-shortcuts { position: sticky; z-index: 10; top: 68px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0 0 12px; padding: 6px; border: 1px solid #cbd8d0; border-radius: 10px; background: rgb(255 255 255 / 96%); box-shadow: 0 4px 12px rgb(10 47 32 / 8%); }
+  .route-planner-shortcuts a { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 6px; border-radius: 7px; color: var(--cirne-forest); font-size: 11px; font-weight: 800; text-align: center; text-decoration: none; }
 }
 @media (max-width: 620px) {
   .route-planner-stop-list li { grid-template-columns: 38px minmax(0, 1fr) 70px; }
@@ -797,4 +855,46 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .administration-section-heading { padding: 15px 14px; }
   .administration-directory li button { padding: 12px; }
   .administration-editor { padding: 15px; }
+}
+/* Daily pickup planning and field reconciliation share a readable mobile layout. */
+.logistics-management-page { padding: clamp(1rem, 3vw, 2.5rem); }
+.logistics-dashboard { margin-block: 1.5rem 2rem; min-width: 0; }
+.logistics-dashboard > p { max-width: 75ch; }
+.logistics-toolbar, .logistics-card-actions { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; margin-block: 1rem; }
+.logistics-toolbar label { display: grid; gap: .4rem; }
+.logistics-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; padding: 1.25rem; border-radius: 1rem; background: #0b3024; color: #fff; }
+.logistics-route-heading { margin-block: 1rem; padding: 1rem 1.25rem; border: 1px solid #b8cdc2; border-radius: 1rem; background: #f7faf8; overflow-wrap: anywhere; }
+.logistics-route-heading h2 { margin-block: .35rem; font-size: clamp(1.15rem, 4vw, 1.5rem); }
+.logistics-route-planner { margin-block: 1.5rem; padding: clamp(1rem, 3vw, 1.5rem); border: 1px solid #b8cdc2; border-radius: 1rem; background: #fff; }
+.logistics-route-selection { display: grid; gap: .65rem; margin-block: 1rem; }
+.logistics-route-selection label { display: flex; gap: .75rem; align-items: start; min-height: 44px; padding: .75rem; border: 1px solid #d5e1db; border-radius: .75rem; }
+.logistics-route-selection input { inline-size: 1.25rem; block-size: 1.25rem; flex: none; }
+.logistics-route-selection span, .logistics-route-selection small, .logistics-route-stops span, .logistics-route-stops small { display: block; }
+.logistics-route-stops { display: grid; gap: .75rem; padding-left: 1.5rem; }
+.logistics-route-stops li { padding: .75rem; border-bottom: 1px solid #d5e1db; }
+.logistics-route-stops li, .logistics-stop-order { display: flex; gap: .75rem; justify-content: space-between; align-items: start; }
+.logistics-stop-order button { min-width: 44px; min-height: 44px; border: 1px solid #9bb8a8; border-radius: .5rem; background: #fff; font: inherit; }
+.logistics-summary div, .logistics-weights div { min-width: 0; }
+.logistics-summary dt, .logistics-weights dt { font-size: .875rem; }
+.logistics-summary dd, .logistics-weights dd { margin: .4rem 0 0; font-size: 1.4rem; font-weight: 700; overflow-wrap: anywhere; }
+.logistics-pickup-list { display: grid; gap: 1.25rem; }
+.logistics-pickup-card, .logistics-route-card { padding: clamp(1rem, 2.5vw, 1.5rem); border: 1px solid #d5e1db; border-radius: 1rem; background: #fff; min-width: 0; overflow-wrap: anywhere; }
+.logistics-pickup-card h3 { font-size: 1.2rem; }
+.logistics-pickup-card p { margin-block: .65rem; }
+.logistics-weights { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; padding-block: 1rem; border-block: 1px solid #d5e1db; }
+.logistics-pickup-form { display: grid; gap: .8rem; padding-block: 1rem; }
+.logistics-pickup-form label { display: grid; gap: .4rem; }
+.logistics-pickup-form input, .logistics-pickup-form select, .logistics-pickup-form textarea, .logistics-toolbar input, .logistics-toolbar select, .logistics-route-card select { width: 100%; min-width: 0; min-height: 44px; padding: .75rem; border: 1px solid #bdcec4; border-radius: .5rem; background: #fff; color: #101713; font: inherit; box-sizing: border-box; }
+.logistics-history summary { cursor: pointer; min-height: 44px; padding-block: .75rem; }
+.logistics-history li { margin-block: 1rem; }
+.logistics-dashboard :focus-visible { outline: 3px solid #00863b; outline-offset: 3px; }
+@media (max-width: 480px) {
+  .logistics-weights { gap: .5rem; }
+  .logistics-weights dd { font-size: 1.05rem; }
+  .logistics-toolbar { align-items: stretch; }
+  .logistics-toolbar label, .logistics-toolbar > button { width: 100%; }
+  .logistics-card-actions > button { flex: 1 1 160px; }
+  .logistics-route-stops li { display: grid; gap: .75rem; }
+  .logistics-stop-order { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .logistics-stop-order button:last-child { margin-left: auto; }
 }

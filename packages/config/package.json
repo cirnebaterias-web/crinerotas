@@ -1,1 +1,1 @@
-{"name":"@cirne/config","version":"0.1.0","private":true,"type":"module","exports":{"./server":"./src/server.ts","./public":"./src/public.ts"},"dependencies":{"zod":"4.6.6"}}
+{"name":"@cirne/config","version":"0.1.0","private":true,"type":"module","exports":{"./server":"./src/server.ts","./public":"./src/public.ts","./client-sheet-sync":"./src/client-sheet-sync.ts","./sales-sync":"./src/sales-sync.ts","./product-catalog-sync":"./src/product-catalog-sync.ts","./scrap-ledger-sync":"./src/scrap-ledger-sync.ts"},"dependencies":{"zod":"4.6.6"}}

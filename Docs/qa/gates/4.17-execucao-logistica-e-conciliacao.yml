@@ -1,0 +1,37 @@
+schema: 1
+story: '4.17'
+story_title: 'Rota móvel da logística e conciliação de sucata prometida versus coletada'
+gate: PASS
+status_reason: 'Promessa preservada, execução pessoal, divergências e correções auditadas foram verificadas em SQL, contratos, BFF, CLI e UI local; restam apenas recomendações baixas não bloqueantes.'
+reviewer: 'Quinn'
+reviewed_revision: 'worktree:sha256:86104dce939bd5b642eb1c09463ead484cb65da1b183b5aeed926702e9d60339'
+updated: '2026-11-04T13:10:00Z'
+top_issues:
+  - id: MNT-417-001
+    severity: low
+    finding: 'Operador recebe eventos seguros da própria agenda no JSON, embora a UI reserve a expansão histórica ao gestor; não há escape de escopo.'
+    suggested_action: 'Minimizar histórico em evolução incremental, incluindo replay e perfis múltiplos, sem reescrever migração aplicada.'
+    suggested_owner: dev
+  - id: UX-417-004
+    severity: low
+    finding: 'Mensagem de acesso negado no painel legado orienta novo login tanto para 401 quanto para 403.'
+    suggested_action: 'Distinguir orientação de sessão expirada e falta de permissão em refinamento de texto.'
+    suggested_owner: dev
+waiver: { active: false }
+evidence:
+  manifest_files: 35
+  manifest_method: 'SHA256 UTF-8 de path:sha256(file) separados por LF, sem LF final, na ordem da primeira ocorrência no File List; excluir Docs/qa e Docs/stories.'
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ac_gaps: [] }
+  verification: 'Lint/typecheck/build/diff-check PASS; 755 unitários PASS + 1 skip; pgTAP 26 arquivos/1292 asserções PASS, incluindo 61 logísticas; rollback transacional PASS; 29 E2E únicos e smoke UI real PASS.'
+  assessment: 'Docs/qa/assessments/4.16-4.17-review-20261104.md'
+  coderabbit: 'Docs/qa/assessments/4.16-4.17-coderabbit-20261104.md'
+nfr_validation:
+  security: { status: PASS, notes: 'BFF/SQL, capacidade, escopo, operador atual, bloqueio e reautorização antes de replay verificados.' }
+  reliability: { status: PASS, notes: '100/80/120/0 kg, correção 80 para 85, original imutável, versão, revisão e totais efetivos cobertos; sem recebimento fictício.' }
+  performance: { status: PASS, notes: 'Lista operacional e reflow móvel aprovados localmente; sem benchmark produtivo.' }
+  maintainability: { status: PASS, notes: 'ADR 008, contratos compartilhados, migração incremental, histórico protegido e fronteiras legadas preservadas.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Tratar MNT-417-001 e UX-417-004 conforme assessment, sem ampliar o fluxo comercial.'
+    - action: 'Concluir gates de infraestrutura/HTTPS/backup antes do acesso móvel remoto; nenhuma implantação ou push é afirmado por este gate.'

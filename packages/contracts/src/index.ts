@@ -1,9 +1,16 @@
 import { z } from 'zod';
 import { competitorCommercialActionTypeSchema } from './commercial-action-types';
+import { clientGoogleLocationSchema } from './client-google-location';
+export * from './client-google-location';
 export * from './scrap-revisions';
 export * from './client-reference';
 export * from './clients';
 export * from './client-imports';
+export * from './client-sheet-sync';
+export * from './sales';
+export * from './scrap-ledger';
+export * from './sales-crm';
+export * from './product-catalog';
 export * from './management-day';
 export * from './management-map';
 export * from './administration';
@@ -11,6 +18,9 @@ export * from './visit-detail';
 export * from './commercial-action-types';
 export * from './field-intelligence';
 export * from './report-exports';
+export * from './weekly-route-proposals';
+export * from './seller-route-profiles';
+export * from './scrap-collection-routes';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
 export type LiveResponse = z.infer<typeof liveResponseSchema>;
@@ -203,6 +213,7 @@ export const routeClientSnapshotSchema = z.object({
   externalReference: z.string().trim().min(1).max(120).nullable(),
   name: z.string().trim().min(1).max(160),
   address: z.string().trim().min(1).max(300),
+  googleLocation: clientGoogleLocationSchema.nullable().optional(),
   latitude: nullableDecimalSchema,
   longitude: nullableDecimalSchema,
   portfolioReference: z.string().trim().min(1).max(120).nullable(),
@@ -826,10 +837,11 @@ export const pickupScheduleSchema = z.object({
   origin: z.enum(['visit', 'standalone']), visitId: z.uuid().nullable(),
   estimatedWeightKg: positiveScrapWeightSchema, desiredDate: z.iso.date(), period: scrapPeriodSchema,
   observation: z.string().nullable(), requestedAt: z.iso.datetime({ offset: true }),
-  serverSavedAt: z.iso.datetime({ offset: true }), status: z.literal('pending'),
+  serverSavedAt: z.iso.datetime({ offset: true }), status: z.enum(['pending', 'completed']),
   version: z.number().int().positive(),
 }).strict();
 export type PickupSchedule = z.infer<typeof pickupScheduleSchema>;
+export * from './logistics-pickups';
 
 const scrapAgendaCursorSchema = z.string().regex(/^[A-Za-z0-9_-]{8,1024}$/u);
 export const scrapAgendaFilterObjectSchema = z.object({

@@ -11,6 +11,8 @@ import { formatServiceDate, movePending, orderedStops, pendingIds, routeProgress
 import { NavigationActions } from './navigation-actions';
 import { VisitEvidenceCapture, type VisitEvidenceCaptureValue } from '@/features/visits/visit-evidence-capture';
 import { checkinFailureMessage } from './checkin-failure-message';
+import { ClientSalesDialog } from '@/features/clients/client-sales-dialog';
+import { orderPendingFromLocation } from './route-location-order';
 
 const statusLabels = { pending: 'Pendente', in_visit: 'Em visita', completed: 'Visitado', not_visited: 'Não visitado' };
 
@@ -28,6 +30,7 @@ export function RouteScreen() {
   const [visitDrafts, setVisitDrafts] = useState<Record<string, LocalVisitDraft>>({});
   const [visitBusyStop, setVisitBusyStop] = useState<string | null>(null);
   const [checkinStop, setCheckinStop] = useState<CanonicalRoute['stops'][number] | null>(null);
+  const [salesClient, setSalesClient] = useState<CanonicalRoute['stops'][number]['client'] | null>(null);
   const generation = useRef(0);
   const accessBlocked = useRef(false);
   const cacheGeneration = useRef(0);
@@ -35,6 +38,7 @@ export function RouteScreen() {
   const offlineService = useRef<OfflineFoundationService | null>(null);
 
   const clearPrivate = useCallback(() => {
+    setSalesClient(null);
     ++cacheGeneration.current;
     setIdentity(null); setToday(null); setDraft(null); setOfflineCache(null); setCompositionMessage(''); setVisitDrafts({});
   }, []);
@@ -159,6 +163,29 @@ export function RouteScreen() {
     } finally { if (current === generation.current) setBusy(false); }
   }
 
+  async function beginReorder() {
+    if (!route || busy || offline || needsReload || !navigator.geolocation) {
+      setMessage('Ative a localização do celular para reorganizar a rota. A cidade-base não será alterada.');
+      return;
+    }
+    setBusy(true); setMessage('Obtendo sua localização atual…');
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      try {
+        await sellerClient.captureRouteLocation({ latitude: position.coords.latitude,
+          longitude: position.coords.longitude, accuracyM: position.coords.accuracy,
+          capturedAt: new Date(position.timestamp).toISOString() });
+        setDraft(orderPendingFromLocation(route.stops, { latitude: position.coords.latitude,
+          longitude: position.coords.longitude }));
+        setMessage(`Localização pontual registrada com precisão de ${Math.round(position.coords.accuracy)} m. As paradas pendentes foram aproximadas por distância em linha reta; revise antes de salvar.`);
+      } catch {
+        setMessage(position.coords.accuracy > 100
+          ? 'A precisão do GPS está acima de 100 m. Vá para uma área aberta e tente novamente.'
+          : 'Não foi possível confirmar a localização. Tente novamente com internet.');
+      } finally { setBusy(false); }
+    }, () => { setBusy(false); setMessage('Permita o acesso à localização para reorganizar a rota.'); },
+    { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 });
+  }
+
   async function beginVisit(stop: CanonicalRoute['stops'][number]) {
     if (accessBlocked.current || !identity || !offlineService.current || visitBusyStop) return;
     const existing = visitDrafts[stop.routeVersionStopId];
@@ -255,7 +282,7 @@ export function RouteScreen() {
         </aside>
         <section className="seller-stops" aria-labelledby="stops-title">
           <div className="seller-section-heading"><div><h2 id="stops-title">Paradas do dia <span>{stops.length}</span></h2><p>{draft ? 'Ajuste a sequência usando as setas.' : 'Seu roteiro na ordem de execução.'}</p></div>
-            {!draft && <button className="seller-button seller-secondary" disabled={busy || offline || needsReload || !canReorder || pending.length < 2} onClick={() => { setDraft(route.stops); setMessage(''); }}>Reordenar <span aria-hidden="true">↕</span></button>}
+            {!draft && <button className="seller-button seller-secondary" disabled={busy || offline || needsReload || !canReorder || pending.length < 2} onClick={() => void beginReorder()}>Reordenar <span aria-hidden="true">↕</span></button>}
           </div>
           {(draft || needsReload) && <div className="seller-editbar"><span>{needsReload ? 'Recarregamento necessário' : 'Editando · alterações não salvas'}</span><div>
             {needsReload ? <button className="seller-button seller-primary" disabled={busy || offline} onClick={() => void load()}>Recarregar rota</button> : <>
@@ -268,7 +295,9 @@ export function RouteScreen() {
             const localVisit = visitDrafts[stop.routeVersionStopId];
             return <li key={stop.routeVersionStopId} className="seller-stop-card" data-status={stop.status}>
               <div className="seller-stop-number" aria-label={`Parada ${stop.executionOrder}`}>{String(stop.executionOrder).padStart(2, '0')}</div>
-              <div className="seller-stop-info"><div className="seller-stop-meta"><span className={`seller-stop-status status-${stop.status}`}>{statusLabels[stop.status]}</span><span>Prioridade {stop.priority}</span></div><h3>{stop.client.name}</h3><p>{stop.client.address}</p>
+              <div className="seller-stop-info"><div className="seller-stop-meta"><span className={`seller-stop-status status-${stop.status}`}>{statusLabels[stop.status]}</span><span>Prioridade {stop.priority}</span></div><h3 aria-label={stop.client.name}>{identity?.capabilities.includes('sales.read_client')
+                ? <button type="button" className="client-sales-trigger" aria-label={`Consultar compras de ${stop.client.name}`} onClick={() => setSalesClient(stop.client)}>{stop.client.name}</button>
+                : stop.client.name}</h3><p>{stop.client.address}</p>
                 <span className="seller-planned-order">Ordem planejada {stop.plannedOrder}</span>
                 <NavigationActions client={stop.client} offline={offline} busy={busy || needsReload} />
                 {!draft && (stop.status === 'pending' || visitDrafts[stop.routeVersionStopId]) && <button
@@ -289,6 +318,7 @@ export function RouteScreen() {
           {!draft && <button className="seller-button seller-refresh" onClick={() => void load()} disabled={busy || offline}>↻ Atualizar rota</button>}
         </section>
       </div>}
+      {salesClient && <ClientSalesDialog key={salesClient.id} client={salesClient} onClose={() => setSalesClient(null)} />}
       {checkinStop && <div className="seller-evidence-overlay">
         <VisitEvidenceCapture
           kind="checkin"

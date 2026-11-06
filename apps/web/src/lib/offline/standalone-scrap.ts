@@ -21,12 +21,21 @@ const scrapCsrfToken = 'cirne-route-v1';
 export class StandaloneScrapScheduleStore {
   private readonly db: OfflineDatabase;
   private syncing: Promise<LocalStandaloneScrapSchedule[]> | null = null;
+  private blocked = false;
+  private ownerId: string | null = null;
+  private readonly controller = new AbortController();
 
   constructor(database = new OfflineDatabase(), private readonly now = () => new Date().toISOString()) {
     this.db = database;
   }
 
-  close() { this.db.close(); }
+  close() { this.blocked = true; this.controller.abort(); this.db.close(); }
+
+  private assertAccess(userId?: string) {
+    if (this.blocked || (userId && this.ownerId && userId !== this.ownerId)) {
+      throw new Error('A sessão mudou. Entre novamente para acessar os agendamentos.');
+    }
+  }
 
   private deviceId() {
     let id = window.localStorage.getItem(deviceKey);
@@ -35,55 +44,80 @@ export class StandaloneScrapScheduleStore {
   }
 
   private async partition(): Promise<OfflinePartition> {
+    this.assertAccess();
     await this.db.open();
+    this.assertAccess();
     const deviceId = this.deviceId();
     if (navigator.onLine) {
       let response: Response | undefined;
       try {
-        response = await fetch(mePath, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15_000) });
+        response = await fetch(mePath, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(15_000)]) });
       } catch { /* Use the locally validated window if the network is temporarily unavailable. */ }
       if (response?.ok) {
         const identity = meResponseSchema.parse(await response.json());
+        this.assertAccess(identity.id);
         if (!identity.roles.includes('seller') || identity.status !== 'active') {
           throw new Error('Acesso de vendedor ativo necessário para agendar.');
         }
         const partition = { userId: identity.id, deviceId };
+        this.ownerId = identity.id;
         await this.db.localSessions.put(createValidatedLocalSession(partition, this.now()));
+        this.assertAccess(identity.id);
         window.localStorage.setItem(userKey, identity.id);
         return partition;
       }
       if (response?.status === 401 || response?.status === 403) throw new Error('Entre novamente para agendar.');
     }
     const userId = window.localStorage.getItem(userKey);
+    this.assertAccess(userId ?? undefined);
     if (!userId) throw new Error('Entre online ao menos uma vez para agendar offline.');
     const partition = { userId, deviceId };
     const session = await this.db.localSessions.get([userId, deviceId]);
     if (!session || !evaluateLocalAccess(session, partition, this.now()).allowed) {
       throw new Error('A sessão offline expirou. Entre novamente quando houver conexão.');
     }
+    this.assertAccess(userId);
+    this.ownerId = userId;
     return partition;
   }
 
   async searchClients(query: string): Promise<ScrapClient[]> {
+    if (query.trim().length < 2) throw new Error('Digite ao menos 2 caracteres do nome ou o documento completo do cliente.');
     const partition = await this.partition();
     const normalized = query.trim().toLocaleLowerCase('pt-BR');
+    let remoteUnavailable = false;
     if (navigator.onLine) {
+      let response: Response | undefined;
       try {
-        const response = await fetch(`${scrapClientsPath}?q=${encodeURIComponent(query.trim())}`, {
-          credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+        response = await fetch(`${scrapClientsPath}?q=${encodeURIComponent(query.trim())}`, {
+          credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(15_000)]),
         });
-        if (!response.ok) throw new Error('Falha ao buscar clientes.');
-        const clients = scrapClientListSchema.parse(await response.json()).clients;
+      } catch { remoteUnavailable = true; }
+      this.assertAccess(partition.userId);
+      if (response?.status === 401) throw new Error('Entre novamente para buscar os clientes da sua carteira.');
+      if (response?.status === 403) throw new Error('Seu acesso à carteira não foi autorizado. Solicite a conferência do gestor.');
+      if (response?.ok) {
+        let clients: ScrapClient[];
+        try { clients = scrapClientListSchema.parse(await response.json()).clients; }
+        catch { throw new Error('Não foi possível carregar os clientes. Tente buscar novamente.'); }
+        this.assertAccess(partition.userId);
         await this.db.scrapClients.bulkPut(clients.map((client): LocalScrapClient => ({
           ...partition, ...client, cachedAt: this.now(),
         })));
+        this.assertAccess(partition.userId);
         return clients;
-      } catch { /* A consulta local usa somente clientes previamente autorizados e vistos. */ }
+      }
+      remoteUnavailable = true;
     }
-    return (await this.db.scrapClients.where('[userId+deviceId]').equals([
+    const cached = (await this.db.scrapClients.where('[userId+deviceId]').equals([
       partition.userId, partition.deviceId,
     ]).toArray()).filter((client) => `${client.name} ${client.address}`.toLocaleLowerCase('pt-BR')
       .includes(normalized)).slice(0, 30).map(({ id, name, address }) => ({ id, name, address }));
+    this.assertAccess(partition.userId);
+    if (remoteUnavailable && cached.length === 0) {
+      throw new Error('A busca está indisponível e não há clientes correspondentes salvos neste aparelho. Confira a conexão e tente novamente.');
+    }
+    return cached;
   }
 
   async listSchedules(): Promise<LocalStandaloneScrapSchedule[]> {
@@ -91,6 +125,7 @@ export class StandaloneScrapScheduleStore {
     const schedules = await this.db.scrapSchedules.where('[userId+deviceId]').equals([
       partition.userId, partition.deviceId,
     ]).toArray();
+    this.assertAccess(partition.userId);
     return schedules.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -100,6 +135,7 @@ export class StandaloneScrapScheduleStore {
     const key: [string, string, string] = [partition.userId, partition.deviceId, input.offlineId];
     return this.db.transaction('rw', this.db.scrapSchedules, async () => {
       const previous = await this.db.scrapSchedules.get(key);
+      this.assertAccess(partition.userId);
       if (previous) {
         if (JSON.stringify(previous.request) !== JSON.stringify(request)) {
           throw new Error('Este agendamento já foi salvo com outros dados; crie um novo.');
@@ -129,6 +165,7 @@ export class StandaloneScrapScheduleStore {
       partition.userId, partition.deviceId,
     ]).filter((record) => record.status === 'pending').sortBy('createdAt');
     for (const record of records) {
+      this.assertAccess(partition.userId);
       let response: Response;
       try {
         response = await fetch(scrapSchedulesPath, {
@@ -137,11 +174,13 @@ export class StandaloneScrapScheduleStore {
             'Content-Type': 'application/json', 'X-CSRF-Token': scrapCsrfToken,
             'X-Device-Id': partition.deviceId, 'Idempotency-Key': record.idempotencyKey,
           },
-          body: JSON.stringify(record.request), signal: AbortSignal.timeout(30_000),
+          body: JSON.stringify(record.request), signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(30_000)]),
         });
       } catch { break; }
+      this.assertAccess(partition.userId);
       if (response.ok) {
         const saved = pickupScheduleSchema.parse(await response.json());
+        this.assertAccess(partition.userId);
         if (saved.offlineId !== record.offlineId) throw new Error('Resposta de agendamento incompatível.');
         await this.db.scrapSchedules.put({ ...record, status: 'synced', serverId: saved.id,
           serverSavedAt: saved.serverSavedAt, lastError: undefined });
@@ -152,6 +191,7 @@ export class StandaloneScrapScheduleStore {
         const parsed = apiErrorResponseSchema.safeParse(await response.json());
         if (parsed.success) message = parsed.data.error.message;
       } catch { /* Keep the safe message. */ }
+      this.assertAccess(partition.userId);
       if (response.status >= 400 && response.status < 500 && response.status !== 401 && response.status !== 429) {
         await this.db.scrapSchedules.put({ ...record, status: 'action_required', lastError: message });
         continue;

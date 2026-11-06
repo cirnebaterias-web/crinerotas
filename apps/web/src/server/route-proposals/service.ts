@@ -1,0 +1,166 @@
+import { clientListResponseSchema, dailySellerLocationSchema, decideWeeklyRouteProposalRequestSchema,
+  persistedWeeklyRouteProposalSchema, reviseWeeklyRouteProposalRequestSchema,
+  saveWeeklyRouteProposalRequestSchema, sellerRouteProfileSchema, weeklyRouteProposalRequestSchema,
+  weeklyRouteProposalSchema, type DecideWeeklyRouteProposalRequest, type ImportedClient,
+  type ReviseWeeklyRouteProposalRequest,
+  type WeeklyRouteProposalRequest } from '@cirne/contracts';
+import { proposeWeeklyRoutes, SellerBaseCityNotConfiguredError,
+  weeklyProposalReadiness } from '@cirne/domain';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { clientImportRpc } from '../client-imports/http';
+import { getSalesSignals } from '../client-sales/crm';
+import { RouteRequestError } from '../routes/http';
+import { getScrapLedgerAnalytics } from '../scrap-ledger-sync/service';
+import { listManagedClientSellers } from '../clients/service';
+
+const scrapPageSchema = z.object({
+  generationId: z.uuid().nullable(), view: z.literal('balances'), page: z.number().int().positive(),
+  pageSize: z.literal(50), totalCount: z.number().int().nonnegative(),
+  rows: z.array(z.object({ client_external_reference: z.string().regex(/^(?:\d{11}|\d{14})$/),
+    balance_kg: z.union([z.string(), z.number()]), trend: z.enum(['growing', 'falling', 'stable']) }).passthrough()),
+  trendMethod: z.string(),
+}).strip();
+const scrapGenerationSchema = z.object({ generationId: z.uuid(),
+  publishedAt: z.iso.datetime({ offset: true }) }).strict();
+
+async function listPortfolio(client: SupabaseClient, sellerId: string) {
+  const clients: ImportedClient[] = [];
+  let totalPages = 1;
+  for (let page = 1; page <= totalPages; page++) {
+    const result = clientListResponseSchema.parse(await clientImportRpc(client, 'list_management_clients', {
+      p_query: '', p_page: page, p_page_size: 100, p_seller_id: sellerId,
+    }));
+    totalPages = result.pagination.totalPages;
+    clients.push(...result.clients);
+    if (clients.length > 5000) throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Carteira excede o limite da proposta.', false);
+  }
+  return clients;
+}
+
+async function readSignals(client: SupabaseClient, sellerId: string, serviceDate: string, clients: ImportedClient[], now: Date) {
+  const byId = new Map<string, Awaited<ReturnType<typeof getSalesSignals>>['signals'][number]['metrics']>();
+  let generationId: string | undefined;
+  let asOfDate: string | undefined;
+  for (let index = 0; index < clients.length; index += 50) {
+    const result = await getSalesSignals(client, { sellerId, serviceDate,
+      clientIds: clients.slice(index, index + 50).map(({ id }) => id), generationId, asOfDate }, now);
+    generationId ??= result.generationId;
+    asOfDate ??= result.asOfDate;
+    result.signals.forEach(({ client: customer, metrics }) => byId.set(customer.id, metrics));
+  }
+  return { byId, generationId: generationId ?? null, asOfDate: asOfDate ?? null };
+}
+
+async function readScrapDebts(client: SupabaseClient) {
+  const debts = new Map<string, { debtKg: number; state: 'debtor' | 'creditor' | 'settled' }>();
+  try {
+    const first = scrapPageSchema.parse(await getScrapLedgerAnalytics(client, 'balances', '', 1));
+    const metadata = scrapGenerationSchema.parse(await clientImportRpc(client, 'get_scrap_ledger_generation_metadata'));
+    if (metadata.generationId !== first.generationId) throw new Error('scrap_generation_changed');
+    const pages = Math.ceil(first.totalCount / first.pageSize);
+    const all = [first];
+    for (let page = 2; page <= pages; page += 1) {
+      const next = scrapPageSchema.parse(await getScrapLedgerAnalytics(client, 'balances', '', page));
+      if (next.generationId !== first.generationId) throw new Error('scrap_generation_changed');
+      all.push(next);
+    }
+    all.flatMap(({ rows }) => rows).forEach((row) => { const balance = Number(row.balance_kg);
+      debts.set(row.client_external_reference, { debtKg: Math.max(0, -balance),
+        state: balance < 0 ? 'debtor' : balance > 0 ? 'creditor' : 'settled' }); });
+    return { debts, status: 'available' as const, generationId: first.generationId,
+      publishedAt: metadata.publishedAt };
+  } catch {
+    // Sales opportunity remains usable; null explicitly represents unavailable scrap data.
+    return { debts, status: 'unavailable' as const, generationId: null, publishedAt: null };
+  }
+}
+
+export async function generateWeeklyProposal(client: SupabaseClient, command: WeeklyRouteProposalRequest, now = new Date()) {
+  const parsed = weeklyRouteProposalRequestSchema.parse(command);
+  const seller = (await listManagedClientSellers(client)).sellers.find(({ id }) => id === parsed.sellerId);
+  if (!seller) throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Vendedor não encontrado.', false);
+  let origin;
+  try {
+    const persisted = sellerRouteProfileSchema.parse(await clientImportRpc(client, 'get_seller_route_profile', {
+      p_seller_id: parsed.sellerId,
+    }));
+    const readiness = weeklyProposalReadiness(persisted, now);
+      if (!readiness.ready) {
+        const messages = {
+          portfolio_unassigned: 'A carteira está sem titular.',
+          seller_inactive: 'O desligamento do vendedor já entrou em vigor.',
+          base_city_missing: 'A cidade-base do vendedor ainda não foi configurada.',
+        } as const;
+        throw new SellerBaseCityNotConfiguredError(messages[readiness.reason]);
+      }
+    origin = readiness.origin;
+  } catch (error) {
+    if (error instanceof SellerBaseCityNotConfiguredError) {
+      throw new RouteRequestError(422, 'VALIDATION_FAILED', error.message, false);
+    }
+    throw error;
+  }
+  const portfolio = await listPortfolio(client, parsed.sellerId);
+  const [signals, debts] = await Promise.all([
+    readSignals(client, parsed.sellerId, parsed.weekStart, portfolio, now), readScrapDebts(client),
+  ]);
+  return weeklyRouteProposalSchema.parse(proposeWeeklyRoutes({ weekStart: parsed.weekStart,
+    generatedAt: now.toISOString(), origin,
+    sources: { sales: { status: signals.generationId ? 'available' : 'unavailable',
+      generationId: signals.generationId, asOfDate: signals.asOfDate },
+      scrap: { status: debts.status, generationId: debts.generationId, publishedAt: debts.publishedAt } },
+    candidates: portfolio.map((customer) => {
+      const metrics = signals.byId.get(customer.id);
+      return { clientId: customer.id, name: customer.name,
+        status: customer.status === 'active' ? 'active' : 'inactive',
+        daysSinceLastPurchase: metrics?.daysSinceLastPurchase ?? null,
+        periodicityDays: metrics?.periodicityDays ?? null,
+        averageMonthlyVolume: metrics?.averageMonthlyVolume ?? null,
+        scrapDebtKg: debts.debts.get(customer.externalReference)?.debtKg ?? null,
+        scrapBalanceState: debts.debts.get(customer.externalReference)?.state ?? 'unavailable',
+        location: customer.latitude !== null && customer.longitude !== null
+          ? { latitude: customer.latitude, longitude: customer.longitude } : null,
+        hasNavigableAddress: Boolean(customer.googleLocation?.placeId || customer.googleLocation?.address || customer.address.trim()),
+      };
+    }) }));
+}
+
+export async function generateAndSaveWeeklyProposal(client: SupabaseClient,
+  command: WeeklyRouteProposalRequest & { idempotencyKey: string }, now = new Date()) {
+  const proposal = await generateWeeklyProposal(client, {
+    schemaVersion: command.schemaVersion, weekStart: command.weekStart, sellerId: command.sellerId,
+  }, now);
+  const persistenceCommand = saveWeeklyRouteProposalRequestSchema.parse({
+    schemaVersion: 1, idempotencyKey: command.idempotencyKey, proposal,
+  });
+  return persistedWeeklyRouteProposalSchema.parse(await clientImportRpc(client, 'save_weekly_route_proposal', {
+    p_command: persistenceCommand,
+  }));
+}
+
+export async function inspectWeeklyProposal(client: SupabaseClient, proposalId: string) {
+  return persistedWeeklyRouteProposalSchema.parse(await clientImportRpc(client, 'get_weekly_route_proposal', {
+    p_id: z.uuid().parse(proposalId),
+  }));
+}
+
+export async function reviseWeeklyProposal(client: SupabaseClient, proposalId: string,
+  command: ReviseWeeklyRouteProposalRequest) {
+  return persistedWeeklyRouteProposalSchema.parse(await clientImportRpc(client, 'revise_weekly_route_proposal', {
+    p_id: z.uuid().parse(proposalId), p_command: reviseWeeklyRouteProposalRequestSchema.parse(command),
+  }));
+}
+
+export async function decideWeeklyProposal(client: SupabaseClient, proposalId: string,
+  command: DecideWeeklyRouteProposalRequest) {
+  return persistedWeeklyRouteProposalSchema.parse(await clientImportRpc(client, 'decide_weekly_route_proposal', {
+    p_id: z.uuid().parse(proposalId), p_command: decideWeeklyRouteProposalRequestSchema.parse(command),
+  }));
+}
+
+export async function captureDailySellerLocation(client: SupabaseClient, command: unknown) {
+  return dailySellerLocationSchema.parse(await clientImportRpc(client, 'capture_daily_seller_location', {
+    p_command: command,
+  }));
+}

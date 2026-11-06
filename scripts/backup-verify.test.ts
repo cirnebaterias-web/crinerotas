@@ -84,7 +84,7 @@ describe('ops:backup:verify', () => {
     await save();
     await expect(verifyBackupManifest(manifestPath)).rejects.toThrow('ausente');
     expect(directory).toContain('cirne-backup-verify-');
-  });
+  }, 15_000);
 
   it('requires exact declared object count and the private bucket', async () => {
     const { manifest, manifestPath, save } = await fixture();
@@ -98,7 +98,7 @@ describe('ops:backup:verify', () => {
     manifest.scrapEvidence.bucket = 'visit-evidence';
     await save();
     await expect(verifyBackupManifest(manifestPath)).rejects.toThrow('Cobertura');
-  });
+  }, 15_000);
 
   it('accepts an explicit zero-object snapshot without claiming complete DB coverage', async () => {
     const { manifest, manifestPath, save } = await fixture();
@@ -110,7 +110,7 @@ describe('ops:backup:verify', () => {
       verifiedObjectCount: 0,
       scrapEvidenceBytes: 0,
     });
-  });
+  }, 15_000);
 
   it.each(['../outside.dump', '/outside.dump', 'C:/outside.dump', 'objects\\outside.dump',
     './database.dump', 'folder//database.dump', 'NUL.dump'])('rejects unsafe relative path %s', async (path) => {

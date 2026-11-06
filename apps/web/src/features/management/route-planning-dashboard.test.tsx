@@ -21,4 +21,10 @@ describe('route planning dashboard', () => {
     expect(html).toContain('A rota ainda está vazia');
     expect(html).not.toContain('draggable');
   });
+
+  it('preserves a valid date received from the management day view', () => {
+    const html = renderToStaticMarkup(<RoutePlanningDashboard initialServiceDate="2026-11-05" />);
+    expect(html).toContain('value="2026-11-05"');
+    expect(html).toContain('/management/day?serviceDate=2026-11-05');
+  });
 });

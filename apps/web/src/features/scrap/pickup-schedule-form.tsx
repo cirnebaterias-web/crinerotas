@@ -23,7 +23,8 @@ export function PickupScheduleForm({ initial, onSave }: { initial?: PickupSchedu
   }
   return <form onSubmit={submit} aria-busy={busy}><p className="seller-muted">Informe a previsão para a logística. O peso será conferido na coleta.</p>
     <label>Peso estimado em kg<input required inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} disabled={busy} /></label>
-    <label>Data desejada<input required type="date" min={localDate()} value={date} onChange={(e) => setDate(e.target.value)} disabled={busy} /></label>
+    <label>Data desejada<input required type="date" min={localDate(1)} aria-describedby="pickup-date-help" value={date} onChange={(e) => setDate(e.target.value)} disabled={busy} /></label>
+    <p id="pickup-date-help" className="seller-muted">Escolha a partir de amanhã, no horário de Brasília.</p>
     <fieldset><legend>Período</legend><div className="seller-choice-grid">{([['morning', 'Manhã'], ['afternoon', 'Tarde']] as const).map(([value, label]) => <label key={value}><input required type="radio" name="pickup-period" checked={period === value} onChange={() => setPeriod(value)} disabled={busy} />{label}</label>)}</div></fieldset>
     <label>Observação (opcional)<textarea rows={3} maxLength={1000} value={observation} onChange={(e) => setObservation(e.target.value)} disabled={busy} /></label>
     {error && <p className="seller-notice seller-error" role="alert">{error}</p>}<button className="seller-button seller-primary" disabled={busy}>{busy ? 'Salvando…' : 'Salvar agendamento'}</button>

@@ -1,0 +1,24 @@
+schema: 1
+story: '4.19'
+story_title: 'Proposta semanal de rotas com oportunidade, sucata e origem GPS'
+gate: PASS
+status_reason: 'Os onze critérios de aceite foram aprovados após o fechamento do DB-VAL-001; a validação SQL está estrita e NULL-safe e não restam achados críticos, altos ou médios.'
+reviewer: 'Quinn'
+updated: '2026-11-05T23:03:21Z'
+top_issues: []
+waiver: { active: false }
+evidence:
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], ac_gaps: [] }
+  independent_verification: '5 suites focais / 18 testes PASS; git diff --check PASS; revisão read-only do fechamento DB-VAL-001 e dos cinco testes pgTAP negativos.'
+  implementation_verification: 'Clean DB reset PASS; pgTAP focal 37/37 PASS; pgTAP completo 31 arquivos / 1468 PASS; unitários 148 arquivos / 825 PASS e 1 skip; typecheck, lint e build PASS.'
+  database: 'Documento de proposta validado de forma estrita e NULL-safe; escopo, carteira, idempotência, versão, republicação e cancelamento seguro possuem cobertura.'
+  coderabbit: 'Pre-commit executado em lotes sem CRITICAL; achados aplicáveis à Story 4.19 foram corrigidos antes do gate final.'
+nfr_validation:
+  security: { status: PASS, notes: 'RLS, capacidades, escopo gerencial, carteira autorizada e helpers privados foram verificados; RPCs rejeitam documentos estruturalmente inválidos.' }
+  reliability: { status: PASS, notes: 'Idempotência, versão obsoleta, republicação, rota em execução, GPS concorrente e fontes consistentes possuem tratamento e cobertura.' }
+  performance: { status: PASS, notes: 'Limites de dez clientes por dia e cinquenta por semana são aplicados; paginação usa geração consistente.' }
+  maintainability: { status: PASS, notes: 'Contrato compartilhado, domínio puro, CLI-first, BFF e validação SQL estão alinhados.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Manter os testes negativos de remoção de campos sempre que o schema da proposta evoluir.'

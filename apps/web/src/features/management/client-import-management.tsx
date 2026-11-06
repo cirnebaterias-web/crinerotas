@@ -1,6 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { ClientLocationSource } from '../clients/client-location-source';
+
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   clientImportBatchSchema,
   clientImportPreviewSchema,
@@ -21,7 +23,10 @@ import {
   type MeResponse,
 } from '@cirne/contracts';
 import { ClientMaintenanceForm } from './client-maintenance-form';
+import { ClientSheetSyncPanel } from './client-sheet-sync-panel';
 import { ScrapShell, scrapRequest } from '@/features/scrap/scrap-ui';
+import { ClientSalesDialog } from '@/features/clients/client-sales-dialog';
+import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 
 const clientPageSize = 25;
 const initialPagination: ClientListPagination = {
@@ -58,6 +63,7 @@ export function ClientImportManagement() {
   const [sellers, setSellers] = useState<ClientSeller[]>([]);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ClientDetail | null>(null);
+  const [salesClient, setSalesClient] = useState<ImportedClient | null>(null);
   const [loading, setLoading] = useState(true);
   const [clientsLoaded, setClientsLoaded] = useState(false);
   const [listBusy, setListBusy] = useState(false);
@@ -66,9 +72,13 @@ export function ClientImportManagement() {
   const [searchInput, setSearchInput] = useState('');
   const [appliedQuery, setAppliedQuery] = useState('');
   const [pagination, setPagination] = useState<ClientListPagination>(initialPagination);
+  const accessBlocked = useRef(false);
 
   const loadClients = useCallback(async (query: string, page: number) => {
-    const result = clientListResponseSchema.parse(await scrapRequest(clientListUrl(query, page)));
+    if (accessBlocked.current) return;
+    const response = await scrapRequest(clientListUrl(query, page));
+    if (accessBlocked.current) return;
+    const result = clientListResponseSchema.parse(response);
     setClients(result.clients);
     setAppliedQuery(result.query);
     setPagination(result.pagination);
@@ -78,6 +88,13 @@ export function ClientImportManagement() {
 
   useEffect(() => {
     let active = true;
+    const stopObserving = observeLocalAccessRevocation(() => {
+      active = false; accessBlocked.current = true;
+      setIdentity(null); setClients([]); setSellers([]); setSalesClient(null);
+      setEditing(null); setCreating(false); setClientsLoaded(false); setLoading(false);
+      setBusy(false); setListBusy(false);
+      setMessage('Seu acesso mudou. Entre novamente para consultar os clientes.');
+    });
     void (async () => {
       try {
         const currentIdentity = meResponseSchema.parse(await scrapRequest(mePath));
@@ -129,95 +146,116 @@ export function ClientImportManagement() {
         if (active) setLoading(false);
       }
     })();
-    return () => { active = false; };
+    return () => { active = false; stopObserving(); };
   }, []);
 
   const canManage = identity?.capabilities.includes('clients.manage') ?? false;
   const canImport = identity?.capabilities.includes('clients.import') ?? false;
+  const canReadSales = identity?.capabilities.includes('sales.read_client') ?? false;
 
   async function validate() {
+    if (accessBlocked.current) return;
     if (!file) { setMessage('Selecione uma planilha .xlsx.'); return; }
     setBusy(true); setMessage(''); setBatch(null);
     try {
       const result = clientImportPreviewSchema.parse(await sendFile(clientImportsValidatePath, file));
+      if (accessBlocked.current) return;
       setPreview(result);
       setMessage(result.rejectedCount === 0
         ? 'Planilha válida e pronta para importar.'
         : 'Revise as rejeições ou importe somente as linhas aceitas.');
     } catch (error) {
+      if (accessBlocked.current) return;
       setMessage(error instanceof Error ? error.message : 'Não foi possível validar.');
-    } finally { setBusy(false); }
+    } finally { if (!accessBlocked.current) setBusy(false); }
   }
 
   async function execute() {
+    if (accessBlocked.current) return;
     if (!file) { setMessage('Selecione uma planilha .xlsx.'); return; }
     setBusy(true); setMessage('');
     try {
       const result = clientImportBatchSchema.parse(await sendFile(clientImportsPath, file));
+      if (accessBlocked.current) return;
       setBatch(result); setPreview(null);
       const successMessage = result.replayed
         ? 'Este conteúdo já havia sido importado; o resultado anterior foi recuperado.'
         : 'Base de clientes atualizada.';
       try {
         await loadClients(appliedQuery, 1);
+        if (accessBlocked.current) return;
         setMessage(successMessage);
       } catch {
+        if (accessBlocked.current) return;
         setMessage(`${successMessage} A lista não pôde ser atualizada. Atualize a página para consultar o estado mais recente.`);
       }
     } catch (error) {
+      if (accessBlocked.current) return;
       setMessage(error instanceof Error ? error.message : 'Não foi possível importar.');
-    } finally { setBusy(false); }
+    } finally { if (!accessBlocked.current) setBusy(false); }
   }
 
   async function saved(client: ClientDetail) {
+    if (accessBlocked.current) return;
     setSearchInput(client.externalReference);
     setCreating(false);
     setEditing(null);
     try {
       await loadClients(client.externalReference, 1);
+      if (accessBlocked.current) return;
       setMessage('Cliente salvo e lista atualizada.');
     } catch {
+      if (accessBlocked.current) return;
       setMessage('Cliente salvo. A lista não pôde ser atualizada. Atualize a página para consultar o estado mais recente.');
     }
   }
 
   async function searchClients(event: FormEvent) {
     event.preventDefault();
+    if (accessBlocked.current) return;
     setListBusy(true); setMessage('');
     try {
       await loadClients(searchInput, 1);
     } catch (error) {
+      if (accessBlocked.current) return;
       setMessage(error instanceof Error ? error.message : 'Não foi possível buscar clientes.');
-    } finally { setListBusy(false); }
+    } finally { if (!accessBlocked.current) setListBusy(false); }
   }
 
   async function clearSearch() {
+    if (accessBlocked.current) return;
     setSearchInput(''); setListBusy(true); setMessage('');
     try {
       await loadClients('', 1);
     } catch (error) {
+      if (accessBlocked.current) return;
       setMessage(error instanceof Error ? error.message : 'Não foi possível limpar a busca.');
-    } finally { setListBusy(false); }
+    } finally { if (!accessBlocked.current) setListBusy(false); }
   }
 
   async function showPage(page: number) {
+    if (accessBlocked.current) return;
     setListBusy(true); setMessage('');
     try {
       await loadClients(appliedQuery, page);
     } catch (error) {
+      if (accessBlocked.current) return;
       setMessage(error instanceof Error ? error.message : 'Não foi possível carregar a página.');
-    } finally { setListBusy(false); }
+    } finally { if (!accessBlocked.current) setListBusy(false); }
   }
 
   async function retryInitialClients() {
+    if (accessBlocked.current) return;
     setListBusy(true); setMessage('');
     try {
       await loadClients('', 1);
+      if (accessBlocked.current) return;
       setSearchInput('');
       setMessage('Clientes carregados.');
     } catch (error) {
+      if (accessBlocked.current) return;
       setMessage(error instanceof Error ? error.message : 'Não foi possível consultar clientes.');
-    } finally { setListBusy(false); }
+    } finally { if (!accessBlocked.current) setListBusy(false); }
   }
 
   const issues = batch?.issues ?? preview?.issues ?? [];
@@ -227,6 +265,10 @@ export function ClientImportManagement() {
     <p className="seller-kicker">GESTÃO DE CLIENTES</p>
     <h1>Base de clientes</h1>
     <p>A planilha autorizada pela Gestão Comercial ou pelo Administrativo continua sendo a fonte oficial.</p>
+    {(canManage || canImport) && <nav className="seller-evidence-actions" aria-label="Atalhos da base de clientes">
+      <a className="seller-button seller-secondary" href="#client-list">{canReadSales ? 'Consultar clientes e mini CRM' : 'Consultar clientes'}</a>
+      {canImport && <a className="seller-button seller-secondary" href="#client-base-updates">Atualizar ou importar base</a>}
+    </nav>}
 
     {loading && <p className="seller-notice" role="status">Carregando clientes…</p>}
     {accessDenied && <p className="seller-notice" role="alert">Seu perfil não tem acesso à gestão de clientes.</p>}
@@ -248,40 +290,13 @@ export function ClientImportManagement() {
       client={editing}
       sellers={sellers}
       onCancel={() => { setCreating(false); setEditing(null); }}
-      onEditExisting={(current) => { setEditing(current); setCreating(false); setMessage(''); }}
+      onEditExisting={(current) => { if (!accessBlocked.current) { setEditing(current); setCreating(false); setMessage(''); } }}
       onSaved={saved}
     />}
 
-    {canImport && <section aria-labelledby="client-import-title">
-      <h2 id="client-import-title">Importar planilha oficial</h2>
-      <p>Valide a planilha antes de atualizar clientes e carteiras. Clientes ausentes no arquivo não serão alterados.</p>
-      <a className="seller-button seller-secondary" href="/api/v1/client-imports/template">Baixar modelo Excel</a>
-      <div className="seller-stock-card seller-stock-form">
-        <label>Planilha Excel<input
-          type="file"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={(event) => {
-            setFile(event.target.files?.[0] ?? null);
-            setPreview(null); setBatch(null);
-          }}
-          disabled={busy}
-        /></label>
-        {file && <p>Arquivo selecionado: <strong>{file.name}</strong></p>}
-        <div className="seller-evidence-actions">
-          <button type="button" className="seller-button seller-secondary" onClick={() => void validate()} disabled={busy || !file}>Validar</button>
-          <button type="button" className="seller-button seller-primary" onClick={() => void execute()} disabled={busy || !file}>{busy ? 'Processando…' : 'Importar linhas válidas'}</button>
-        </div>
-      </div>
-      {(preview || batch) && <section aria-labelledby="client-import-summary">
-        <h3 id="client-import-summary">Resultado</h3>
-        <p>Total: {preview?.totalCount ?? batch?.totalCount} · Aceitas: {preview?.acceptedCount ?? batch?.acceptedCount} · Rejeitadas: {preview?.rejectedCount ?? batch?.rejectedCount}</p>
-        {batch && <p>Lote: <code>{batch.id}</code></p>}
-        {issues.length > 0 && <ul className="seller-stop-list">{issues.map((item, index) => <li key={`${item.rowNumber}-${item.code}-${index}`} className="seller-stock-card"><strong>Linha {item.rowNumber}: {item.code}</strong><p>{item.message}</p></li>)}</ul>}
-      </section>}
-    </section>}
-
     {!loading && clientsLoaded && !accessDenied && <section aria-labelledby="client-list" aria-busy={listBusy}>
       <h2 id="client-list">Clientes cadastrados</h2>
+      {canReadSales && <p>Abra o mini CRM de um cliente para consultar compras, gráficos, produtos e histórico.</p>}
       <form className="seller-stock-card seller-stock-form" role="search" onSubmit={searchClients}>
         <label htmlFor="client-search">Pesquisar clientes</label>
         <input
@@ -311,15 +326,21 @@ export function ClientImportManagement() {
       </p>
       {clients.length === 0 && <p>Nenhum cliente encontrado na sua abrangência para esta busca.</p>}
       <ul className="seller-stop-list">{clients.map((client) => <li className="seller-stock-card" key={client.id}>
-        <h3>{client.name}</h3>
+        <h3 aria-label={client.name}>{canReadSales
+          ? <button type="button" className="client-sales-trigger" aria-label={`Consultar compras de ${client.name}`} onClick={() => setSalesClient(client)}>{client.name}</button>
+          : client.name}</h3>
         <p>{client.externalReference} · {client.status === 'active' ? 'Ativo' : 'Inativo'} · versão {client.version}</p>
         <p>{client.address}</p>
+        <ClientLocationSource location={client.googleLocation} />
         <p>Vendedor: {client.sellerEmail ?? 'Sem carteira'}{client.portfolioReference ? ` · ${client.portfolioReference}` : ''}</p>
+        <div className="seller-evidence-actions">
+        {canReadSales && <button type="button" className="seller-button seller-primary" aria-label={`Ver mini CRM de ${client.name}`} onClick={() => setSalesClient(client)}>Ver mini CRM</button>}
         {canManage && <button
           type="button"
           className="seller-button seller-secondary"
           onClick={() => { setEditing(client); setCreating(false); setMessage(''); }}
         >Editar cliente</button>}
+        </div>
       </li>)}</ul>
       {(pagination.hasPrevious || pagination.hasNext) && <nav className="seller-evidence-actions" aria-label="Paginação de clientes">
         <button
@@ -336,5 +357,37 @@ export function ClientImportManagement() {
         >Próxima página</button>
       </nav>}
     </section>}
+
+    {canImport && <div id="client-base-updates">
+      <ClientSheetSyncPanel onUpdated={() => loadClients(appliedQuery, 1)} />
+      <section aria-labelledby="client-import-title">
+        <h2 id="client-import-title">Importar planilha oficial</h2>
+        <p>Valide a planilha antes de atualizar clientes e carteiras. Clientes ausentes no arquivo não serão alterados.</p>
+        <a className="seller-button seller-secondary" href="/api/v1/client-imports/template">Baixar modelo Excel</a>
+        <div className="seller-stock-card seller-stock-form">
+          <label>Planilha Excel<input
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(event) => {
+              setFile(event.target.files?.[0] ?? null);
+              setPreview(null); setBatch(null);
+            }}
+            disabled={busy}
+          /></label>
+          {file && <p>Arquivo selecionado: <strong>{file.name}</strong></p>}
+          <div className="seller-evidence-actions">
+            <button type="button" className="seller-button seller-secondary" onClick={() => void validate()} disabled={busy || !file}>Validar</button>
+            <button type="button" className="seller-button seller-primary" onClick={() => void execute()} disabled={busy || !file}>{busy ? 'Processando…' : 'Importar linhas válidas'}</button>
+          </div>
+        </div>
+        {(preview || batch) && <section aria-labelledby="client-import-summary">
+          <h3 id="client-import-summary">Resultado</h3>
+          <p>Total: {preview?.totalCount ?? batch?.totalCount} · Aceitas: {preview?.acceptedCount ?? batch?.acceptedCount} · Rejeitadas: {preview?.rejectedCount ?? batch?.rejectedCount}</p>
+          {batch && <p>Lote: <code>{batch.id}</code></p>}
+          {issues.length > 0 && <ul className="seller-stop-list">{issues.map((item, index) => <li key={`${item.rowNumber}-${item.code}-${index}`} className="seller-stock-card"><strong>Linha {item.rowNumber}: {item.code}</strong><p>{item.message}</p></li>)}</ul>}
+        </section>}
+      </section>
+    </div>}
+    {salesClient && canReadSales && <ClientSalesDialog key={salesClient.id} client={salesClient} onClose={() => setSalesClient(null)} />}
   </ScrapShell>;
 }

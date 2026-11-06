@@ -46,7 +46,8 @@ const result: ManagementDayResponse = {
 
 describe('management day dashboard', () => {
   it('renders the desktop route table and the sanitized stop inspector', () => {
-    const html = renderToStaticMarkup(<ManagementDayDashboard initial={{ kind: 'ready', serviceDate: result.serviceDate, result }} />);
+    const html = renderToStaticMarkup(<ManagementDayDashboard
+      initial={{ kind: 'ready', serviceDate: result.serviceDate, result }} canPlanRoutes />);
     expect(html).toContain('Vendedor Sintético');
     expect(html).toContain('Cliente Visitado');
     expect(html).toContain('Situação das atividades no servidor');
@@ -57,6 +58,8 @@ describe('management day dashboard', () => {
     expect(html).toContain('itens ainda apenas no aparelho não são visíveis');
     expect(html).toContain('Mapa de apoio');
     expect(html).toContain('Mostrar mapa');
+    expect(html).toContain('Criar ou editar rota do dia');
+    expect(html).toContain('/management/routes?serviceDate=2026-10-20');
     expect(html).not.toContain('latitude');
     expect(html).not.toContain('photoUrl');
     expect(html).not.toContain('payload');
@@ -81,5 +84,11 @@ describe('management day dashboard', () => {
     const html = renderToStaticMarkup(<ManagementDayDashboard initial={{ kind: 'forbidden', serviceDate: '2026-10-20', message: 'Seu perfil não tem acesso à visão gerencial.' }} />);
     expect(html).toContain('Acesso não autorizado');
     expect(html).not.toContain('Indicadores do dia');
+  });
+
+  it('does not expose the planning action without the scoped capability', () => {
+    const html = renderToStaticMarkup(<ManagementDayDashboard
+      initial={{ kind: 'ready', serviceDate: result.serviceDate, result }} />);
+    expect(html).not.toContain('Criar ou editar rota do dia');
   });
 });

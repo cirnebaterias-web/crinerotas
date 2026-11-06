@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { clientGoogleLocationSchema } from './client-google-location';
 
 const decimalStringSchema = z.string().regex(/^-?\d+(?:\.\d+)?$/u);
 const nonNegativeDecimalStringSchema = decimalStringSchema.refine((value) => Number(value) >= 0);
@@ -36,6 +37,7 @@ export const visitDetailContextSchema = z.object({
     externalReference: z.string().trim().min(1).max(120).nullable(),
     name: z.string().trim().min(1).max(160),
     address: z.string().trim().min(1).max(300),
+    googleLocation: clientGoogleLocationSchema.nullable().optional(),
   }).strict(),
   seller: z.object({ id: z.uuid(), displayName: z.string().trim().min(1).max(120) }).strict(),
   parameterSet: z.object({ id: z.uuid(), version: z.number().int().positive() }).strict(),

@@ -42,6 +42,7 @@ begin
 end
 $route_ownership$;
 grant create on schema api to cirne_route_executor;
+select pg_catalog.set_config('cirne.migration_invoker', current_user, true);
 set local role cirne_route_executor;
 alter table api.route_version_stops
   add constraint route_version_stops_id_client_key unique (id, client_id);
@@ -49,7 +50,7 @@ do $reference_grant$
 begin
   execute pg_catalog.format(
     'grant references on table api.route_version_stops to %I',
-    session_user
+    current_setting('cirne.migration_invoker')
   );
 end
 $reference_grant$;
@@ -97,7 +98,7 @@ do $reference_revoke$
 begin
   execute pg_catalog.format(
     'revoke references on table api.route_version_stops from %I',
-    session_user
+    current_setting('cirne.migration_invoker')
   );
 end
 $reference_revoke$;

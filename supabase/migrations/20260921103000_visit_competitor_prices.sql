@@ -1,6 +1,7 @@
 -- Story 3.3: parameterized competitor prices, explicit unavailability and offline sync.
 -- No operational catalog values are seeded while AB-02 remains open.
 begin;
+select pg_catalog.set_config('cirne.migration_invoker', current_user, true);
 select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('cirne:database:migrate'));
 set local lock_timeout = '5s';
 
@@ -30,7 +31,7 @@ $visit_ownership$;
 set local role cirne_visit_executor;
 do $reference_grant$
 begin
-  execute pg_catalog.format('grant references on table api.parameter_sets, api.visits to %I', session_user);
+  execute pg_catalog.format('grant references on table api.parameter_sets, api.visits to %I', current_setting('cirne.migration_invoker'));
 end
 $reference_grant$;
 reset role;
@@ -136,7 +137,7 @@ $visit_ownership$;
 set local role cirne_visit_executor;
 do $reference_revoke$
 begin
-  execute pg_catalog.format('revoke references on table api.parameter_sets, api.visits from %I', session_user);
+  execute pg_catalog.format('revoke references on table api.parameter_sets, api.visits from %I', current_setting('cirne.migration_invoker'));
 end
 $reference_revoke$;
 reset role;

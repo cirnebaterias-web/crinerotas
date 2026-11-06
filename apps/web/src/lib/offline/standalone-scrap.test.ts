@@ -10,6 +10,47 @@ const client = { id: '22222222-2222-4222-8222-222222222222', name: 'Loja Teste',
 const at = '2026-10-06T12:00:00.000Z';
 const names: string[] = [];
 
+function searchStore() {
+  const name = `standalone-search-${crypto.randomUUID()}`;
+  names.push(name);
+  const storage = new Map<string, string>();
+  vi.stubGlobal('window', { localStorage: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value); },
+  } });
+  vi.stubGlobal('navigator', { onLine: true });
+  return { store: new StandaloneScrapScheduleStore(new OfflineDatabase(name, { indexedDB, IDBKeyRange }), () => at), storage };
+}
+
+it('explains failed searches and never falls back to cached clients after permission denial', async () => {
+  const { store } = searchStore();
+  let status = 200;
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => path === '/api/v1/me'
+    ? Response.json({ id: userId, displayName: 'Vendedor', roles: ['seller'], capabilities: ['scrap.schedule_self'], scopeIds: [], status: 'active' })
+    : Response.json(status === 200 ? { schemaVersion: 1, clients: [client] } : {}, { status })));
+  await expect(store.searchClients('a')).rejects.toThrow('2 caracteres');
+  expect(await store.searchClients('Loja')).toEqual([client]);
+  status = 403;
+  await expect(store.searchClients('Loja')).rejects.toThrow('não foi autorizado');
+  status = 503;
+  await expect(store.searchClients('Ausente')).rejects.toThrow('busca está indisponível');
+  expect(await store.searchClients('Loja')).toEqual([client]);
+  store.close();
+});
+
+it('does not recreate local authorization when an identity response arrives after logout', async () => {
+  const { store, storage } = searchStore();
+  let finish!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+  const reading = store.listSchedules();
+  const rejection = expect(reading).rejects.toThrow('sessão mudou');
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  store.close();
+  finish(Response.json({ id: userId, displayName: 'Vendedor', roles: ['seller'], capabilities: [], scopeIds: [], status: 'active' }));
+  await rejection;
+  expect(storage.get('cirne-rotas.last-user-id')).toBeUndefined();
+});
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   await Promise.all(names.splice(0).map((name) => new Dexie(name, { indexedDB, IDBKeyRange }).delete()));

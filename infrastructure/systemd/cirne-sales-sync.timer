@@ -1,0 +1,13 @@
+[Unit]
+Description=Cirne Rotas - atualizar Vendas as 06h15 de Sao Paulo
+
+[Timer]
+OnCalendar=*-*-* 06:15:00 America/Sao_Paulo
+AccuracySec=1s
+RandomizedDelaySec=0
+# Missing a slot does not authorize a surprise import at boot. Recover explicitly.
+Persistent=false
+Unit=cirne-sales-sync.service
+
+[Install]
+WantedBy=timers.target

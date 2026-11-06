@@ -15,6 +15,7 @@ import {
 import { ScrapShell } from '../scrap/scrap-ui';
 import { PickupScheduleRevisionForm } from './pickup-schedule-revision-form';
 import { ReportExportActions } from './report-export-actions';
+import { observeLocalAccessRevocation } from '../../lib/offline/access-revocation';
 
 export type ScrapAgendaInitialState =
   | { kind: 'ready' | 'empty'; filters: ScrapAgendaFilter; result: ScrapAgendaResponse }
@@ -81,10 +82,21 @@ export function ScrapAgendaDashboard({
   const [message, setMessage] = useState(initial.kind === 'forbidden' || initial.kind === 'recoverable_error' ? initial.message : '');
   const [revising, setRevising] = useState('');
   const alertRef = useRef<HTMLDivElement>(null);
+  const blocked = useRef(false);
+  const generation = useRef(0);
   useEffect(() => { if (state === 'recoverable_error' || state === 'forbidden') alertRef.current?.focus(); }, [state]);
+  useEffect(() => {
+    const stop = observeLocalAccessRevocation(() => {
+      blocked.current = true; generation.current++; setConfirmed(null); setRevising(''); setState('forbidden');
+      setDraft((current) => ({ ...current, sellerId: undefined, clientId: undefined }));
+      setMessage('A sessão mudou. Entre novamente para consultar a agenda.');
+    });
+    return () => { generation.current++; stop(); };
+  }, []);
 
   function applyFilters(event: FormEvent) {
     event.preventDefault();
+    if (blocked.current) return;
     const parsed = scrapAgendaFilterSchema.safeParse({
       ...draft,
       status: 'pending',
@@ -101,11 +113,12 @@ export function ScrapAgendaDashboard({
     router.push(`/management/scrap/agenda?${filterUrl(parsed.data).toString()}`);
   }
 
-  async function fetchResult(filters: ScrapAgendaFilter) {
+  async function fetchResult(filters: ScrapAgendaFilter, current: number) {
     const url = new URL(scrapAgendaPath, window.location.origin);
     url.search = filterUrl(filters, true).toString();
     const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
     const body = await response.json().catch(() => null) as unknown;
+    if (blocked.current || current !== generation.current) return null;
     if (!response.ok) {
       const failure = apiErrorResponseSchema.safeParse(body);
       if ([401, 403].includes(response.status)) {
@@ -118,13 +131,16 @@ export function ScrapAgendaDashboard({
   }
 
   async function refresh() {
+    if (blocked.current) return false;
+    const current = ++generation.current;
     setState('loading'); setMessage('');
     try {
-      const result = await fetchResult(confirmed?.filters ?? initial.filters);
+      const result = await fetchResult(confirmed?.filters ?? initial.filters, current);
       if (!result) return false;
       setConfirmed(result); setRevising(''); setState(result.records.length === 0 ? 'empty' : 'ready');
       return true;
     } catch (error) {
+      if (blocked.current || current !== generation.current) return false;
       setState('recoverable_error');
       setMessage(error instanceof Error ? error.message : 'Não foi possível atualizar a agenda.');
       return false;
@@ -132,14 +148,16 @@ export function ScrapAgendaDashboard({
   }
 
   async function loadMore() {
-    if (!confirmed?.nextCursor) return;
+    if (blocked.current || !confirmed?.nextCursor) return;
+    const current = ++generation.current;
     setState('loading');
     try {
-      const result = await fetchResult({ ...confirmed.filters, cursor: confirmed.nextCursor });
+      const result = await fetchResult({ ...confirmed.filters, cursor: confirmed.nextCursor }, current);
       if (!result) return;
       setConfirmed({ ...result, records: [...confirmed.records, ...result.records] });
       setState('ready');
     } catch (error) {
+      if (blocked.current || current !== generation.current) return;
       setState('recoverable_error');
       setMessage(error instanceof Error ? error.message : 'Não foi possível carregar a próxima página.');
     }
@@ -147,6 +165,7 @@ export function ScrapAgendaDashboard({
 
   return <ScrapShell><main className="field-intelligence-page">
     <p className="seller-kicker">GESTÃO · AGENDA DE SUCATA</p><h1>Pendências confirmadas</h1>
+    <p>Para atribuir paradas aos operadores e conferir prometido versus coletado, acesse <Link href="/management/scrap/logistics">Rotas de coleta</Link>.</p>
     <nav className="field-intelligence-tabs" aria-label="Gestão de sucata"><Link href="/management/scrap">Coletas e recebimentos</Link><Link href="/management/scrap/agenda" aria-current="page">Agenda pendente</Link></nav>
     <form className="field-intelligence-filters" onSubmit={applyFilters}>
       <label>Data desejada inicial<input type="date" required value={draft.from} onChange={(event) => setDraft({ ...draft, from: event.target.value })} /></label>
@@ -155,7 +174,7 @@ export function ScrapAgendaDashboard({
       <label>Vendedor (ID)<input value={draft.sellerId ?? ''} onChange={(event) => setDraft({ ...draft, sellerId: event.target.value || undefined })} /></label>
       <label>Cliente (ID)<input value={draft.clientId ?? ''} onChange={(event) => setDraft({ ...draft, clientId: event.target.value || undefined })} /></label>
       <label>Estado<input value="Pendente" disabled aria-describedby="agenda-state-note" /></label>
-      <p id="agenda-state-note">Outros estados dependem da definição de responsável e SLA.</p>
+      <p id="agenda-state-note">Esta consulta mostra solicitações ainda pendentes. Os resultados e as divergências estão em Rotas de coleta.</p>
       <div className="field-intelligence-actions"><button className="seller-button seller-primary">Aplicar filtros</button><button type="button" className="seller-button seller-secondary" disabled={state === 'loading'} onClick={() => void refresh()}>{state === 'loading' ? 'Atualizando…' : 'Atualizar agora'}</button>{confirmed && <ReportExportActions view="scrap_agenda" filters={{ ...confirmed.filters }} disabled={state === 'loading'} />}</div>
     </form>
     {state === 'loading' && <p role="status" aria-live="polite">Atualizando pendências confirmadas…</p>}

@@ -12,7 +12,7 @@ export async function validateImportSellers(client: SupabaseClient, preview: Cli
   const invalidRows = preview.rows.filter((row) => invalidSet.has(row.sellerEmail));
   const rows = preview.rows.filter((row) => !invalidSet.has(row.sellerEmail));
   const issues = [...preview.issues, ...invalidRows.map((row) => ({ rowNumber: row.rowNumber,
-    code: 'SELLER_NOT_FOUND', message: 'Vendedor inexistente, inativo ou sem papel de Vendedor.' }))];
+    code: 'SELLER_NOT_FOUND', message: 'Vendedor inexistente, inativo, sem papel de Vendedor ou fora da sua abrangência.' }))];
   const rejectedCount = new Set(issues.filter((item) => item.rowNumber > 1).map((item) => item.rowNumber)).size;
   return clientImportPreviewSchema.parse({ ...preview, rows, issues,
     totalCount: rows.length + rejectedCount, acceptedCount: rows.length, rejectedCount });

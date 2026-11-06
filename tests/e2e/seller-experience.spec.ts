@@ -21,6 +21,14 @@ async function setup(page: Page, options: { empty?: boolean; fail?: boolean; con
   let route = structuredClone(initialRoute);
   const commands: unknown[] = [];
   let loggedOut = false;
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+      getCurrentPosition: (success: PositionCallback) => success({
+        coords: { latitude: -5.81, longitude: -35.21, accuracy: 12, altitude: null,
+          altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now(),
+      } as GeolocationPosition),
+    } });
+  });
   await page.route('**/api/v1/**', async (request) => {
     const url = new URL(request.request().url());
     if (url.pathname === '/api/v1/auth/session') {
@@ -28,6 +36,11 @@ async function setup(page: Page, options: { empty?: boolean; fail?: boolean; con
       else await request.fulfill({ json: identity });
     } else if (url.pathname === '/api/v1/me') {
       await request.fulfill({ status: options.unauthorized || loggedOut ? 401 : 200, json: identity });
+    } else if (url.pathname === '/api/v1/me/route-location') {
+      const body = request.request().postDataJSON() as { latitude: number; longitude: number; accuracyM: number; capturedAt: string };
+      await request.fulfill({ json: { kind: 'current_gps', sellerId: identity.id, locationId: id(80),
+        capturedBy: identity.id, version: 1, latitude: body.latitude, longitude: body.longitude,
+        accuracyM: body.accuracyM, capturedAt: body.capturedAt } });
     } else if (url.pathname.endsWith('/execution-order')) {
       commands.push(request.request().postDataJSON());
       if (options.networkSave) { await request.abort('failed'); return; }
@@ -133,7 +146,7 @@ test.describe('seller visual MVP', () => {
     const commands = await setup(page);
     const mutations: string[] = [];
     page.on('request', (request) => {
-      if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(request.method());
+      if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(new URL(request.url()).pathname);
     });
     const external: string[] = [];
     await context.route('https://www.google.com/**', async (route) => {
@@ -167,7 +180,7 @@ test.describe('seller visual MVP', () => {
     await expect(page.getByText('Versão da execução 1', { exact: false })).toBeVisible();
     await expect(page.getByText('Editando · alterações não salvas')).toBeVisible();
     expect(commands).toHaveLength(0);
-    expect(mutations).toHaveLength(0);
+    expect(mutations).toEqual(['/api/v1/me/route-location']);
   });
 
   test('copy remains available offline and navigation comes back only after reconnecting', async ({ page, context }) => {

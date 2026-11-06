@@ -1,0 +1,33 @@
+schema: 1
+story: '4.22'
+story_title: 'Localização Google do cliente e preservação da evidência GPS'
+gate: PASS
+status_reason: 'Os nove critérios foram verificados por revisão independente e testes de contratos, importação, navegação, histórico, autorização e pacote offline. Referência Google e GPS observado permanecem separados, sem alteração automática do cadastro.'
+reviewer: 'Quinn'
+reviewed_revision: 'worktree:sha256:85f5848f5e9fb8b640643a75f61aa3fd351990e84f1c554d7bf19eac37fd5448'
+updated: '2026-11-04T20:05:28Z'
+top_issues: []
+waiver: { active: false }
+evidence:
+  manifest_files: 27
+  manifest_method: 'SHA256 UTF-8 de path:sha256(file) separados por LF, sem LF final, na ordem do File List; excluir Docs/qa, Docs/stories e artefatos locais ignorados. Parecer limitado ao delta da Story 4.22 nos arquivos compartilhados.'
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9], ac_gaps: [] }
+  independent_verification: '6 suítes focais / 66 testes PASS e diff-check focal PASS; revisão read-only de contratos, parser, URL, UI, migração e pgTAP.'
+  implementation_verification: 'Lint, typecheck, build e diff-check PASS; 135 arquivos / 778 unitários PASS e 1 skip; integração Q/U/P/R 1 PASS; E2E offline 3 PASS; CLI 7 verificações PASS sem rede; pgTAP 28 arquivos / 1381 PASS, incluindo 68 da Story 4.22.'
+  migration: 'Dry-run com ROLLBACK comprovado; aplicação sintética em ordem e prévia local com backup registradas no Dev Agent Record. Sem reset.'
+  local_preview: 'API autenticada e UI 390px verificadas pelo executor; carga local explícita: 712 aceitos, 8 pendentes, 158 ignorados, 710 com Q/U e 263 destes sem coordenadas. Nenhuma rota real publicada no smoke.'
+  coderabbit: 'Indisponível: tentativa com CLI compatível review --agent falhou na conexão WSL 0x8007274c antes da análise. Não representa PASS automatizado; revisão independente executada.'
+nfr_validation:
+  security: { status: PASS, notes: 'Owners, ACL e guards existentes preservados; escopo e capacidade de leitura de GPS testados separadamente. URL com origem fixa e parâmetros codificados; metadados Google estritos.' }
+  reliability: { status: PASS, notes: 'Vazio explícito limpa metadados; atributo legado ausente preserva. Mesma request_key reproduz a intenção, nova chave reaplica fonte. Publicações antigas, contexto e GPS mantidos após importação, replay e sucessor.' }
+  performance: { status: PASS, notes: 'Parser continua limitado a 5000 linhas; navegação não consulta rede. Build e smoke móvel locais aprovados; sem alegação de benchmark produtivo.' }
+  maintainability: { status: PASS, notes: 'Contratos compartilhados, domínio puro, migração aditiva e runbook coerentes; nenhuma dependência nova ou serviço pago.' }
+limitations:
+  - 'Credencial Google da prévia é demonstrativa: POST de sincronização retorna 503. Carga CSV local explícita não valida OAuth, botão com credencial definitiva ou agendador de produção.'
+  - 'Place ID tem validação sintática local; não foi comprovada sua resolução pelo Google nem confirmação de chegada.'
+  - 'Revisão/aprovação de localização canônica, IA, otimizador semanal e deploy remoto não integram este gate.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Configurar credencial Google definitiva e validar botão/agendamento no ambiente autorizado antes de alegar integração operacional completa.'
+    - action: 'Executar CodeRabbit quando a conexão WSL estiver disponível; manter explícita a ausência desta análise.'

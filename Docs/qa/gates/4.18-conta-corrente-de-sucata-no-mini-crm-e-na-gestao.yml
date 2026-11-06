@@ -1,0 +1,23 @@
+schema: 1
+story: '4.18'
+story_title: 'Conta-corrente de sucata no mini CRM e na gestão'
+gate: PASS
+status_reason: 'Os dez critérios de aceite foram aprovados após correção de escopo, auditabilidade, fidelidade das colunas, publicação staged e observabilidade de falhas; não restam achados críticos, altos ou médios.'
+reviewer: 'Quinn'
+updated: '2026-11-06T01:18:09Z'
+top_issues: []
+waiver: { active: false }
+evidence:
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], ac_gaps: [] }
+  independent_verification: '3 suites focais / 4 testes PASS; git diff --check PASS; revisão read-only de contratos, importação, BFF, UI, migrations, rollback e pgTAP.'
+  implementation_verification: 'Clean DB reset PASS; pgTAP focal 25/25; pgTAP completo 31 arquivos / 1472 PASS; unitários 149 arquivos / 827 PASS e 1 skip; typecheck, lint e build PASS.'
+  database: 'Gerações imutáveis e atômicas, publicação com ambas as abas positivas, falha persistida, RLS/grants estreitos e analytics escopado possuem cobertura.'
+nfr_validation:
+  security: { status: PASS, notes: 'Gestor consulta apenas documentos de clientes em carteiras autorizadas; administração mantém auditoria global; vendedor fica restrito ao mini CRM escopado.' }
+  reliability: { status: PASS, notes: 'Leitura dupla estável, idempotência, gerações anteriores, publicação atômica e falhas observáveis estão implementadas.' }
+  performance: { status: PASS, notes: 'Limites de fonte, staging em lotes, paginação de 50 e totalizadores server-side estão definidos.' }
+  maintainability: { status: PASS, notes: 'Contratos, importação, CLI/BFF, banco e UI preservam as colunas oficiais e a separação entre ledger e fatos operacionais.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Manter um caso pgTAP explícito para administrador consultar documento sem vínculo ao evoluir a regra de escopo.'

@@ -96,8 +96,13 @@ function StopInspector({ route, selectedStopId, selectedVisitId, open, onSelect,
   </aside>;
 }
 
-export function ManagementDayDashboard({ initial, mapConfig = { enabled: false, reason: 'unconfigured' } }: {
+export function ManagementDayDashboard({
+  initial,
+  canPlanRoutes = false,
+  mapConfig = { enabled: false, reason: 'unconfigured' },
+}: {
   initial: ManagementDayInitialState;
+  canPlanRoutes?: boolean;
   mapConfig?: ManagementMapPublicConfig;
 }) {
   const router = useRouter();
@@ -131,6 +136,13 @@ export function ManagementDayDashboard({ initial, mapConfig = { enabled: false, 
   const attentionQueue = useMemo(() => confirmed?.schemaVersion === 2
     ? managementAttentionQueue(confirmed.routes) : [], [confirmed]);
   const selectedRoute = routes.find((route) => route.routeId === selectedRouteId) ?? routes[0] ?? null;
+  const planningDate = managementServiceDateSchema.safeParse(selectedDate);
+  const planningHref = planningDate.success
+    ? `/management/routes?serviceDate=${encodeURIComponent(planningDate.data)}`
+    : '/management/routes';
+  const confirmedPlanningHref = confirmed
+    ? `/management/routes?serviceDate=${encodeURIComponent(confirmed.serviceDate)}`
+    : planningHref;
 
   function closeInspector() {
     setInspectorOpen(false);
@@ -215,7 +227,10 @@ export function ManagementDayDashboard({ initial, mapConfig = { enabled: false, 
 
   return <main className="manager-day-page">
     <div className="management-page-heading"><div><p className="seller-kicker">GESTÃO COMERCIAL · CENTRAL OPERACIONAL</p><h1>Rotas e atividades do dia</h1><p>Acompanhe o avanço dos vendedores e abra cada parada para verificar o que chegou ao servidor.</p></div>
-      <button type="button" className="seller-button seller-secondary" disabled={attentionQueue.length === 0} onClick={(event) => focusAttention(event.currentTarget)}>Abrir próxima atenção</button></div>
+      <div className="management-page-actions">
+        {canPlanRoutes && planningDate.success && <Link className="seller-button seller-primary" href={planningHref}>Criar ou editar rota do dia</Link>}
+        <button type="button" className="seller-button seller-secondary" disabled={attentionQueue.length === 0} onClick={(event) => focusAttention(event.currentTarget)}>Abrir próxima atenção</button>
+      </div></div>
     <form className="manager-day-controls" onSubmit={selectDate}>
       <label>Data operacional<input type="date" required value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} disabled={state === 'loading'} /></label>
       <button className="seller-button seller-primary" disabled={state === 'loading'}>Aplicar data</button>
@@ -235,7 +250,7 @@ export function ManagementDayDashboard({ initial, mapConfig = { enabled: false, 
       <div className="management-freshness"><p>Última atualização conhecida: <strong>{localDateTime(confirmed.lastKnownUpdateAt)}</strong></p><p>{confirmed.serverVisibilityNote}</p></div>
       <ManagementMapPanel key={`${confirmed.serviceDate}:${confirmed.generatedAt}`}
         serviceDate={confirmed.serviceDate} config={mapConfig} />
-      {confirmed.availability === 'empty' ? <section className="seller-state" aria-live="polite"><h2>Nenhuma rota publicada nesta data</h2><p>Selecione outra data ou atualize após a publicação das rotas.</p></section>
+      {confirmed.availability === 'empty' ? <section className="seller-state" aria-live="polite"><h2>Nenhuma rota publicada nesta data</h2><p>Selecione outra data ou crie o planejamento para o vendedor.</p>{canPlanRoutes && <Link className="seller-button seller-primary" href={confirmedPlanningHref}>Criar rota para esta data</Link>}</section>
         : confirmed.schemaVersion === 1 ? <LegacyRoutes result={confirmed} />
           : <><section className="management-local-filters" aria-label="Filtros locais"><label>Buscar vendedor ou cliente<input type="search" value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Digite um nome" /></label><label className="management-attention-toggle"><input type="checkbox" checked={onlyAttention} onChange={(event) => {
             const checked = event.target.checked; setOnlyAttention(checked);

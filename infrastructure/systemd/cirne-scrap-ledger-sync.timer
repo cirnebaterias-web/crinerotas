@@ -1,0 +1,12 @@
+[Unit]
+Description=Cirne Rotas - sucata às 08:00 e 18:00 (America/Sao_Paulo)
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 America/Sao_Paulo
+OnCalendar=*-*-* 18:00:00 America/Sao_Paulo
+Persistent=true
+RandomizedDelaySec=0
+Unit=cirne-scrap-ledger-sync.service
+
+[Install]
+WantedBy=timers.target

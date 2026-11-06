@@ -1,5 +1,6 @@
 import {
-  authSessionPath, mePath, meResponseSchema, myTodayRoutePath, routeTodayResponseSchema,
+  authSessionPath, dailySellerLocationCaptureSchema, dailySellerLocationSchema, mePath, meResponseSchema,
+  myTodayRoutePath, routeTodayResponseSchema,
   reorderRouteExecutionRequestSchema, reorderRouteExecutionResultSchema, routeExecutionOrderPath,
   loginRequestSchema, type LoginRequest, type CanonicalRoute,
 } from '@cirne/contracts';
@@ -41,6 +42,12 @@ export const sellerClient = {
     const body = reorderRouteExecutionRequestSchema.parse({ schemaVersion: 1, expectedVersion: route.executionVersion, pendingStopIds });
     return reorderRouteExecutionResultSchema.parse(await request(routeExecutionOrderPath(route.routeId), {
       method: 'PUT', headers: mutationHeaders, body: JSON.stringify(body),
+    }));
+  },
+  async captureRouteLocation(input: { latitude: number; longitude: number; accuracyM: number; capturedAt: string }) {
+    const body = dailySellerLocationCaptureSchema.parse({ schemaVersion: 1, idempotencyKey: crypto.randomUUID(), ...input });
+    return dailySellerLocationSchema.parse(await request('/api/v1/me/route-location', {
+      method: 'POST', headers: mutationHeaders, body: JSON.stringify(body),
     }));
   },
 };

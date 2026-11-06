@@ -1,0 +1,13 @@
+[Unit]
+Description=Cirne Rotas - atualização da conta-corrente de sucata
+After=network-online.target cirne-rotas.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/cirne-rotas/current
+EnvironmentFile=/etc/cirne-rotas/scrap-ledger-sync.env
+ExecStart=/usr/bin/npm run ops:scrap-ledger-sync -- --scheduled
+User=cirne
+Group=cirne
+NoNewPrivileges=true
+PrivateTmp=true

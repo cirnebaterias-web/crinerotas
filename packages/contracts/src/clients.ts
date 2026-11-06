@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { clientExternalReferenceSchema } from './client-reference';
+import { clientGoogleLocationSchema } from './client-google-location';
 
 export const clientStatusSchema = z.enum(['active', 'archived']);
 const clientNameSchema = z.string().trim().min(1).max(160);
@@ -50,6 +51,7 @@ export const clientDetailSchema = z.object({
   externalReference: clientExternalReferenceSchema,
   name: clientNameSchema,
   address: clientAddressSchema,
+  googleLocation: clientGoogleLocationSchema.nullable().optional(),
   latitude: z.number().min(-90).max(90).nullable(),
   longitude: z.number().min(-180).max(180).nullable(),
   portfolioReference: z.string().max(120).nullable(),

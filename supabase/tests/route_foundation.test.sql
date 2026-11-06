@@ -42,11 +42,11 @@ select is((
 select is((
   select jsonb_agg(permission_code order by permission_code)
   from api.role_permissions where role_id = '00000000-0000-4000-8000-000000000002'
-), '["clients.import", "clients.manage", "clients.read", "identity.read_self", "route.plan_scoped", "route.read_scoped", "route.reorder_scoped", "scrap.manage_operations", "scrap.manage_points", "scrap.read_operations"]'::jsonb, 'manager receives explicit client management, import, scoped route and scrap permissions without receipt');
+), '["clients.import", "clients.manage", "clients.read", "identity.read_self", "route.plan_scoped", "route.read_scoped", "route.reorder_scoped", "sales.read_client", "sales.sync", "scrap_ledger.read", "scrap_ledger.sync", "scrap.dispatch_pickups", "scrap.manage_operations", "scrap.manage_points", "scrap.read_operations"]'::jsonb, 'manager receives explicit client management, import, scoped route, sales, scrap-ledger and logistics dispatch permissions without receipt');
 select is((
   select jsonb_agg(permission_code order by permission_code)
   from api.role_permissions where role_id = '00000000-0000-4000-8000-000000000001'
-), '["identity.read_self", "route.read_self", "route.reorder_self", "scrap.collect_self", "scrap.schedule_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller receives self route, visit and scrap capabilities');
+), '["identity.read_self", "route.read_self", "route.reorder_self", "sales.read_client", "scrap_ledger.read", "scrap.collect_self", "scrap.schedule_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller receives self route, visit, scrap and scoped sales/scrap-ledger read capabilities');
 
 select id as seller_a_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_a' \gset
 select id as seller_b_id from auth.users where raw_user_meta_data ->> 'actorKey' = 'seller_b' \gset

@@ -25,6 +25,22 @@ const detail: VisitDetailResponse = {
 };
 
 describe('VisitDetailDashboard', () => {
+  it('shows historical source and observed GPS separately only when authorized', () => {
+    const result: VisitDetailResponse = { ...detail,
+      context: { ...detail.context, client: { ...detail.context.client,
+        googleLocation: { address: 'Endereço Google histórico', placeId: 'EjR_123', status: 'REVISAR', precision: 'RANGE_INTERPOLATED' } } },
+      location: { state: 'available', latitude: '-5.12345', longitude: '-35.12345', accuracyM: '15', distanceM: '220', capturedAt: at },
+    };
+    const html = renderToStaticMarkup(<VisitDetailDashboard initial={{ kind: 'ready', result }} />);
+    expect(html).toContain('Endereço Google histórico');
+    expect(html).toContain('GPS observado nesta visita');
+    expect(html).toContain('Capturado em');
+    expect(html).toContain('-5.12345');
+    expect(html).toContain('não comprova falha do vendedor');
+    const redacted = renderToStaticMarkup(<VisitDetailDashboard initial={{ kind: 'ready', result: { ...result, location: { state: 'withheld' } } }} />);
+    expect(redacted).not.toContain('-5.12345');
+    expect(redacted).not.toContain('GPS observado nesta visita');
+  });
   it('renders historical context, distinct scrap totals and explicit redaction states', () => {
     const html = renderToStaticMarkup(<VisitDetailDashboard initial={{ kind: 'ready', result: detail }} />);
     expect(html).toContain('Cliente A');

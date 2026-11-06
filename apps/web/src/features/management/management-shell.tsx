@@ -5,26 +5,11 @@ import { usePathname } from 'next/navigation';
 import type { MeResponse } from '@cirne/contracts';
 import { Brand } from '@/features/auth/brand';
 import { sellerClient } from '@/lib/seller-client';
-
-type Item = { href: string; label: string; capability: string };
-
-const items: Item[] = [
-  { href: '/management/day', label: 'Central do dia', capability: 'route.read_scoped' },
-  { href: '/management/routes', label: 'Planejar rotas', capability: 'route.plan_scoped' },
-  { href: '/management/intelligence', label: 'Inteligência de campo', capability: 'route.read_scoped' },
-  { href: '/management/pilot', label: 'Indicadores do piloto', capability: 'route.read_scoped' },
-  { href: '/management/commercial-actions', label: 'Ações comerciais', capability: 'route.plan_scoped' },
-  { href: '/management/clients', label: 'Clientes', capability: 'clients.read' },
-  { href: '/management/scrap', label: 'Operação de sucata', capability: 'scrap.read_operations' },
-  { href: '/management/scrap/agenda', label: 'Agenda de coletas', capability: 'scrap.read_operations' },
-  { href: '/management/administration', label: 'Administração', capability: 'identity.manage' },
-];
+import { visibleManagementNavigationItems } from './management-navigation-items';
 
 function ManagementNavigation({ identity, onNavigate }: { identity: MeResponse | null; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const visible = useMemo(() => items.filter((item) => (
-    identity ? identity.capabilities.includes(item.capability) : item.href === '/management/day'
-  )), [identity]);
+  const visible = useMemo(() => visibleManagementNavigationItems(identity), [identity]);
   const activeHref = visible.filter((item) => (
     pathname === item.href || pathname.startsWith(`${item.href}/`)
   )).sort((left, right) => right.href.length - left.href.length)[0]?.href;
@@ -76,7 +61,7 @@ export function ManagementShell({ children, initialIdentity }: { children: React
       <button ref={menuButtonRef} type="button" aria-expanded={drawerOpen} aria-controls="management-drawer" onClick={() => setDrawerOpen(!drawerOpen)}>
         Menu
       </button>
-      {drawerOpen && <div ref={drawerRef} className="management-drawer" id="management-drawer" role="dialog" aria-modal="true" aria-label="Menu da gestão">
+      {drawerOpen && <div ref={drawerRef} className="management-drawer" id="management-drawer" role="region" aria-label="Menu da gestão">
         <button type="button" className="management-drawer-close" onClick={() => { setDrawerOpen(false); menuButtonRef.current?.focus(); }}>Fechar ×</button>
         <ManagementNavigation identity={identity} onNavigate={() => setDrawerOpen(false)} />
         <a className="management-home-link" href="/home">Voltar ao início</a>

@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { z } from 'zod';
 import { scrapCollectionsPath, scrapCollectionSchema, scrapCollectionReceiptPath, scrapCollectionAttachmentsPath, confirmScrapReceiptRequestSchema, type ScrapCollection, type MeResponse } from '@cirne/contracts';
-import { sellerClient } from '@/lib/seller-client';
-import { ScrapShell, scrapRequest, scrapMutation } from '@/features/scrap/scrap-ui';
+import { sellerClient, isSessionFailure } from '@/lib/seller-client';
+import { ScrapShell, ScrapRequestError, scrapRequest, scrapMutation } from '@/features/scrap/scrap-ui';
 import { ScrapCorrectionForm } from './scrap-correction-form';
 import { ScrapRevisionHistory } from './scrap-revision-history';
+import { LogisticsPickupDashboard } from '@/features/logistics/logistics-pickup-dashboard';
+import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 
 const collectionList = z.object({ collections: z.array(scrapCollectionSchema), totals: z.object({ collectedKg: z.string(), receivedKg: z.string(), scheduledKg: z.string() }) });
 const evidenceList = z.object({ attachments: z.array(z.object({ offlineId: z.string(), signedUrl: z.string().url() })) });
@@ -63,13 +65,47 @@ export function ScrapManagement() {
   const [identity, setIdentity] = useState<MeResponse | null>(null); const [collections, setCollections] = useState<ScrapCollection[]>([]);
   const [totals, setTotals] = useState({ collectedKg: '0', receivedKg: '0', scheduledKg: '0' });
   const [selected, setSelected] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(true);
-  async function load() { setBusy(true); setError(''); try { const user = await sellerClient.identity(); if (!user.capabilities.includes('scrap.read_operations')) throw new Error('Seu perfil não tem acesso à gestão de sucata.'); setIdentity(user); const result = collectionList.parse(await scrapRequest(scrapCollectionsPath)); setCollections(result.collections); setTotals(result.totals); } catch (failure) { setError(failure instanceof Error ? failure.message : 'Não foi possível consultar a operação.'); } finally { setBusy(false); } }
-  useEffect(() => { void load(); }, []);
+  const blocked = useRef(false); const generation = useRef(0);
+  async function load() {
+    if (blocked.current) return;
+    const current = ++generation.current;
+    setBusy(true); setError('');
+    try {
+      const user = await sellerClient.identity();
+      if (blocked.current || current !== generation.current) return;
+      if (!user.capabilities.includes('scrap.read_operations')) throw new ScrapRequestError('Seu perfil não tem acesso à gestão de sucata.', 403);
+      const result = collectionList.parse(await scrapRequest(scrapCollectionsPath));
+      if (blocked.current || current !== generation.current) return;
+      setIdentity(user); setCollections(result.collections); setTotals(result.totals);
+    } catch (failure) {
+      if (!blocked.current && current === generation.current) {
+        if (isSessionFailure(failure) || (failure instanceof ScrapRequestError && [401, 403].includes(failure.status))) {
+          setIdentity(null); setCollections([]); setSelected(''); setTotals({ collectedKg: '0', receivedKg: '0', scheduledKg: '0' });
+          setError('Seu acesso não foi autorizado. Entre novamente para consultar a operação.');
+        } else {
+          // Keep the mounted logistics form and the last confirmed values on a recoverable refresh failure.
+          setError('Não foi possível atualizar a operação. Os últimos dados confirmados e os formulários foram preservados. Tente novamente.');
+        }
+      }
+    } finally { if (!blocked.current && current === generation.current) setBusy(false); }
+  }
+  useEffect(() => {
+    const stop = observeLocalAccessRevocation(() => {
+      blocked.current = true; generation.current++; setIdentity(null); setCollections([]); setSelected('');
+      setTotals({ collectedKg: '0', receivedKg: '0', scheduledKg: '0' }); setBusy(false);
+      setError('A sessão mudou. Entre novamente para consultar a operação.');
+    });
+    void load();
+    return () => { generation.current++; stop(); };
+  }, []);
   const collection = collections.find((c) => c.id === selected);
   const canCorrect = Boolean(identity?.capabilities.includes('scrap.manage_operations') && identity.roles.some((role) => role === 'manager' || role === 'administrator'));
-  return <ScrapShell><p className="seller-kicker">ADMINISTRAÇÃO · LOGÍSTICA · GESTÃO</p><h1>Coleta de sucata</h1><nav aria-label="Gestão"><a className="seller-button seller-secondary" href="/management/commercial-actions">Ações comerciais</a>{identity?.capabilities.includes('scrap.manage_points') && <a className="seller-button seller-secondary" href="/management/scrap/points">Pontos de concentração</a>}</nav>
+  return <ScrapShell><p className="seller-kicker">ADMINISTRAÇÃO · LOGÍSTICA · GESTÃO</p><h1>Coleta de sucata</h1>
+    {identity?.capabilities.includes('scrap.manage_points') && <nav aria-label="Gestão de sucata"><a className="seller-button seller-secondary" href="/management/scrap/points">Pontos de concentração</a></nav>}
+    {identity?.capabilities.includes('scrap.dispatch_pickups') && <LogisticsPickupDashboard mode="manager" embedded />}
+    <h2>Coletas realizadas pelo vendedor</h2>
     <section className="seller-progress" aria-label="Volumes separados"><p>Coletados pelo vendedor: <strong>{totals.collectedKg} kg</strong></p><p>Recebidos pela Cirne: <strong>{totals.receivedKg} kg</strong></p><p>Agendados para logística: <strong>{totals.scheduledKg} kg previstos</strong></p></section>
-    <div className="seller-evidence-actions"><a className="seller-button seller-secondary" aria-current="page" href="/management/scrap">Coletas do vendedor</a><a className="seller-button seller-secondary" href="/management/scrap/agenda">Agenda pendente</a><button className="seller-button seller-secondary" disabled={busy} onClick={() => void load()}>Atualizar</button></div>
+    <div className="seller-evidence-actions"><a className="seller-button seller-secondary" aria-current="page" href="/management/scrap">Coletas do vendedor</a><a className="seller-button seller-secondary" href="/management/scrap/agenda">Agenda pendente</a><button className="seller-button seller-secondary" disabled={busy || blocked.current} onClick={() => void load()}>Atualizar</button></div>
     {busy && <p role="status">Carregando registros…</p>}{error && <p className="seller-notice seller-error" role="alert">{error}</p>}
     <ul className="seller-stop-list">{collections.map((c) => <li key={c.id}><button className="seller-task-card" onClick={() => setSelected(c.id)} aria-pressed={selected === c.id}><span><strong>{c.client.name} · {c.actualWeightKg} kg coletados</strong><small>{c.seller.displayName} · {new Date(c.collectedAt).toLocaleString('pt-BR')} · termo {c.receiptNumber}</small><small>{c.concentrationPoint?.name ?? 'Matriz em Natal'}</small></span><span>{c.status === 'received' ? 'Recebido pela Cirne' : 'Aguardando recebimento'}</span></button></li>)}</ul>{!busy && collections.length === 0 && <p>Nenhuma coleta registrada.</p>}{collection && <CollectionDetail key={collection.id} collection={collection} canReceive={Boolean(identity?.capabilities.includes('scrap.receive'))} canCorrect={canCorrect} onReload={load} />}
   </ScrapShell>;

@@ -1,10 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { buildGoogleMapsUrl } from './navigation';
+import { buildGoogleMapsUrl, navigationAddress } from './navigation';
 
 const address = 'Rua São José, 100 & loja #2 — Recife, PE';
 const client = { address, latitude: null, longitude: null };
 
 describe('Google Maps destination', () => {
+  const googleLocation = { address: 'Endereço Google, 200', placeId: 'EjR_Address-123', status: 'REVISAR', precision: 'RANGE_INTERPOLATED' };
+  it('prefers Place ID over conflicting imported coordinates, without claiming verification', () => {
+    const input = Object.freeze({ ...client, latitude: '0', longitude: '0', googleLocation });
+    const url = new URL(buildGoogleMapsUrl(input)!);
+    expect([...url.searchParams]).toEqual([['api', '1'], ['destination', googleLocation.address], ['destination_place_id', googleLocation.placeId]]);
+    expect(navigationAddress(input)).toBe(googleLocation.address);
+    expect(input.latitude).toBe('0');
+  });
+  it('uses Google address without an ID and original address as text for ID-only sources', () => {
+    const withGoogle = { ...client, latitude: '0', longitude: '0', googleLocation: { ...googleLocation, placeId: null } };
+    expect(new URL(buildGoogleMapsUrl(withGoogle)!).searchParams.get('destination')).toBe(googleLocation.address);
+    const idOnly = new URL(buildGoogleMapsUrl({ ...client, googleLocation: { ...googleLocation, address: null } })!);
+    expect(idOnly.searchParams.get('destination')).toBe(address);
+    expect(idOnly.searchParams.get('destination_place_id')).toBe(googleLocation.placeId);
+  });
+  it('never injects parameters from a malformed ID and supports blank Google fields', () => {
+    const url = new URL(buildGoogleMapsUrl({ ...client, googleLocation: { ...googleLocation, placeId: 'evil&origin=x' } })!);
+    expect(url.searchParams.has('destination_place_id')).toBe(false);
+    expect(url.searchParams.has('origin')).toBe(false);
+    expect(buildGoogleMapsUrl({ ...client, googleLocation: { address: null, placeId: null, status: null, precision: null } })).toBe(buildGoogleMapsUrl(client));
+  });
   it('encodes the address as one parameter with fixed origin and no API key', () => {
     const url = new URL(buildGoogleMapsUrl(client)!);
     expect(url.origin + url.pathname).toBe('https://www.google.com/maps/dir/');

@@ -1,0 +1,94 @@
+schema: 1
+story: '3.13'
+story_title: 'Sincronização autorizada de clientes com Google Sheets'
+gate: PASS
+status_reason: 'Implementação técnica aprovada após revisão independente, correção dos cinco achados e validação sintética das fronteiras de segurança, regras de negócio e recuperação. G1–G5 continuam abertos: este parecer não autoriza nem declara sincronização Google ou agendamento produtivo ativos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'worktree-sha256:def3607b1078e987c2d58f39fb7b3c9825659715fb77966d7d025ec0d54feda5'
+updated: '2026-11-03T21:42:00-03:00'
+expires: '2026-11-17T21:42:00-03:00'
+top_issues: []
+waiver:
+  active: false
+
+scope:
+  technical_delivery: approved
+  production_activation: not_approved
+  external_gates_open: [G1, G2, G3, G4, G5]
+  data: 'Dados sintéticos e Supabase local; sem leitura da base Google real, sem provisionamento real do pareamento técnico e sem deploy/VPS.'
+  exclusions: 'Mudanças anteriores das Stories 3.11/4.8 não recebem novo parecer por este gate; somente regressões aplicáveis foram consideradas.'
+
+revision_method:
+  files: 35
+  source: 'File List da Story 3.13, excluindo a própria story e Docs/qa/ para evitar autorreferência.'
+  algorithm: 'Ordenar caminhos por comparação ordinal; para cada arquivo produzir caminho|sha256(bytes) em hex minúsculo; unir com LF sem LF final; SHA256 dos bytes UTF-8 resultantes.'
+
+resolved_issues:
+  - id: SEC-313-001
+    severity: high
+    resolution: 'Preservadas chaves originais e detectadas colisões normalizadas, duplicatas JSON e escapes Unicode antes de qualquer colapso; configuração ambígua falha fechada.'
+  - id: REL-313-002
+    severity: medium
+    resolution: 'Recuperar tentativa mantém a mesma chave até resultado terminal; nova atualização usa nova chave. E2E cobre resposta perdida, consulta, recuperação e nova leitura.'
+  - id: MNT-313-003
+    severity: low
+    resolution: 'UUIDs manual e técnico canonicalizados para minúsculas nas fronteiras de contrato/configuração.'
+  - id: UX-313-004
+    severity: low
+    resolution: 'Motivo acionável inclui vendedor fora da abrangência, sem divulgar identidade adicional.'
+  - id: SEC-313-005
+    severity: high
+    resolution: 'Migração incremental exige pareamento privado fonte/ator antes de begin/replay/slot e revalida em finish. Sem bypass de administrador; RLS permite leitura/lock, não provisionamento pelo executor.'
+
+evidence:
+  independent_execution:
+    - 'Vitest focado: 6 arquivos, 76 testes PASS, incluindo contratos, configuração, Google, normalização, serviço e CLI.'
+    - 'pgTAP após migração incremental: 105/105 PASS, exit 0; inclui identidade direta na RPC, replay, revogação/troca durante lease e escrita da allowlist negada.'
+    - 'Integração real local após ajuste CI final: 1/1 PASS, exit 0, em 2026-11-03 21:41 -03; serviço/adaptador/caller-scoped Supabase, sem depender de apps/web/.env.local.'
+    - 'systemd-analyze calendar confirmou 06:00 e 13:00 America/Sao_Paulo; nenhum timer instalado/ativado.'
+  development_execution_reviewed:
+    - 'npm test -- --maxWorkers=2: 106 arquivos, 574 PASS e 1 skip preexistente.'
+    - 'npm run lint, npm run typecheck, npm run build, npm run security:secrets e git diff --check: PASS; lint/typecheck/secretlint repetidos após ajuste final do teste CI.'
+    - 'Playwright: 5 novos cenários UI, 8 manutenção manual, 2 importador legado, 2 HTTP reais e 2 regressões reais de modelo/rota: todos PASS.'
+    - 'Concorrência real entre duas conexões: segunda execução SYNC_BUSY; rollback, sem dados reais.'
+    - 'CLI autenticada com ator sintético e startup de produção local: PASS, integração disabled e horários explícitos.'
+  automated_review:
+    - 'CodeRabbit global: exit 0, review_completed, 0 findings; 57 arquivos coletados.'
+    - 'CodeRabbit final Supabase: exit 0, review_completed, 0 findings; 3 arquivos, incluindo hardening incremental e pgTAP.'
+  manual_post_coderabbit:
+    - 'Subpath @cirne/config/client-sheet-sync e imports server-side corrigem startup nativo sem leitura automática de segredos nem exposição ao cliente.'
+    - 'Seletores E2E e header CSRF ajustam fixtures ao contrato, sem relaxar controles.'
+    - 'Teste integrado final obtém somente configuração pública por helper Supabase status já usado no harness; não imprime a saída nem depende de arquivo .env.local ausente no CI.'
+    - 'Runbook administrativo pareia configuração BFF/banco, preserva grants existentes e documenta revogação; snippet revisado, não executado com fonte/ator reais.'
+  artifacts:
+    - 'Docs/qa/assessments/3.13-review-20261103.md'
+    - 'Docs/qa/assessments/3.13-coderabbit-20261103.md'
+    - 'Docs/runbooks/google-client-sync.md'
+  limitations:
+    - 'qa-master-checklist.md referenciado pela task está ausente no core instalado; critérios usados: task, Constitution, Story 3.13, ADR 005 e arquitetura §§16–17.'
+    - 'Não executados Google real, scheduler implantado, validação de vendedores no destino ou teste de carga na VPS.'
+
+trace:
+  ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  ac_gaps: []
+  note: 'Cobertura técnica conforme AC 14: evidência sintética permite entrega antes de credenciais/VPS; ativação real exige gates externos próprios.'
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Caller-scoped, clients.import/CSRF, RLS owner/admin e identidade técnica no banco; endpoints/escopo Google fixos, segredos privados e erros sanitizados.'
+  reliability:
+    status: PASS
+    notes: 'Lease e serialização por fonte, importação/resultado atômicos, replay sem duplicação, recuperação de resposta perdida, falha segura e revogação antes de finish.'
+  performance:
+    status: PASS
+    notes: 'Limites de bytes/linhas, timeout e exclusão mútua verificados no escopo sintético; sem alegação de capacidade ou latência produtiva da VPS.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos e caso de uso compartilhados, CLI anterior à UI, migração incremental sem reescrever aplicada, testes e runbook atualizados; nenhuma dependência nova.'
+
+recommendations:
+  immediate: []
+  before_production:
+    - 'Concluir G1–G5: credencial Google read-only, mapeamentos/destino validados, identidade técnica com pareamento BFF/banco e escopo autorizado.'
+    - 'Implantar e verificar 06:00/13:00 America/Sao_Paulo na VPS, obter leitura/resultado reais e concluir governança, backup e rollback antes de habilitar flags.'

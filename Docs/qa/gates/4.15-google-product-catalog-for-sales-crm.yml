@@ -1,0 +1,92 @@
+schema: 1
+story: '4.15'
+story_title: 'Base oficial de produtos do Google Sheets para o mini CRM'
+gate: PASS
+status_reason: 'REL-415-001 foi corrigido de ponta a ponta: o cursor registra explicitamente available ou catalog_unavailable e o SQL responde VERSION_CONFLICT quando uma consulta fixada sem catálogo encontra a primeira publicação. Contratos, cliente, CLI, BFF, migração, pgTAP, integração e E2E foram verificados sem achados abertos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'worktree-sha256:a62be40c7752e0288c3442a5db04d1ef9af4b3d2ebdd04e3a27f2cbd9fc68e91'
+updated: '2026-11-04T01:33:15-03:00'
+expires: '2026-11-18T01:33:15-03:00'
+quality_score: 100
+
+top_issues: []
+
+resolved_issues:
+  - id: 'REL-415-001'
+    severity: medium
+    resolution: 'O contrato exige catalogState em cursores fixados; available exige catalogGenerationId e catalog_unavailable o proíbe. Cliente, BFF e CLI propagam o discriminador. A migração incremental rejeita com VERSION_CONFLICT a transição catalog_unavailable -> primeira publicação durante a paginação.'
+    evidence:
+      - 'packages/contracts/src/sales-crm.ts'
+      - 'apps/web/src/features/clients/client-sales-dialog.tsx'
+      - 'apps/web/src/server/client-sales/service.ts'
+      - 'apps/cli/src/sales-crm-cli.ts'
+      - 'supabase/migrations/20261109120000_product_catalog_cursor_state.sql'
+      - 'supabase/tests/product_catalog_sync.test.sql'
+      - 'tests/e2e/client-sales.spec.ts'
+
+waiver:
+  active: false
+
+scope:
+  technical_delivery: approved
+  production_activation: not_approved
+  included: 'Contratos/domínio, captura manual CLI, BFF, migrações/RPCs, CRM schemaVersion 2, UI responsiva e testes sintéticos da Story 4.15, incluindo a correção REL-415-001.'
+  excluded: 'Fonte/credencial Google real, produtos ou vendas reais, capability products.sync provisionada, timer de produtos, VPS, commit, push, PR e deploy.'
+
+revision_method:
+  files: 57
+  source: 'File List da Story 4.15, excluindo a própria story e Docs/qa/.'
+  algorithm: 'Ordenar caminhos ordinalmente; produzir caminho|sha256(bytes) em hexadecimal minúsculo por arquivo; unir com LF sem LF final; SHA256 dos bytes UTF-8.'
+
+evidence:
+  tests_reviewed: 829
+  independent_execution:
+    - 'Unitários dirigidos pós-correção: 7 arquivos, 47 PASS; contratos, cliente HTTP, diálogo, BFF/CRM e CLI.'
+    - 'Integração CLI -> serviço BFF -> SQL: 1/1 PASS; fixture removida ao final.'
+    - 'pgTAP product_catalog_sync.test.sql: 78/78 PASS em transação com rollback, incluindo catalog_unavailable -> primeira publicação.'
+    - 'Playwright client-sales.spec.ts: 10/10 PASS, incluindo conflito ao publicar o primeiro catálogo entre páginas.'
+    - 'Lint, typecheck, secretlint e git diff --check repetidos por QA: PASS.'
+  development_execution_reviewed:
+    - 'Unitários completos: 128 arquivos, 740 PASS e 1 skip previsto.'
+    - 'Build final Next.js 16.4.3: PASS; rotas do catálogo incluídas.'
+    - 'Migração 20261109120000 aplicada com sucesso; pgTAP isolado completo: 25 arquivos, 1.230 verificações PASS em banco descartável.'
+    - 'CodeRabbit final em apps/packages/tests sem achados; supabase sem achado da Story 4.15. A sugestão sobre lease da Story 3.13 foi rejeitada por contrariar teste explícito.'
+  shared_database:
+    before_and_after: { catalogSources: 0, catalogRuns: 0, productsSync: 0, salesSources: 0 }
+    note: 'Nenhuma fonte, capability, venda, produto real ou timer de produtos foi persistido pela revisão.'
+  migration_contract:
+    status: PASS
+    note: 'A migração incremental está aplicada; a assinatura pública antiga foi removida, a nova assinatura exige p_catalog_state, mantém grants mínimos e preserva o helper privado anterior usado apenas pelos RPCs de catálogo disponível.'
+  migration_lint:
+    status: PASS_WITH_NOTE
+    note: 'O aviso histórico de volatilidade do helper de hash não afeta REL-415-001, não participa de índice funcional e permanece como recomendação de manutenção.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    ac_gaps: []
+    note: 'Todos os ACs têm evidência por camada; REL-415-001 está resolvido e sem regressão observada.'
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Conta Google read-only e IDs privados permanecem fora do repositório/browser; products.sync nasce sem allowlist; fonte+ator e escopo atual são revalidados no SQL; preço não aparece nas projeções comerciais.'
+  performance:
+    status: PASS
+    notes: 'Limites de 10.000 linhas, chunks de até 500/1 MiB, páginas de 25, índices por geração/código e timeouts/retries limitados. Não representa benchmark de carga real da VPS.'
+  reliability:
+    status: PASS
+    notes: 'Snapshots, leases, replay, dupla leitura, publicação atômica, rollback e conflito entre estados/gerações foram comprovados; ausência de catálogo também fica fixada no cursor.'
+  maintainability:
+    status: PASS
+    notes: 'Contrato discriminado, migração incremental, runbooks e regressões por camada. A volatilidade do helper de hash segue como manutenção futura não bloqueante.'
+  accessibility:
+    status: PASS
+    notes: 'Diálogo operável por teclado, foco contido/retornado, tabela equivalente ao gráfico, desktop/mobile e reflow equivalente a 200% aprovados.'
+
+recommendations:
+  immediate: []
+  before_production:
+    - action: 'Executar os gates operacionais de credencial/fonte, provisionamento explícito de products.sync, backup, rollback e observabilidade; definir a cadência antes de criar qualquer timer de produtos.'
+      refs: ['Docs/runbooks/google-product-catalog-sync.md']
+  future:
+    - action: 'Adicionar prova explícita dos limites máximos de 10.000 linhas e divisão de chunk por bytes, além de alinhar a volatilidade do helper SQL de hash ao db lint.'
+      refs: ['apps/cli/src/product-catalog-sync.test.ts', 'supabase/migrations/20261108120000_product_catalog_sync.sql']

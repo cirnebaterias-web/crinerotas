@@ -16,6 +16,7 @@ export async function ManagementDayPage({
   const parameters = await searchParams;
   let fallbackDate = new Date().toISOString().slice(0, 10);
   let selectedDate = fallbackDate;
+  let canPlanRoutes = false;
   let initial: ManagementDayInitialState;
   try {
     const timeZone = readServerConfig(process.env).OPERATIONAL_TIME_ZONE;
@@ -36,6 +37,8 @@ export async function ManagementDayPage({
         setAll: () => { /* Server Components cannot persist refreshed cookies. */ },
       };
       const identity = await resolveIdentityRequest(null, cookieMethods);
+      canPlanRoutes = identity.roles.includes('manager')
+        && identity.capabilities.includes('route.plan_scoped');
       const client = createCallerScopedClient(null, cookieMethods);
       const result = await getManagementDay(
         identity, parsed.data, timeZone, new SupabaseManagementDayRepository(client),
@@ -54,5 +57,6 @@ export async function ManagementDayPage({
   const dashboardKey = initial.kind === 'ready' || initial.kind === 'empty'
     ? `${initial.serviceDate}:${initial.result.generatedAt}`
     : `${initial.serviceDate}:${initial.kind}`;
-  return <ManagementDayDashboard key={dashboardKey} initial={initial} mapConfig={readManagementMapConfig(process.env)} />;
+  return <ManagementDayDashboard key={dashboardKey} initial={initial}
+    canPlanRoutes={canPlanRoutes} mapConfig={readManagementMapConfig(process.env)} />;
 }
