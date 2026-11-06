@@ -1,5 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="Cirne Rotas">
-  <rect width="192" height="192" rx="36" fill="#182b24"/>
-  <path d="M47 50h98v24H71v44h74v24H47z" fill="#f7f4ec"/>
-  <circle cx="132" cy="106" r="13" fill="#e6b94a"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" role="img" aria-label="Cirne Rotas">
+  <rect width="36" height="36" rx="11" fill="#00783b"/>
+  <path d="M11 25V15a5 5 0 0 1 5-5h9M19 7l6 3-6 3M25 17v4a5 5 0 0 1-5 5h-3" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
