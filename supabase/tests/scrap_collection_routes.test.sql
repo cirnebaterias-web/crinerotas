@@ -55,6 +55,24 @@ select throws_ok(format('select api.create_scrap_collection_route(%L,%L)',:'rout
   (:'create_command'::jsonb||jsonb_build_object('routeDate',current_date+1))::text),
   'P0001','IDEMPOTENCY_KEY_REUSED','same key cannot represent another route');
 select (:'created'::jsonb)->>'routeId' as route_id \gset
+reset role;
+savepoint recompute_swap;
+update api.scrap_collection_route_stops set location_snapshot=case schedule_id
+  when :'first' then extensions.st_setsrid(extensions.st_makepoint(-35.20,-5.80),4326)::extensions.geography
+  when :'second' then extensions.st_setsrid(extensions.st_makepoint(-36.00,-5.80),4326)::extensions.geography
+  else extensions.st_setsrid(extensions.st_makepoint(-35.21,-5.80),4326)::extensions.geography end
+  where route_id=:'route_id' and active;
+grant cirne_scrap_executor to postgres with set true;
+set local role cirne_scrap_executor;
+select lives_ok(format('select private.scrap_collection_route_recompute(%L)',:'route_id'),
+  'recompute safely swaps active orders without transient uniqueness collisions');
+reset role;
+select is((select planned_order from api.scrap_collection_route_stops
+  where route_id=:'route_id' and schedule_id=:'second' and active),1,
+  'recompute applies the new deterministic order after staging the complete result');
+rollback to recompute_swap;
+set local role authenticated;
+select set_config('request.jwt.claim.sub',:'manager_a',true);
 select throws_ok(format('select api.create_scrap_collection_route(%L,%L)',gen_random_uuid(),:'create_command'),
   'P0001','VALIDATION_FAILED','one promise cannot be placed in two routes');
 select jsonb_build_object('schemaVersion',1,'expectedVersion',1,'reason','Ordem operacional',
@@ -95,6 +113,18 @@ select is((:'removed_stop'::jsonb)->>'status','draft',
 select set_config('request.jwt.claim.sub',:'logistics_a',true);
 select is(jsonb_array_length(api.list_logistics_pickups(current_date)->'records'),0,
   'revised route leaves the operator phone until the new version is approved and assigned');
+select set_config('request.jwt.claim.sub',:'manager_a',true);
+savepoint active_reassignment;
+select api.create_scrap_collection_route(gen_random_uuid(),jsonb_build_object(
+  'schemaVersion',1,'routeDate',current_date,'scheduleIds',jsonb_build_array(:'first'))) as reassigned_route \gset
+select is((:'reassigned_route'::jsonb)#>>'{counts,total}','1',
+  'a schedule archived from the previous route can be assigned to a new active route');
+reset role;
+select is((select count(*)::integer from api.scrap_collection_route_stops
+  where schedule_id=:'first' and active),1,
+  'only one active route stop owns a reassigned schedule');
+rollback to active_reassignment;
+set local role authenticated;
 select set_config('request.jwt.claim.sub',:'manager_a',true);
 select api.change_scrap_collection_route(:'route_id','revise',gen_random_uuid(),jsonb_build_object(
   'schemaVersion',1,'expectedVersion',5,'reason','Cliente reincluído pelo gestor',

@@ -15,8 +15,22 @@ type DeferredClientList = {
 async function setup(page: Page, manager = false, canReadSales = true) {
   const reads: URL[] = []; const mutations: string[] = []; const signals: URL[] = [];
   let failure = 0; let noHistory = false; let catalogUnavailable = false; let catalogPublished = false;
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+      getCurrentPosition: (success: PositionCallback) => success({
+        coords: { latitude: -5.81, longitude: -35.21, accuracy: 12, altitude: null,
+          altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now(),
+      } as GeolocationPosition),
+    } });
+  });
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === '/api/v1/me/route-location' && route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { latitude: number; longitude: number; accuracyM: number; capturedAt: string };
+      return route.fulfill({ json: { kind: 'current_gps', sellerId: id(10), locationId: id(80),
+        capturedBy: id(10), version: 1, latitude: body.latitude, longitude: body.longitude,
+        accuracyM: body.accuracyM, capturedAt: body.capturedAt } });
+    }
     if (route.request().method() !== 'GET') { mutations.push(url.pathname); return route.fulfill({ status: 500, json: {} }); }
     if (url.pathname === '/api/v1/me') return route.fulfill({ json: {
       id: id(10), displayName: 'Pessoa sintética', roles: [manager ? 'manager' : 'seller'], status: 'active', scopeIds: [id(10)],

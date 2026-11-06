@@ -5,7 +5,7 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testIgnore: ['**/seller-real.spec.ts', '**/scrap-agenda-real.spec.ts', '**/scrap-collection-real.spec.ts', '**/route-planning-real.spec.ts', '**/client-template-real.spec.ts', '**/client-sheet-sync-real.spec.ts', '**/sales-sync-real.spec.ts', '**/sales-crm-real.spec.ts'],
+  testIgnore: ['**/seller-real.spec.ts', '**/scrap-agenda-real.spec.ts', '**/scrap-collection-real.spec.ts', '**/scrap-ledger-real.spec.ts', '**/route-planning-real.spec.ts', '**/client-template-real.spec.ts', '**/client-sheet-sync-real.spec.ts', '**/sales-sync-real.spec.ts', '**/sales-crm-real.spec.ts'],
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,

@@ -2,19 +2,19 @@ schema: 1
 story: '4.23'
 story_title: 'Planejamento inteligente e execucao simples das rotas de coleta de sucata'
 gate: PASS
-status_reason: 'Os onze criterios de aceite foram rastreados e aprovados apos dois ciclos de correcao, sem achados criticos, altos ou medios remanescentes. Identidade, versao, aprovacao, despacho, execucao integral e sugestao geografica confiavel possuem cobertura automatizada e verificacao independente.'
+status_reason: 'Os onze criterios permanecem aprovados apos hardening da unicidade ativa e da reordenacao atomica; nao restam achados criticos, altos ou medios.'
 reviewer: 'Quinn'
-reviewed_revision: 'worktree:sha256:babb2051fa089a02810e60793b637103e4afb49dd956a09301d0065c66bb7180'
-updated: '2026-11-05T21:14:37Z'
+reviewed_revision: 'worktree:hardening-0.6.2'
+updated: '2026-11-06T11:56:59Z'
 top_issues: []
 waiver: { active: false }
 evidence:
   trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], ac_gaps: [] }
-  independent_verification: '4 suites focais / 17 testes PASS; Playwright movel 6/6 PASS em 390x844; git diff --check PASS; revisao read-only de contratos, CLI, BFF, UI, migration e pgTAP.'
-  implementation_verification: 'pgTAP 30 arquivos / 1431 testes PASS; unitarios 146 arquivos / 823 PASS e 1 skip; lint, typecheck, build, secretlint, denylist e diff-check PASS.'
-  database: 'Migration local cria agregado versionado, RLS, idempotencia e auditoria append-only; revisao de composicao ou ordem invalida aprovacao e despacho anteriores antes de novo ciclo approve/assign.'
+  independent_verification: '4 suites focais / 17 testes PASS; revisao read-only do hardening SQL e dos cenarios de swap/reutilizacao; git diff --check PASS. Playwright movel anterior 6/6 PASS em 390x844.'
+  implementation_verification: 'Clean DB reset PASS; pgTAP focal 39/39 e completo 31 arquivos / 1476 PASS; unitarios 149 arquivos / 827 PASS e 1 skip; lint, typecheck, build e diff-check PASS.'
+  database: 'Historico permite o mesmo agendamento em rotas distintas, mas somente uma parada ativa; recompute aplica ordem completa atomicamente e o trigger ignora paradas arquivadas.'
   mobile: 'Fluxo do operador prioriza rota, progresso, lojista, endereco e kg; dados secundarios ficam em detalhe progressivo. Composicao e desfazer gerenciais foram verificados sem overflow em 390x844.'
-  coderabbit: 'Indisponivel nesta worktree; a limitacao foi registrada explicitamente e nao representa PASS automatizado. Revisao QA independente e gates locais foram executados.'
+  coderabbit: 'A tentativa via WSL desta rodada nao conectou por indisponibilidade do ambiente systemd; nao foi contabilizada como PASS automatizado. Revisao QA independente e gates locais foram executados.'
 nfr_validation:
   security: { status: PASS, notes: 'Escopo, capacidade, RLS, documento estrito e isolamento do operador foram verificados; coordenadas so usam evidencia de visita com posicao e acuracia ate 100 m.' }
   reliability: { status: PASS, notes: 'Idempotencia, versao obsoleta, arquivamento sem resultado falso, reprovacao apos revisao e fechamento somente com todas as paradas terminais possuem cobertura.' }

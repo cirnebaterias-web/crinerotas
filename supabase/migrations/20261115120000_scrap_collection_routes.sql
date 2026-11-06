@@ -32,7 +32,7 @@ create index scrap_collection_routes_operator on api.scrap_collection_routes(ope
 create table api.scrap_collection_route_stops (
   id uuid primary key default gen_random_uuid(),
   route_id uuid not null references api.scrap_collection_routes(id) on delete restrict,
-  schedule_id uuid not null unique references api.pickup_schedules(id) on delete restrict,
+  schedule_id uuid not null references api.pickup_schedules(id) on delete restrict,
   client_name_snapshot text not null,
   document_snapshot text check(document_snapshot ~ '^(\d{11}|\d{14})$'),
   address_snapshot text not null,
@@ -51,6 +51,10 @@ create table api.scrap_collection_route_stops (
     or (not active and removed_by is not null and removed_at is not null and removal_reason is not null))
 );
 create index scrap_collection_route_stops_route on api.scrap_collection_route_stops(route_id, planned_order);
+create unique index scrap_collection_route_stops_route_schedule_key
+  on api.scrap_collection_route_stops(route_id,schedule_id);
+create unique index scrap_collection_route_stops_active_schedule_key
+  on api.scrap_collection_route_stops(schedule_id) where active;
 create unique index scrap_collection_route_stops_active_suggested_order_key
   on api.scrap_collection_route_stops(route_id,suggested_order) where active;
 create unique index scrap_collection_route_stops_active_planned_order_key
@@ -176,8 +180,14 @@ create function private.scrap_collection_route_recompute(p_route_id uuid)
 returns void language plpgsql volatile security definer set search_path = '' as $$
 declare current_stop uuid; previous_location extensions.geography(point,4326); next_order integer := 1;
   processed uuid[] := '{}'::uuid[];
-  centroid extensions.geometry; next_stop record;
+  centroid extensions.geometry; next_stop record; next_distance numeric := null;
 begin
+  create temporary table if not exists pg_temp.scrap_route_recomputed_order (
+    stop_id uuid primary key,
+    final_order integer not null,
+    distance_km numeric
+  ) on commit drop;
+  truncate pg_temp.scrap_route_recomputed_order;
   select extensions.st_centroid(extensions.st_collect(location_snapshot::extensions.geometry)) into centroid
     from api.scrap_collection_route_stops where route_id = p_route_id and active and location_snapshot is not null;
   if centroid is not null then
@@ -186,9 +196,8 @@ begin
       order by extensions.st_distance(location_snapshot, centroid::extensions.geography) desc, schedule_id limit 1;
     current_stop := next_stop.id; previous_location := next_stop.location_snapshot;
     while current_stop is not null loop
-      update api.scrap_collection_route_stops set suggested_order = next_order, planned_order = next_order,
-        approximate_from_previous_km = case when next_order = 1 then null else approximate_from_previous_km end,
-        updated_at = now() where id = current_stop;
+      insert into pg_temp.scrap_route_recomputed_order(stop_id,final_order,distance_km)
+        values(current_stop,next_order,next_distance);
       processed := array_append(processed,current_stop);
       next_order := next_order + 1;
       select id, location_snapshot,
@@ -198,17 +207,27 @@ begin
         order by extensions.st_distance(location_snapshot, previous_location), schedule_id limit 1;
       if not found then current_stop := null; else
         current_stop := next_stop.id;
-        update api.scrap_collection_route_stops set approximate_from_previous_km = next_stop.distance_km where id = current_stop;
+        next_distance := next_stop.distance_km;
         previous_location := next_stop.location_snapshot;
       end if;
     end loop;
   end if;
   for next_stop in select id from api.scrap_collection_route_stops
     where route_id = p_route_id and active and not (id = any(processed)) order by client_name_snapshot, schedule_id loop
-    update api.scrap_collection_route_stops set suggested_order = next_order, planned_order = next_order,
-      approximate_from_previous_km = null, updated_at = now() where id = next_stop.id;
+    insert into pg_temp.scrap_route_recomputed_order(stop_id,final_order,distance_km)
+      values(next_stop.id,next_order,null);
     next_order := next_order + 1;
   end loop;
+  update api.scrap_collection_route_stops set active=false,
+    removed_by=(select created_by from api.scrap_collection_routes where id=p_route_id),
+    removed_at=now(),removal_reason='Recalculando ordem da rota.'
+    where route_id=p_route_id and active;
+  update api.scrap_collection_route_stops stop set suggested_order=ordered.final_order,
+    planned_order=ordered.final_order,approximate_from_previous_km=ordered.distance_km,updated_at=now()
+    from pg_temp.scrap_route_recomputed_order ordered where stop.id=ordered.stop_id;
+  update api.scrap_collection_route_stops set active=true,removed_by=null,removed_at=null,removal_reason=null
+    where route_id=p_route_id
+    and id in(select stop_id from pg_temp.scrap_route_recomputed_order);
 end $$;
 
 create function api.get_scrap_collection_route(p_route_id uuid)
@@ -495,7 +514,7 @@ begin
   if old.result_outcome is not null or new.result_outcome is null then return new; end if;
   select route.* into route_value from api.scrap_collection_routes route
     join api.scrap_collection_route_stops stop on stop.route_id=route.id
-    where stop.schedule_id=new.schedule_id for update of route;
+    where stop.schedule_id=new.schedule_id and stop.active for update of route;
   if route_value.id is null or route_value.status in ('cancelled','completed') then return new; end if;
   select count(*)::integer,count(*) filter(where pickup.result_outcome is not null)::integer
     into total_count,completed_count from api.scrap_collection_route_stops stop
