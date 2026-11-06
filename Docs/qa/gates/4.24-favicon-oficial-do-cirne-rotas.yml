@@ -1,0 +1,25 @@
+schema: 1
+story: '4.24'
+story_title: 'Favicon oficial do Cirne Rotas'
+gate: PASS
+status_reason: 'Metadata, simbolo vetorial, manifesto PWA, regressao automatizada e gates completos aprovados sem achados bloqueadores.'
+reviewer: 'Quinn'
+reviewed_revision: 'd75f0fb'
+updated: '2026-11-06T17:10:00Z'
+top_issues: []
+waiver: { active: false }
+evidence:
+  trace: { ac_covered: [1, 2, 3, 4], ac_gaps: [] }
+  tests: 'Teste focal 2/2; suite unitaria 150 arquivos, 829 PASS e 1 skip; lint, typecheck, build e diff-check PASS.'
+  visual: 'SVG rasterizado e inspecionado em 256 px; simbolo branco sobre verde com margens legiveis.'
+  coderabbit: 'Nao contabilizado como parecer automatizado; revisao QA independente e gates locais completos executados.'
+nfr_validation:
+  security: { status: PASS, notes: 'Ativos estaticos e metadata sem entrada externa ou privilegio.' }
+  reliability: { status: PASS, notes: 'Teste impede remocao da metadata e divergencia do simbolo oficial.' }
+  performance: { status: PASS, notes: 'SVG pequeno e escalavel; nenhum script ou requisicao adicional.' }
+  maintainability: { status: PASS, notes: 'Favicon reutiliza o mesmo path vetorial do componente de marca.' }
+limitations:
+  - 'Caches de navegador podem reter o favicon anterior ate uma recarga ou limpeza do cache do site.'
+recommendations:
+  immediate: []
+  future: []
