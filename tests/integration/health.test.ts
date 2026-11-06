@@ -389,8 +389,8 @@ it('returns the caller-scoped seller and manager contexts', async () => {
   expect(await sellerResponse.json()).toMatchObject({
     id: seller.id,
     roles: ['seller'],
-    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'scrap.collect_self',
-      'scrap.schedule_self', 'sync.write_self', 'visit.start_self'],
+    capabilities: ['identity.read_self', 'route.read_self', 'route.reorder_self', 'sales.read_client',
+      'scrap_ledger.read', 'scrap.collect_self', 'scrap.schedule_self', 'sync.write_self', 'visit.start_self'],
     scopeIds: [seller.id],
     status: 'active',
   });
