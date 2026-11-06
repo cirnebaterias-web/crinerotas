@@ -150,6 +150,7 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
     <p className="seller-kicker">{kind === 'checkin' ? 'CHECK-IN' : 'CHECKOUT'}</p>
     <h2 id="evidence-title">Foto da fachada e posição</h2>
     <p className="seller-muted">{client.name} · a foto deve ser tirada agora pela câmera. A galeria não está disponível.</p>
+    <p className="seller-muted">A posição será registrada para conferência. A referência do cadastro pode estar imprecisa; o GPS desta visita não a substitui automaticamente.</p>
     <div className="seller-evidence-camera">
       <video ref={videoRef} playsInline muted aria-label="Visualização da câmera traseira" />
       {preview && <img src={preview} alt="Foto da fachada capturada agora" />}
@@ -161,7 +162,7 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
     </button>}
     <div className="seller-evidence-location" aria-live="polite">
       <strong>{locating ? 'Obtendo GPS…' : location ? `GPS registrado · precisão ${location.accuracyM} m` : 'GPS indisponível'}</strong>
-      {location?.distanceM && <span>Distância da loja: {Math.round(Number(location.distanceM))} m</span>}
+      {location?.distanceM && <span>Distância aproximada à referência cadastral: {Math.round(Number(location.distanceM))} m</span>}
     </div>
     {issues.length > 0 && <div className="seller-evidence-exception">
       <strong>Revisão necessária</strong>

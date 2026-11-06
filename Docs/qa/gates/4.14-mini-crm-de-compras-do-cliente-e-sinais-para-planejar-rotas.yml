@@ -1,0 +1,92 @@
+schema: 1
+story: '4.14'
+story_title: 'Mini CRM de compras do cliente e sinais para planejar rotas'
+gate: PASS
+status_reason: 'Entrega técnica aprovada após revisão independente de autorização, contexto de leitura, fórmulas e interação, com testes focados, SQL e integração repetidos por QA. Os ajustes de foco e cobertura de corridas foram fechados; limitações do banco compartilhado e gates externos permanecem explícitos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'worktree-sha256:133baf6dd1b4cb12ef24b49e75ca2f7be5ef92a5586f90885aeb93472baa31c6'
+updated: '2026-11-03T23:20:02-03:00'
+expires: '2026-11-17T23:20:02-03:00'
+top_issues: []
+waiver:
+  active: false
+
+scope:
+  technical_delivery: approved
+  production_activation: not_approved
+  external_gates_open: [G1, G2, G3, G4, G5]
+  included: 'Mini CRM online, métricas compartilhadas, CLI/BFF, leitura SQL autorizada, sinais da página visível do planner e testes sintéticos da Story 4.14.'
+  excluded: 'Dados reais, Google/timer/VPS ativos, cache offline comercial, mutação automática de rota, commit/push/PR/deploy e revisão retroativa dos gates 4.8/4.13.'
+
+revision_method:
+  files: 39
+  source: 'File List da Story 4.14, excluindo a própria story, Docs/qa/ e .local/.'
+  algorithm: 'Ordenar caminhos ordinalmente; produzir caminho|sha256(bytes) em hex minúsculo por arquivo; unir com LF sem LF final; SHA256 dos bytes UTF-8.'
+
+resolved_issues:
+  - id: REL-414-001
+    severity: medium
+    resolution: 'Foco transferido ao controle persistente antes de remover a paginação; contenção Tab/Shift+Tab e retorno ao acionador conferidos. Correção encontrada por UI e verificada manualmente por QA, com E2E final PASS.'
+  - id: TEST-414-002
+    severity: low
+    resolution: 'Cobertura solicitada por QA adicionada: sinais atrasados após mudança de data e invalidação de conteúdo por troca de identidade via BroadcastChannel. Ambos os cenários PASS.'
+
+evidence:
+  independent_execution:
+    - 'Unitários focados finais: 7 arquivos, 55 PASS, exit 0; contratos, domínio, CLI, snapshot, BFF, HTTP e apresentação.'
+    - 'pgTAP sales_route_signals.test.sql: 77/77 PASS, exit 0, transação com rollback e atores sintéticos próprios.'
+    - 'Integração JS→SQL: 1/1 PASS, exit 0; duas gerações, hash/Unicode, preservação/replay e igualdade detalhe/sinais.'
+    - 'git diff --check PASS; revisão manual dos deltas finais de foco e testes posteriores à captura CodeRabbit.'
+  development_execution_reviewed:
+    - 'Lint, typecheck, build final, secretlint e diff-check PASS.'
+    - 'Global unitário: 120 arquivos, 713 PASS, 1 skip preexistente de symlink Windows.'
+    - 'SQL clean-room pré-apply: 24 arquivos, 1.153 PASS; pós-apply local: 304 PASS. Executado por Dara; não reivindicado como repetição integral independente nesta story.'
+    - 'E2E real CRM/ingestão: 6 PASS; E2E CRM mockado: 8 PASS; reflow final ajustado: 1 PASS; regressão selecionada rota/visita: 12 PASS.'
+  visual:
+    - 'QA inspecionou diretamente capturas sintéticas de detalhe 390/1440 px, gráfico negativo/tabela, planner desktop e reflow 640×500/dpr2.'
+    - 'Cabeçalho/Fechar, textos e valores legíveis, sem sobreposição observada. Reflow equivalente a 200%, não zoom nativo do navegador/SO.'
+  automated_review:
+    - 'CodeRabbit global e pré-apply SQL: exit 0, zero achados. Deltas finais manuais discriminados em 4.14-coderabbit-20261103.md.'
+  shared_database_regression:
+    command: 'npm run db:test'
+    known_result: FAIL
+    rerun_by_qa_for_this_story: false
+    reason: 'Fixtures fundacionais duplicadas no banco compartilhado, limitação herdada e preservada da 4.13. Não remover atores/resetar banco nem declarar esse comando PASS; regressão completa foi verificada em clone descartável isolado.'
+  artifacts:
+    - 'Docs/qa/assessments/4.14-review-20261103.md'
+    - 'Docs/qa/assessments/4.14-coderabbit-20261103.md'
+    - 'Docs/runbooks/google-sales-sync.md'
+  limitations:
+    - 'qa-master-checklist.md ausente; critérios explícitos da task, Constitution, story, ADR e arquitetura usados sem checklist inventada.'
+    - 'Não houve Google real, execução remota do CI, implantação/timer ou teste integral de todos os E2E.'
+    - 'Clean-room usa schema local migrado; helper e PNGs locais ignorados não compõem o digest de entrega.'
+
+trace:
+  ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+  ac_gaps: []
+  note: 'Aceite técnico sintético; tabela de cenários/evidências no assessment. A ativação real depende dos gates externos da 4.13.'
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Escopo/capacidades atuais em toda RPC, lote integral 1–50, sem bypass de administrador, projeções mínimas e no-store/NetworkOnly; sessão revogada remove dados transitórios.'
+  reliability:
+    status: PASS
+    notes: 'Tripla geração/data/versão cadastral, retry inicial único, conflito em cursor fixado, erros distintos de vazio e descarte de respostas obsoletas; nenhuma mutação automática de rota.'
+  performance:
+    status: PASS
+    notes: 'Sinais em uma consulta SQL limitada à página visível, sem N+1; limites e volume bigint testados. Não representa benchmark de carga real da VPS.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos e cálculos compartilhados CLI/BFF/UI, migration incremental, documentação e testes por camada; nenhuma dependência externa nova.'
+  accessibility:
+    status: PASS
+    notes: 'Diálogo com teclado/foco/retorno, alvos mínimos, série textual equivalente, negativos não dependem apenas de cor e reflow mobile/equivalente 200% verificados.'
+
+recommendations:
+  immediate: []
+  future:
+    - 'Manter ambiente sintético exclusivo para regressão completa e tratar fixtures duplicadas em tarefa própria sem apagar dados existentes.'
+  before_production:
+    - 'Concluir G1–G5 da 4.13, retenção/capacidade/privacidade, backup, credenciais e observação da execução agendada no ambiente autorizado.'
+    - 'Implantar contratos/BFF e migration incremental compatíveis; não reescrever migrations aplicadas nem afirmar timer ativo a partir de flags locais.'

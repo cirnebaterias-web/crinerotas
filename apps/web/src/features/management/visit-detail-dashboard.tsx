@@ -10,6 +10,7 @@ import {
   type VisitDetailResponse,
 } from '@cirne/contracts';
 import { ScrapShell } from '../scrap/scrap-ui';
+import { ClientLocationSource } from '../clients/client-location-source';
 
 export type VisitDetailInitialState =
   | { kind: 'ready'; result: VisitDetailResponse }
@@ -125,6 +126,8 @@ export function VisitDetailDashboard({ initial }: { initial: VisitDetailInitialS
     {confirmed && <>
       <p className="seller-notice">{confirmed.serverVisibilityNote}</p>
       <section className="manager-day-route" aria-labelledby="visit-context-title"><h2 id="visit-context-title">Contexto preservado</h2>
+        <p>Endereço cadastral: {confirmed.context.client.address}</p>
+        <ClientLocationSource location={confirmed.context.client.googleLocation} />
         <dl className="manager-day-counts">
           <div><dt>Data operacional</dt><dd>{confirmed.context.serviceDate}</dd></div>
           <div><dt>Vendedor</dt><dd>{confirmed.context.seller.displayName}</dd></div>
@@ -159,7 +162,14 @@ export function VisitDetailDashboard({ initial }: { initial: VisitDetailInitialS
       </section>
       <section className="manager-day-route"><h2>Exceções operacionais</h2>{confirmed.exceptions.length === 0 ? <p>Não ocorreu exceção conhecida.</p> : <ul>{confirmed.exceptions.map((item) => <li key={`${item.kind}:${item.capturedAt}`}>{item.message} · {dateTime(item.capturedAt)}</li>)}</ul>}</section>
       <section className="manager-day-route"><h2>Localização</h2><p>{sectionState(confirmed.location.state)}</p>
-        {confirmed.location.state === 'available' && <dl className="manager-day-counts"><div><dt>Latitude</dt><dd>{confirmed.location.latitude}</dd></div><div><dt>Longitude</dt><dd>{confirmed.location.longitude}</dd></div><div><dt>Precisão (m)</dt><dd>{confirmed.location.accuracyM ?? 'Não informada'}</dd></div></dl>}
+        {confirmed.location.state === 'available' && <>
+          <p>GPS observado nesta visita. Não substitui automaticamente a localização do cadastro.</p>
+          <dl className="manager-day-counts"><div><dt>Latitude</dt><dd>{confirmed.location.latitude}</dd></div><div><dt>Longitude</dt><dd>{confirmed.location.longitude}</dd></div><div><dt>Precisão (m)</dt><dd>{confirmed.location.accuracyM ?? 'Não informada'}</dd></div>
+            <div><dt>Capturado em</dt><dd>{dateTime(confirmed.location.capturedAt)}</dd></div>
+            <div><dt>Distância aproximada à referência cadastral (m)</dt><dd>{confirmed.location.distanceM ?? 'Sem coordenadas de referência'}</dd></div>
+          </dl>
+          <p>A referência cadastral pode estar imprecisa; uma divergência exige conferência, não comprova falha do vendedor.</p>
+        </>}
       </section>
       <section className="manager-day-route"><h2>Evidências</h2><EvidenceList evidence={confirmed.evidence} /></section>
       <section className="manager-day-route"><h2>Histórico sanitizado</h2>{confirmed.timeline.length === 0 ? <p>Nenhum evento de histórico disponível.</p> : <ol>{confirmed.timeline.map((event, index) => <li key={`${event.occurredAt}:${event.action}:${index}`}>{event.action} · {dateTime(event.occurredAt)}</li>)}</ol>}</section>

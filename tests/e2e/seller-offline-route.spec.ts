@@ -84,6 +84,28 @@ async function mockSeller(page: Page, currentRoute: () => CanonicalRoute = () =>
   });
 }
 
+test('Google destination survives route caching and offline reopening without changing old coordinates', async ({ page, context }) => {
+  const googleLocation = { address: 'Av. Google sintética, 100', placeId: 'EjR_synthetic-123', status: 'REVISAR_ENDERECO_PARCIAL', precision: 'RANGE_INTERPOLATED' };
+  const withGoogle: CanonicalRoute = { ...route, stops: route.stops.map((stop) => ({ ...stop,
+    client: { ...stop.client, latitude: '0', longitude: '0', googleLocation } })) };
+  await mockSeller(page, () => withGoogle);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  const navigate = page.getByRole('link', { name: /Navegar para Cliente offline/ });
+  const url = new URL((await navigate.getAttribute('href'))!);
+  expect(url.searchParams.get('destination_place_id')).toBe(googleLocation.placeId);
+  expect(url.searchParams.get('destination')).toBe(googleLocation.address);
+  expect(url.searchParams.has('origin')).toBe(false);
+  await expect(page.getByText(/Status geo: REVISAR_ENDERECO_PARCIAL/)).toBeVisible();
+  await page.waitForFunction(async () => Boolean((await navigator.serviceWorker.ready).active));
+  await page.unrouteAll({ behavior: 'wait' });
+  await context.setOffline(true);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByText(`Endereço Google: ${googleLocation.address}`)).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Navegar/ })).toBeDisabled();
+  await expect(page.getByText(/ainda não validada em campo/)).toBeVisible();
+});
+
 test('caches the canonical route, reopens it offline and revokes local access', async ({ page, context }) => {
   await mockSeller(page);
   await page.goto('/route');

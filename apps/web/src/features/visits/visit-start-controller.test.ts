@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { StockInput } from '@cirne/contracts';
 import type { OfflineSnapshot } from '../../lib/offline/service';
 import { VisitStartController } from './visit-start-controller';
 
@@ -47,6 +48,62 @@ function fixture() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('VisitStartController', () => {
+  it.each(['catalog', 'post-sync evidence'] as const)(
+    'never republishes stock from an older %s snapshot after a durable online commit', async (phase) => {
+      const f = fixture();
+      const queuedEvent = structuredClone(f.snapshot.outbox[0]!);
+      f.snapshot.outbox = [];
+      f.snapshot.drafts[0]!.persistenceState = 'synced';
+      f.snapshot.drafts[0]!.stock = {
+        eventId: 'stock-old', heliarQuantity: 0, mouraQuantity: 0, ownLines: [],
+        completedOwnBrands: ['Heliar'], deviceSavedAt: stamp, persistenceState: 'synced',
+      };
+      f.service.initialize.mockImplementation(async () => structuredClone(f.snapshot));
+      f.service.refresh.mockImplementation(async () => structuredClone(f.snapshot));
+      await f.controller.resume();
+
+      f.snapshot.drafts[0]!.persistenceState = 'saved_on_device';
+      f.snapshot.outbox = [queuedEvent];
+      let release!: () => void;
+      let entered!: () => void;
+      const paused = new Promise<void>((resolve) => { release = resolve; });
+      const reading = new Promise<void>((resolve) => { entered = resolve; });
+      if (phase === 'catalog') {
+        f.service.getVisitPriceParameters.mockImplementationOnce(async () => {
+          entered(); await paused; return null;
+        });
+      } else {
+        f.service.listVisitAttachments.mockResolvedValueOnce([]).mockImplementationOnce(async () => {
+          entered(); await paused; return [];
+        });
+      }
+      const staleRun = f.controller.resume();
+      await reading;
+      const completedOwnBrands: NonNullable<StockInput['completedOwnBrands']> = ['Heliar', 'América', 'Durex', 'ACDelco'];
+      const values: StockInput = { heliarQuantity: 0, mouraQuantity: 0, ownLines: [], completedOwnBrands };
+      const savedDraft = {
+        ...f.snapshot.drafts[0]!,
+        stock: { ...values, eventId: 'stock-new', deviceSavedAt: stamp, persistenceState: 'saved_on_device' as const },
+      };
+      f.service.saveVisitStock.mockImplementation(async () => {
+        f.snapshot.drafts = [savedDraft];
+        return { draft: savedDraft, event: {} };
+      });
+      await f.controller.saveStock(values);
+      const committedPublication = f.publish.mock.calls.length - 1;
+      release();
+      await staleRun;
+      await f.controller.resume();
+      // Inspect every publication, not just the eventual result: even a transient
+      // stale props update lets the next brand submission permanently lose progress.
+      for (const [view] of f.publish.mock.calls.slice(committedPublication)) {
+        expect(view.draft?.stock?.completedOwnBrands).toEqual(completedOwnBrands);
+      }
+      expect(f.publish.mock.lastCall?.[0].draft.stock.eventId).toBe('stock-new');
+      f.controller.dispose();
+    },
+  );
+
   it('preserves the previous commercial photo when saving its replacement fails', async () => {
     const f = fixture();
     f.online.mockReturnValue(false);

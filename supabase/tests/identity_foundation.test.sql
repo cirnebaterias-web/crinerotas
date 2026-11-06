@@ -71,7 +71,7 @@ select ok(not has_function_privilege('authenticated', 'private.resolve_current_i
 select ok(not has_function_privilege('anon', 'api.get_my_identity()', 'EXECUTE'), 'anon cannot execute the identity wrapper');
 
 select is((select count(*)::integer from api.roles), 4, 'confirmed roles include the dedicated logistics profile');
-select is((select count(*)::integer from api.role_permissions), 28, 'explicit identity, client management, import, sync, route, visit and scrap capabilities are seeded');
+select is((select count(*)::integer from api.role_permissions), 40, 'explicit identity, client management, import, sync, route, visit, scrap, logistics, sales and scrap-ledger capabilities are seeded');
 select is((select count(*)::integer from api.user_profiles p join auth.users u on u.id=p.id
   where u.raw_user_meta_data->>'actorKey' in ('administrator','seller_a','seller_b','manager_a','blocked',
     'seller_e2e','manager_e2e','seller_regression','manager_regression')), 9, 'nine foundational synthetic profiles were provisioned');
@@ -104,7 +104,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_a_id', true);
 select is(api.get_my_identity() ->> 'id', :'seller_a_id', 'seller A resolves only its own identity');
 select is(api.get_my_identity() -> 'roles', '["seller"]'::jsonb, 'seller A receives its active role');
-select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "route.read_self", "route.reorder_self", "scrap.collect_self", "scrap.schedule_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller A receives explicit self capabilities without logistics receipt');
+select is(api.get_my_identity() -> 'capabilities', '["identity.read_self", "route.read_self", "route.reorder_self", "sales.read_client", "scrap_ledger.read", "scrap.collect_self", "scrap.schedule_self", "sync.write_self", "visit.start_self"]'::jsonb, 'seller A receives explicit self, sales and scrap-ledger read capabilities without logistics receipt');
 select is(api.get_my_identity() -> 'scopeIds', jsonb_build_array(:'seller_a_id'::uuid), 'seller A scope is itself');
 select is((select count(*)::integer from api.user_profiles), 1, 'direct profile read is restricted to the caller');
 select is((select count(*)::integer from api.user_profiles where id = :'seller_b_id'::uuid), 0, 'seller A cannot read seller B profile');

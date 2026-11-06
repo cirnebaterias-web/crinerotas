@@ -120,7 +120,7 @@ export const fieldIntelligenceScrapRecordSchema = z.object({
     estimatedWeightKg: decimalStringSchema,
     desiredDate: z.iso.date(),
     period: z.enum(['morning', 'afternoon']),
-    status: z.literal('pending'),
+    status: z.enum(['pending', 'completed']),
   }).strict().nullable(),
 }).strict();
 

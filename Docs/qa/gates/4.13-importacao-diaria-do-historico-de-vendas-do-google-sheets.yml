@@ -1,0 +1,104 @@
+schema: 1
+story: '4.13'
+story_title: 'Importação diária do histórico de vendas do Google Sheets'
+gate: PASS
+status_reason: 'Entrega técnica aprovada após fechar os dois achados e repetir independentemente a regressão completa em banco temporário isolado, com 1.076 verificações aprovadas. A falha do db:test direto por fixtures duplicadas no ambiente compartilhado permanece explicitamente registrada; G1–G5 de ativação real continuam abertos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'worktree-sha256:ba3751d1407b88ef62aac77a094dbac120620b69b878da0a142e101a4dd05fbf'
+updated: '2026-11-03T22:39:08-03:00'
+expires: '2026-11-17T22:39:08-03:00'
+top_issues: []
+waiver:
+  active: false
+
+scope:
+  technical_delivery: approved
+  production_activation: not_approved
+  external_gates_open: [G1, G2, G3, G4, G5]
+  included: 'Ingestão diária Vendas, contratos/leitura mínima para consumo, CLI/BFF, publicação e diagnóstico privados, agenda inativa e testes sintéticos da Story 4.13.'
+  excluded: 'Mini CRM e indicadores da Story 4.14, leitura Google real, implantação de VPS/timer, dados reais, commit/push/PR e alterações externas.'
+
+revision_method:
+  files: 44
+  source: 'File List da Story 4.13, excluindo a própria story, Docs/qa/ e .local/. O helper ignorado tem hash separado abaixo.'
+  algorithm: 'Ordenar caminhos por comparação ordinal; produzir caminho|sha256(bytes) em hex minúsculo por arquivo; unir com LF sem LF final; SHA256 dos bytes UTF-8 resultantes.'
+  diagnostic_helper:
+    path: '.local/run-isolated-pgtap.mjs'
+    sha256: '1c4a1d65055092d9693123a1eb986c3e3270e6d6ed66895649a5c90b94c786fa'
+    versioned: false
+
+resolved_issues:
+  - id: REQ-413-001
+    severity: medium
+    resolution: 'Incremental 20261106120000 acrescenta CLIENT_WITHOUT_ACTIVE_SCOPE sem descartar fatos/conceder vínculos. Motivos exclusivos em um snapshot; contadores derivados das issues e replay histórico preservado. 20 testes novos aprovados.'
+  - id: TEST-413-002
+    severity: medium
+    resolution: 'Quatro assertions nos dois testes fundacionais agora refletem a matriz aprovada de 32 permissões e capacidades manager/seller. Não foram afrouxadas as verificações negativas; suíte completa validada independentemente no clean-room.'
+
+evidence:
+  independent_execution:
+    - 'Vitest final focado: 8 arquivos, 96 testes PASS, exit 0; inclui leitura paginada de snapshot e configuração BFF/CLI separada.'
+    - 'Integração JS→SQL local: 1/1 PASS, exit 0; Unicode/hash, duas gerações, correção/ausência, replay e preservação, tudo em rollback.'
+    - 'pgTAP original de vendas: 102/102 PASS antes da incremental; 20 diagnóstico + 102 vendas + 105 clientes também PASS dentro da execução compartilhada completa.'
+    - 'Regressão completa clean-room repetida por QA: 23 arquivos, 1.076 verificações PASS, exit 0, 16 segundos, em 2026-11-03 22:37–22:38 -03.'
+    - 'systemd-analyze calendar confirmou próxima execução 06:15 America/Sao_Paulo / 09:15 UTC; nenhum timer instalado ou ativado.'
+    - 'git diff --check: PASS após correções.'
+  clean_room_method:
+    schema: 'Cópia schema-only de auth/api/private/storage do banco local migrado; somente catálogo de roles/permissões copiado como dados.'
+    fixtures: 'Dez atores únicos novos, três escopos gerenciais e três clientes sintéticos; nenhuma identidade ou linha comercial copiada do banco ativo, nenhuma fonte Vendas habilitada.'
+    execution: 'pg_prove executou os mesmos 23 arquivos de supabase/tests como postgres não superusuário; não alterou db:test/CI nem usou seleção arbitrária entre atores duplicados.'
+    safety: 'Nome temporário UUID validado, alvo Docker/loopback conferido, remoção somente do banco criado e sem sessões ativas; ausência confirmada depois. Contagens e fingerprint de memberships do banco ativo iguais antes/depois; 17 execuções anteriores de clientes preservadas e zero fontes/execuções/linhas de vendas.'
+  shared_database_regression:
+    command: 'npm run db:test'
+    observed_result: FAIL
+    exit_code: 1
+    files: 23
+    assertions_executed: 503
+    explanation: 'Execução inicial encontrou expectativas antigas de capacidades (corrigidas) e duplicidade preexistente de fixtures (18 perfis fundacionais versus 9), interrompendo 17 arquivos por gset/planos incompletos. A duplicidade foi preservada; este comando no banco compartilhado NÃO é declarado PASS. A prova completa de regressão é a execução isolada acima.'
+  development_execution_reviewed:
+    - 'npm test -- --maxWorkers=2: 114 arquivos, 670 PASS, 1 skip preexistente.'
+    - 'npm run lint, npm run typecheck, npm run build, npm run security:secrets e git diff --check: PASS; código de produto final estável antes da correção exclusiva de assertions SQL.'
+    - 'Playwright real: 3/3 PASS; 401/403, cookie sem autoridade de stage/publish/fail, CSRF, begin desativado 503 e CLI one-shot autenticada com JSON sanitizado.'
+    - 'Concorrência real entre duas conexões: segundo executor recebeu SYNC_BUSY; cargas de 26.000 fatos/chunks e 26.500 linhas no normalizador sem truncamento.'
+  automated_review:
+    - 'CodeRabbit pré-apply inicial: exit 0, sem achados da 4.13; minor de ownership em migration anterior 3.13 separado deste parecer.'
+    - 'CodeRabbit global: exit 0; dois minors corrigidos, nenhum HIGH/CRITICAL.'
+    - 'CodeRabbit pré-apply da incremental de diagnóstico: exit 0, sete arquivos SQL, zero achados.'
+  manual_post_coderabbit:
+    - 'Runbook psql com variáveis citadas, cast UUID e ON_ERROR_STOP.'
+    - 'Configuração BFF sem credenciais Google; CLI mantém validação completa. Testes, imports server-side e documentação conferidos.'
+    - 'Quatro expectativas fundacionais corrigidas, helper clean-room lido integralmente e reproduzido; sem alegar cobertura CodeRabbit inexistente desses últimos ajustes.'
+  artifacts:
+    - 'Docs/qa/assessments/4.13-review-20261103.md'
+    - 'Docs/qa/assessments/4.13-coderabbit-20261103.md'
+    - 'Docs/runbooks/google-sales-sync.md'
+  limitations:
+    - 'qa-master-checklist.md ausente no core instalado; critérios usados: task, Constitution, story, ADR 006 e arquitetura, sem checklist inventada.'
+    - 'Clean-room comprova regressão sobre o schema local migrado e fixtures novas; não comprova credencial Google, carga real, VPS ou execução remota do CI.'
+
+trace:
+  ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  ac_gaps: []
+  note: 'Aceite da entrega técnica sintética; os gates externos continuam necessários para ativação real. A limitação de fixtures do banco compartilhado foi isolada e não escondida.'
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Capacidade de ingestão e pareamento técnico no SQL, Bearer nos comandos BFF, RLS/grants mínimos, revalidação antes de publicação, leitura por cadastro/escopo atuais e projeção sem custos/documentos privados.'
+  reliability:
+    status: PASS
+    notes: 'Dupla leitura canônica, chunks e hashes recompostos, lease/serialização, publicação atômica, recuperação idempotente e histórico preservado; diagnóstico da publicação não se altera em replay.'
+  performance:
+    status: PASS
+    notes: 'Volume sintético acima da amostra, paginação, limites de bytes/linhas/chunks, timeout e backoff verificados; sem alegação de desempenho produtivo da VPS.'
+  maintainability:
+    status: PASS
+    notes: 'CLI antes da UI, contratos/normalizador compartilhados, migrations incrementais, separação de configuração e regressão de capacidades corrigida; nenhuma biblioteca externa nova.'
+
+recommendations:
+  immediate: []
+  future:
+    - 'Usar ambiente/namespace sintético exclusivo para regressão completa e tratar a duplicação histórica por tarefa própria; não remover usuários ou afrouxar assertions para obter PASS.'
+  before_production:
+    - 'Concluir G1–G5, inclusive credenciais read-only, fonte/ator pareados, base/escopos reais, retenção/capacidade, backup e recuperação.'
+    - 'Implantar e observar 06:15 America/Sao_Paulo no ambiente autorizado; flags e testes locais não comprovam timer ativo nem sucesso da rotina de clientes das 06:00.'

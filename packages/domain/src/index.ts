@@ -1,5 +1,9 @@
-export { buildGoogleMapsUrl, type NavigationDestination } from './navigation';
+export { buildGoogleMapsUrl, navigationAddress, type NavigationDestination } from './navigation';
 export * from './report-exports';
+export * from './sales-import';
+export * from './scrap-ledger-import';
+export * from './sales-crm';
+export * from './product-catalog';
 
 import {
   canonicalLocalRouteBundleSchema,
@@ -765,3 +769,7 @@ export function nextRetryDelayMs(attemptCount: number, random: () => number = Ma
   const jitter = 0.8 + Math.min(1, Math.max(0, random())) * 0.4;
   return Math.round(nominal * jitter);
 }
+
+export * from './weekly-route-proposals';
+export * from './seller-route-profile';
+export * from './scrap-collection-routes';

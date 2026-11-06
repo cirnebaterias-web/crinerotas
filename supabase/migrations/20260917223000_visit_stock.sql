@@ -1,4 +1,5 @@
 begin;
+select pg_catalog.set_config('cirne.migration_invoker', current_user, true);
 
 do $preflight$
 begin
@@ -19,7 +20,7 @@ $visit_ownership$;
 set local role cirne_visit_executor;
 do $reference_grant$
 begin
-  execute pg_catalog.format('grant references on table api.visits to %I', session_user);
+  execute pg_catalog.format('grant references on table api.visits to %I', current_setting('cirne.migration_invoker'));
 end
 $reference_grant$;
 reset role;
@@ -50,7 +51,7 @@ $visit_ownership$;
 set local role cirne_visit_executor;
 do $reference_revoke$
 begin
-  execute pg_catalog.format('revoke references on table api.visits from %I', session_user);
+  execute pg_catalog.format('revoke references on table api.visits from %I', current_setting('cirne.migration_invoker'));
 end
 $reference_revoke$;
 reset role;

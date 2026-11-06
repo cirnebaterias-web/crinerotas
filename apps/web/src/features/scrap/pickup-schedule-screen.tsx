@@ -12,9 +12,12 @@ export function PickupScheduleScreen() {
   const [query, setQuery] = useState(''); const [clients, setClients] = useState<ScrapClient[]>([]); const [client, setClient] = useState<ScrapClient | null>(null);
   const [error, setError] = useState(''); const [savedId, setSavedId] = useState(''); const [busy, setBusy] = useState(false);
   const [records, setRecords] = useState<LocalStandaloneScrapSchedule[]>([]); const [offline, setOffline] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [ready, setReady] = useState(false);
   const store = useRef<StandaloneScrapScheduleStore | null>(null); const allowed = useRef(false);
   useEffect(() => {
     const current = new StandaloneScrapScheduleStore(); store.current = current; allowed.current = true;
+    setReady(true);
     let mounted = true;
     const ready = () => mounted && allowed.current;
     const resume = async () => {
@@ -25,13 +28,13 @@ export function PickupScheduleScreen() {
         const updated = await current.synchronize(); if (ready()) setRecords(updated);
       } catch (failure) { if (ready()) setError(failure instanceof Error ? failure.message : 'Não foi possível restaurar os agendamentos.'); }
     };
-    const revoked = observeLocalAccessRevocation(() => { allowed.current = false; setRecords([]); setClients([]); setClient(null); setSavedId(''); setError('Entre novamente para acessar seus agendamentos.'); });
+    const revoked = observeLocalAccessRevocation(() => { allowed.current = false; current.close(); setReady(false); setRecords([]); setClients([]); setClient(null); setSavedId(''); setError('Entre novamente para acessar seus agendamentos.'); });
     const connectivity = () => { setOffline(!navigator.onLine); if (navigator.onLine) void resume(); };
     const foreground = () => { if (document.visibilityState === 'visible') void resume(); };
     void resume(); window.addEventListener('online', connectivity); window.addEventListener('offline', connectivity); document.addEventListener('visibilitychange', foreground);
     return () => { mounted = false; allowed.current = false; revoked(); current.close(); if (store.current === current) store.current = null; window.removeEventListener('online', connectivity); window.removeEventListener('offline', connectivity); document.removeEventListener('visibilitychange', foreground); };
   }, []);
-  async function search(event: FormEvent) { event.preventDefault(); if (busy || !allowed.current || !store.current) return; setBusy(true); setError(''); try { const found = await store.current.searchClients(query); if (allowed.current) setClients(found); } catch (failure) { if (allowed.current) setError(failure instanceof Error ? failure.message : 'Não foi possível buscar clientes.'); } finally { setBusy(false); } }
+  async function search(event: FormEvent) { event.preventDefault(); if (busy || !allowed.current || !store.current) return; setBusy(true); setError(''); setClients([]); setClient(null); setSearched(false); try { const found = await store.current.searchClients(query); if (allowed.current) { setClients(found); setSearched(true); } } catch (failure) { if (allowed.current) setError(failure instanceof Error ? failure.message : 'Não foi possível buscar clientes.'); } finally { setBusy(false); } }
   async function save(value: PickupScheduleInput) {
     if (!client || !store.current || !allowed.current) throw new Error('Selecione o cliente e valide seu acesso.');
     setBusy(true);
@@ -48,10 +51,12 @@ export function PickupScheduleScreen() {
   const saved = records.find((record) => record.offlineId === savedId);
   const statusLabel = (record: LocalStandaloneScrapSchedule) => record.status === 'synced' ? 'Confirmado no servidor' : record.status === 'action_required' ? 'Salvo no aparelho · requer conferência' : 'Salvo no aparelho · envio pendente';
   return <ScrapShell><p className="seller-kicker">FORA DA ROTA</p><h1>Agendar coleta de sucata</h1>
+    <p>Use este formulário para combinar uma coleta futura com a logística. Se você já recolheu a sucata, abra o cliente na <a href="/route">sua rota</a> e preencha a tarefa <strong>Sucata</strong> da visita.</p>
     <p className="seller-muted" role="status">{offline ? 'Sem conexão. Busque clientes já consultados neste aparelho e salve para enviar depois.' : 'Clientes da base autorizada · agendamentos preservados neste aparelho.'}</p>
     {error && <p role="alert" className="seller-notice seller-error">{error}</p>}
     {saved ? <section className="seller-progress" role="status"><h2>{statusLabel(saved)}</h2><p>{saved.client.name} · {saved.client.address}</p><p>{saved.request.desiredDate} · {saved.request.period === 'morning' ? 'Manhã' : 'Tarde'} · {saved.request.estimatedWeightKg} kg previstos</p><a className="seller-button seller-primary" href="/home">Voltar ao início</a><button className="seller-button seller-secondary" disabled={busy} onClick={() => { setSavedId(''); setClient(null); setError(''); }}>Novo agendamento</button></section> : <>
-      <form onSubmit={search}><label>Buscar cliente<input value={query} maxLength={120} disabled={busy} onChange={(e) => setQuery(e.target.value)} /></label><button className="seller-button seller-secondary" disabled={busy}>{busy ? 'Aguarde…' : 'Buscar na base de clientes'}</button></form>
+      <form onSubmit={search}><label>Buscar cliente<input value={query} minLength={2} required maxLength={120} aria-describedby="scrap-search-help" placeholder="Nome ou CNPJ/CPF completo" disabled={busy || !ready} onChange={(e) => setQuery(e.target.value)} /></label><p id="scrap-search-help">Digite pelo menos 2 caracteres do nome ou o documento completo. A busca mostra apenas clientes da sua carteira.</p><button className="seller-button seller-secondary" disabled={busy || !ready}>{busy ? 'Aguarde…' : 'Buscar na base de clientes'}</button></form>
+      {searched && clients.length === 0 && <p role="status" className="seller-notice">{offline ? 'Nenhum cliente correspondente salvo neste aparelho. Conecte-se para consultar sua carteira.' : 'Nenhum cliente encontrado na sua carteira. Tente outro nome ou peça ao gestor para conferir o vínculo do cliente.'}</p>}
       <ul className="seller-stop-list">{clients.map((item) => <li key={item.id}><button type="button" className="seller-task-card" disabled={busy} aria-pressed={client?.id === item.id} onClick={() => setClient(item)}><span><strong>{item.name}</strong><small>{item.address}</small></span><span>{client?.id === item.id ? 'Selecionado' : 'Selecionar'}</span></button></li>)}</ul>
       {client && <section className="seller-stock-card"><h2>{client.name}</h2><p>Endereço da base: {client.address}</p><PickupScheduleForm key={client.id} onSave={save} /></section>}
     </>}

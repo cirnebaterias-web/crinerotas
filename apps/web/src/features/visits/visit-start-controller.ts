@@ -64,6 +64,7 @@ export class VisitStartController {
   private scrapEvidenceSyncDisabled = false;
   private userId: string | undefined;
   private lastView: VisitStartView = initialVisitView;
+  private localCommitRevision = 0;
 
   constructor(
     private readonly offlineId: string,
@@ -151,6 +152,7 @@ export class VisitStartController {
         contentType: photo.contentType, byteSize: photo.blob.size, width: photo.width, height: photo.height,
         checksum: photo.checksum, capturedAt: new Date(this.now()).toISOString(), status: 'pending', blob: photo.blob,
       });
+      this.localCommitRevision++;
       this.attachments = [...this.attachments, attachment].sort((left, right) =>
         left.capturedAt.localeCompare(right.capturedAt));
       this.emitCurrent('Foto do termo de sucata salva no aparelho.');
@@ -171,6 +173,7 @@ export class VisitStartController {
         checksum: photo.checksum, capturedAt: new Date(this.now()).toISOString(), status: 'pending', blob: photo.blob,
       });
       if (previous) await this.service.deleteVisitAttachment(userId, this.offlineId, previous.offlineId);
+      this.localCommitRevision++;
       this.attachments = [...this.attachments.filter((item) => item.offlineId !== previous?.offlineId), attachment];
       this.emitCurrent('Foto de evidência salva no aparelho.');
       return attachment;
@@ -197,6 +200,7 @@ export class VisitStartController {
         status: 'pending',
         blob: photo.blob,
       });
+      this.localCommitRevision++;
       this.attachments = [...this.attachments, attachment].sort((left, right) =>
         left.capturedAt.localeCompare(right.capturedAt));
       this.emitCurrent('Foto comprimida e salva no aparelho.');
@@ -208,6 +212,7 @@ export class VisitStartController {
     if (!this.active || !userId) throw new Error('A visita ainda não está pronta para edição.');
     return this.trackAttachmentOperation((async () => {
       await this.service.deleteVisitAttachment(userId, this.offlineId, offlineId);
+      this.localCommitRevision++;
       this.attachments = this.attachments.filter((attachment) => attachment.offlineId !== offlineId);
       this.emitCurrent('Foto removida do aparelho.');
     })());
@@ -223,6 +228,7 @@ export class VisitStartController {
       kind: 'checkout',
       ...value,
     }).then(({ evidence, draft }) => {
+      this.localCommitRevision++;
       this.evidence = [...this.evidence.filter((item) => item.kind !== 'checkout'), evidence];
       this.emit({
         ...this.lastView,
@@ -258,6 +264,7 @@ export class VisitStartController {
       offlineId: this.offlineId,
       ...values,
     });
+    this.localCommitRevision++;
     this.emit({
       state: 'ready',
       draft: saved.draft,
@@ -280,6 +287,7 @@ export class VisitStartController {
       offlineId: this.offlineId,
       values,
     });
+    this.localCommitRevision++;
     this.emit({
       state: 'ready',
       draft: saved.draft,
@@ -298,6 +306,7 @@ export class VisitStartController {
 
   private async persistCommercialActions(userId: string, values: CommercialActionsInput) {
     const saved = await this.service.saveVisitCommercialActions({ userId, offlineId: this.offlineId, values });
+    this.localCommitRevision++;
     this.emit({
       state: 'ready', draft: saved.draft, message: 'Ações comerciais salvas no aparelho.', busy: false,
       requiresLogin: false, priceParameters: this.priceParameters, commercialActions: this.commercialActions,
@@ -310,6 +319,7 @@ export class VisitStartController {
 
   private async persistScrap(userId: string, values: VisitScrapInput) {
     const saved = await this.service.saveVisitScrap({ userId, offlineId: this.offlineId, values });
+    this.localCommitRevision++;
     this.emit({
       state: 'ready', draft: saved.draft, message: 'Sucata salva no aparelho.', busy: false,
       requiresLogin: false, priceParameters: this.priceParameters, commercialActions: this.commercialActions,
@@ -367,7 +377,16 @@ export class VisitStartController {
     return snapshot.drafts.find((draft) => draft.offlineId === this.offlineId);
   }
 
+  private discardStaleRead(revision: number) {
+    if (revision === this.localCommitRevision) return false;
+    // A durable local commit won while catalogs/evidence were being read. Publishing
+    // that older draft would make the next brand save overwrite already completed work.
+    this.synchronizeAfterCommit();
+    return true;
+  }
+
   private async run() {
+    const readRevision = this.localCommitRevision;
     const snapshot = await this.service.initialize();
     if (!this.active) return;
     if (snapshot.kind !== 'ready') {
@@ -384,21 +403,26 @@ export class VisitStartController {
       this.emit({ ...initialVisitView, state: 'missing' });
       return;
     }
-    this.priceParameters = await this.service.getVisitPriceParameters(
+    const priceParameters = await this.service.getVisitPriceParameters(
       snapshot.partition.userId,
       this.offlineId,
     ) ?? null;
-    this.commercialActions = await this.service.listCommercialActions(snapshot.partition.userId).catch(() => null);
-    this.scrapPoints = await this.service.listScrapPoints(snapshot.partition.userId).catch(() => []);
-    this.attachments = await this.service.listVisitAttachments(
+    const commercialActions = await this.service.listCommercialActions(snapshot.partition.userId).catch(() => null);
+    const scrapPoints = await this.service.listScrapPoints(snapshot.partition.userId).catch(() => []);
+    const attachments = await this.service.listVisitAttachments(
       snapshot.partition.userId,
       this.offlineId,
     );
-    this.evidence = await this.service.listVisitEvidence(
+    const evidence = await this.service.listVisitEvidence(
       snapshot.partition.userId,
       this.offlineId,
     );
-    if (!this.active) return;
+    if (!this.active || this.discardStaleRead(readRevision)) return;
+    this.priceParameters = priceParameters;
+    this.commercialActions = commercialActions;
+    this.scrapPoints = scrapPoints;
+    this.attachments = attachments;
+    this.evidence = evidence;
     this.show(snapshot);
     const scrapPhotoPending = this.attachments.some((item) =>
       item.purpose === 'scrap_receipt' && item.status === 'pending');
@@ -422,18 +446,22 @@ export class VisitStartController {
     this.evidenceRetryDelayMs = summary.recoverable > 0
       ? Math.min(this.evidenceRetryDelayMs * 2, 5 * 60_000)
       : 30_000;
+    const refreshRevision = this.localCommitRevision;
     const refreshed = await this.service.refresh(snapshot.partition);
     if (!this.active) return;
     if (refreshed.kind !== 'ready') {
       this.emit({ ...initialVisitView, state: 'blocked' });
       return;
     }
-    this.attachments = await this.service.listVisitAttachments(
+    const refreshedAttachments = await this.service.listVisitAttachments(
       refreshed.partition.userId, this.offlineId,
     );
-    this.evidence = await this.service.listVisitEvidence(
+    const refreshedEvidence = await this.service.listVisitEvidence(
       refreshed.partition.userId, this.offlineId,
     );
+    if (!this.active || this.discardStaleRead(refreshRevision)) return;
+    this.attachments = refreshedAttachments;
+    this.evidence = refreshedEvidence;
     this.show(refreshed, summary.authenticationRequired);
   }
 

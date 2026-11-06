@@ -140,7 +140,13 @@ test.describe('manager route planning', () => {
     await expect(page.getByRole('button', { name: 'Revisar e publicar' })).toBeEnabled();
 
     await page.getByRole('button', { name: 'Revisar e publicar' }).click();
-    await expect(page.getByRole('dialog', { name: 'Publicar esta rota?' })).toContainText('2 paradas');
+    const publicationDialog = page.getByRole('dialog', { name: 'Publicar esta rota?' });
+    await expect(publicationDialog).toContainText('2 paradas');
+    await expect(page.getByRole('button', { name: 'Voltar e revisar' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(publicationDialog).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Revisar e publicar' })).toBeFocused();
+    await page.getByRole('button', { name: 'Revisar e publicar' }).click();
     await page.getByRole('button', { name: 'Confirmar publicação' }).click();
     await expect(page.getByText('Rota publicada e disponibilizada para o vendedor.')).toBeVisible();
     await expect(page.getByText('Rota publicada', { exact: true })).toBeVisible();
@@ -168,10 +174,66 @@ test.describe('manager route planning', () => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByRole('navigation', { name: 'Atalhos do planejamento' })).toBeVisible();
+
+    const menuButton = page.getByRole('button', { name: 'Menu' });
+    await menuButton.click();
+    await expect(page.getByRole('region', { name: 'Menu da gestão' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Fechar ×' })).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(menuButton).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('region', { name: 'Menu da gestão' })).toHaveCount(0);
+    await expect(menuButton).toBeFocused();
 
     await page.getByLabel('Data da rota').fill('');
+    const discardDialog = page.getByRole('dialog', { name: 'Trocar o planejamento?' });
+    await expect(discardDialog).toContainText('descartar essas alterações locais');
+    await page.keyboard.press('Escape');
+    await expect(discardDialog).toHaveCount(0);
+    await expect(page.getByLabel('Prioridade de Loja Norte')).toHaveValue('5');
+    await expect(page.getByLabel('Data da rota')).not.toHaveValue('');
+
+    await page.getByLabel('Data da rota').fill('');
+    await page.getByRole('button', { name: 'Descartar alterações' }).click();
     await expect(page.getByText('Informe uma data válida para consultar o planejamento.')).toBeVisible();
     await expect(page.getByText('—', { exact: true })).toBeVisible();
     await expect(page.getByText('Abrir Central do dia')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  test('shows a recoverable state and sanitized retry for a planning dependency failure', async ({ page }) => {
+    let planningAttempts = 0;
+    await page.route('**/api/v1/me', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      id: '50000000-0000-4000-8000-000000000001', displayName: 'Gestor Sintético', roles: ['manager'],
+      capabilities: ['identity.read_self', 'route.read_scoped', 'route.plan_scoped', 'clients.read'],
+      scopeIds: [sellerId], status: 'active',
+    }) }));
+    await page.route('**/api/v1/clients/sellers', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      schemaVersion: 1, sellers: [{ id: sellerId, displayName: 'Vendedor Sintético', email: 'seller@example.invalid' }],
+    }) }));
+    await page.route('**/api/v1/clients?*', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      schemaVersion: 1, query: '', clients: [],
+      pagination: { page: 1, pageSize: 25, totalCount: 0, totalPages: 0, hasPrevious: false, hasNext: false },
+    }) }));
+    await page.route('**/api/v1/routes?*', (route) => {
+      planningAttempts += 1;
+      if (planningAttempts === 1) {
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({
+          error: { code: 'DEPENDENCY_UNAVAILABLE', message: '[{ "technical": "zod internals" }]', recoverable: true },
+        }) });
+      }
+      const serviceDate = new URL(route.request().url()).searchParams.get('serviceDate');
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        schemaVersion: 1, availability: 'empty', serviceDate, sellerId,
+      }) });
+    });
+
+    await page.goto('/management/routes');
+    await expect(page.getByText('Falha ao consultar', { exact: true })).toBeVisible();
+    await expect(page.getByText('Não foi possível carregar o planejamento. Sua última composição continua nesta tela; tente novamente.')).toBeVisible();
+    await expect(page.getByText('zod internals')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Tentar carregar novamente' }).click();
+    await expect(page.getByText('Sem rota', { exact: true })).toBeVisible();
+    await expect(page.getByText('Planejamento atualizado.')).toBeVisible();
   });
 });

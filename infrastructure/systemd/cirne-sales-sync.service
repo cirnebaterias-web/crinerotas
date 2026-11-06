@@ -1,0 +1,19 @@
+[Unit]
+Description=Cirne Rotas - captura privada do historico de vendas
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cirne-ops
+Group=cirne-ops
+WorkingDirectory=/opt/cirne-rotas/ops
+EnvironmentFile=/etc/cirne-rotas/sales-sync.env
+ExecStart=/usr/bin/npm run ops:sales-sync -- --scheduled --json
+TimeoutStartSec=600
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StandardOutput=journal
+StandardError=journal

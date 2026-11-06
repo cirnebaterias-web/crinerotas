@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { scrapCollectionInputSchema, type LocalVisitDraft, type LocalAttachment, type VisitScrapInput, type ScrapPoint } from '@cirne/contracts';
 import { PickupScheduleForm } from '@/features/scrap/pickup-schedule-form';
 import { compressStockPhoto, type CompressedStockPhoto } from '../stock/stock-photo-compression';
+import { ClientScrapSummaryCard } from '@/features/clients/client-scrap-summary';
 
 function Photo({ attachment }: { attachment: LocalAttachment }) {
   const [url, setUrl] = useState('');
@@ -38,6 +39,7 @@ export function VisitScrapStep({ draft, attachments, points, onSave, onAddEviden
   }
   async function add(file?: File) { if (!file) return; setBusy(true); setError(''); try { await onAddEvidence(collectionId, await compressStockPhoto(file), file.name); } catch (failure) { setError(failure instanceof Error ? failure.message : 'Não foi possível salvar a foto.'); } finally { setBusy(false); } }
   if (saved) return <section className="seller-stock-card seller-scrap-flow">
+    {draft.client?.id && <ClientScrapSummaryCard clientId={draft.client.id} compact />}
     <p className="seller-kicker">TAREFA DA VISITA</p><h2>Sucata registrada</h2>
     <p>{saved.availability === 'collected'
       ? `${saved.collection?.actualWeightKg} kg coletados · termo ${saved.collection?.receiptNumber}`
@@ -49,7 +51,7 @@ export function VisitScrapStep({ draft, attachments, points, onSave, onAddEviden
       <Photo key={photo.offlineId} attachment={photo} />)}</ul>}
     <p className="seller-muted">Este registro não pode ser sobrescrito neste fluxo. Para corrigir, contate a gestão.</p>
   </section>;
-  return <section className="seller-stock-card seller-scrap-flow"><p className="seller-kicker">TAREFA DA VISITA</p><h2>Sucata</h2><fieldset disabled={busy}><legend>O que aconteceu nesta visita?</legend><div className="seller-choice-grid">
+  return <section className="seller-stock-card seller-scrap-flow"><p className="seller-kicker">TAREFA DA VISITA</p><h2>Sucata</h2>{draft.client?.id && <ClientScrapSummaryCard clientId={draft.client.id} compact />}<fieldset disabled={busy}><legend>O que aconteceu nesta visita?</legend><div className="seller-choice-grid">
     {([['collected', 'Coleta realizada pelo vendedor'], ['scheduled', 'Agendamento para a logística'], ['none', 'Sem sucata']] as const).map(([value, label]) => <label key={value}><input type="radio" name="scrap-availability" checked={availability === value} onChange={() => { setAvailability(value); setError(''); }} />{label}</label>)}
   </div></fieldset>
   {availability === 'none' && <button className="seller-button seller-primary" disabled={busy} onClick={() => void save({ availability: 'none' })}>Confirmar sem sucata</button>}

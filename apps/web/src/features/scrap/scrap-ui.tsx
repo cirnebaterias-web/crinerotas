@@ -36,7 +36,9 @@ export function scrapMutation(body: unknown, key: string, deviceId?: string): Re
   return { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1', 'idempotency-key': key, ...(deviceId ? { 'x-device-id': deviceId } : {}) }, body: JSON.stringify(body) };
 }
 
-export function localDate() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+export function localDate(offsetDays = 0) {
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const shifted = new Date(`${today}T12:00:00Z`);
+  shifted.setUTCDate(shifted.getUTCDate() + offsetDays);
+  return shifted.toISOString().slice(0, 10);
 }

@@ -11,7 +11,8 @@ it('runs a real CLI process using synthetic data without opening Maps', () => {
   expect(result.error).toBeUndefined();
   expect(result.status).toBe(0);
   expect(JSON.parse(result.stdout)).toEqual({ status: 'ok', synthetic: true, networkRequests: 0,
-    checks: { encodedAddress: true, coordinates: true, invalidCoordinatesFallback: true, emptyRejected: true } });
+    checks: { encodedAddress: true, coordinates: true, invalidCoordinatesFallback: true, emptyRejected: true,
+      placeIdPriority: true, googleAddressPriority: true, deviceOrigin: true } });
 }, processTestTimeout);
 
 it('rejects unknown arguments without echoing their values', () => {

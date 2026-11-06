@@ -1,0 +1,26 @@
+schema: 1
+story: '4.16'
+story_title: 'Correções do teste local: saída, mini CRM e sucata do vendedor'
+gate: PASS
+status_reason: 'Critérios verificados por revisão independente, regressões automatizadas e fluxo real local de coleta com Storage; falhas de sessão e corrida de estado foram corrigidas sem pendências bloqueantes.'
+reviewer: 'Quinn'
+reviewed_revision: 'worktree:sha256:79b4a38e4b427c57535fad4c2437d35aa9cbbb80d6599a2e74f10b85aeb3a94c'
+updated: '2026-11-04T13:10:00Z'
+top_issues: []
+waiver: { active: false }
+evidence:
+  manifest_files: 18
+  manifest_method: 'SHA256 UTF-8 de path:sha256(file) separados por LF, sem LF final, na ordem da primeira ocorrência no File List; excluir Docs/qa e Docs/stories.'
+  trace: { ac_covered: [1, 2, 3, 4, 5, 6, 7, 8], ac_gaps: [] }
+  verification: 'Lint/typecheck/build/diff-check PASS; 755 unitários PASS + 1 skip preexistente; 29 E2E únicos PASS; coleta UI/BFF/DB/Storage/gestor PASS e smoke local real PASS.'
+  assessment: 'Docs/qa/assessments/4.16-4.17-review-20261104.md'
+  coderabbit: 'Docs/qa/assessments/4.16-4.17-coderabbit-20261104.md'
+nfr_validation:
+  security: { status: PASS, notes: 'Saída efetiva, isolamento local, revogação e descarte de respostas tardias verificados.' }
+  reliability: { status: PASS, notes: 'Rascunhos preservados em falhas recuperáveis; corrida online do estoque coberta em todas as publicações e no fluxo real.' }
+  performance: { status: PASS, notes: 'Fluxos locais e viewport 390 px aprovados; não equivale a benchmark de carga produtiva.' }
+  maintainability: { status: PASS, notes: 'Reuso de contratos, CRM e infraestrutura offline existentes; sem código de produto alterado por QA.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Executar gates operacionais de deploy, HTTPS e backup antes de disponibilizar acesso remoto; não fazem parte da aprovação local.'

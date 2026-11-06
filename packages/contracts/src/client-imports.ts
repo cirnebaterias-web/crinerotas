@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { clientExternalReferenceSchema } from './client-reference';
+import { clientGoogleLocationSchema } from './client-google-location';
 
 export const clientImportHeaders = [
   'referencia_externa', 'nome', 'endereco', 'latitude', 'longitude',
@@ -11,6 +12,7 @@ export const clientImportRowSchema = z.object({
   externalReference: clientExternalReferenceSchema,
   name: z.string().trim().min(1).max(160),
   address: z.string().trim().min(1).max(300),
+  googleLocation: clientGoogleLocationSchema.optional(),
   latitude: z.number().min(-90).max(90).nullable(),
   longitude: z.number().min(-180).max(180).nullable(),
   portfolioReference: z.string().trim().max(120).nullable(),
@@ -65,6 +67,7 @@ export const importedClientSchema = z.object({
   externalReference: clientExternalReferenceSchema,
   name: z.string(),
   address: z.string(),
+  googleLocation: clientGoogleLocationSchema.nullable().optional(),
   latitude: z.number().nullable(),
   longitude: z.number().nullable(),
   portfolioReference: z.string().nullable(),

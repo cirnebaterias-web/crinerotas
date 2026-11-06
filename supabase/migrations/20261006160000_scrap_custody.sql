@@ -1,5 +1,6 @@
 -- Story 3.10 / ADR 004: seller collection, logistics receipt and future pickup.
 begin;
+select pg_catalog.set_config('cirne.migration_invoker', current_user, true);
 select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('cirne:database:migrate'));
 set local lock_timeout = '5s';
 create role cirne_scrap_executor nologin nosuperuser nocreatedb nocreaterole noinherit nobypassrls;
@@ -25,20 +26,20 @@ insert into api.role_permissions(role_id,permission_code) values
 ('00000000-0000-4000-8000-000000000003','scrap.manage_points');
 grant select on api.user_profiles to cirne_scrap_executor;
 create policy user_profiles_scrap_read on api.user_profiles for select to cirne_scrap_executor using(true);
-do $refs$ begin execute format('grant references on api.user_profiles to %I',session_user); end $refs$;
+do $refs$ begin execute format('grant references on api.user_profiles to %I',current_setting('cirne.migration_invoker')); end $refs$;
 set local role cirne_identity_executor;
 grant execute on function private.resolve_current_identity() to cirne_scrap_executor;
 reset role;
 set local role cirne_route_executor;
 grant select on api.clients to cirne_scrap_executor;
 create policy clients_scrap_read on api.clients for select to cirne_scrap_executor using(true);
-do $refs$ begin execute format('grant references on api.clients to %I',session_user); end $refs$;
+do $refs$ begin execute format('grant references on api.clients to %I',current_setting('cirne.migration_invoker')); end $refs$;
 reset role;
 set local role cirne_visit_executor;
 grant select on api.visits to cirne_scrap_executor;
 create policy visits_scrap_read on api.visits for select to cirne_scrap_executor using(true);
 -- Commercial action reports are owned by the migration role, policy is added below.
-do $refs$ begin execute format('grant references on api.visits to %I',session_user); end $refs$;
+do $refs$ begin execute format('grant references on api.visits to %I',current_setting('cirne.migration_invoker')); end $refs$;
 reset role;
 grant select on api.visit_commercial_action_reports to cirne_scrap_executor;
 create policy action_reports_scrap_read on api.visit_commercial_action_reports for select to cirne_scrap_executor using(true);

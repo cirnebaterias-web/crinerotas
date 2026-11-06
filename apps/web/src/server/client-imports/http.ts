@@ -17,6 +17,9 @@ export function requireClientCapability(
 export async function clientImportRpc(client: SupabaseClient, name: string, args: Record<string, unknown> = {}) {
   const { data, error } = await client.schema('api').rpc(name, args).abortSignal(AbortSignal.timeout(30_000));
   if (!error) return data as unknown;
+  if (error.code === 'P0001' && error.message === 'SYNC_BUSY') {
+    throw new RouteRequestError(409, 'VERSION_CONFLICT', 'Uma atualização desta fonte já está em andamento. Aguarde e consulte o resultado.', true);
+  }
   const statuses = { AUTH_REQUIRED: 401, FORBIDDEN: 403, NOT_FOUND: 404,
     VERSION_CONFLICT: 409, IDEMPOTENCY_KEY_REUSED: 409,
     VALIDATION_FAILED: 422, SELLER_NOT_FOUND: 422 } as const;

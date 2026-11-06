@@ -167,7 +167,7 @@ test.describe('controlled client import management', () => {
     });
     await page.getByRole('button', { name: 'Importar linhas válidas' }).click();
 
-    await expect(page.locator('.seller-notice[role="status"]'))
+    await expect(page.getByRole('status').filter({ hasText: 'Base de clientes atualizada.' }))
       .toContainText('Base de clientes atualizada. A lista não pôde ser atualizada.');
     await expect(page.getByText(/Total: 1/)).toContainText('Aceitas: 1');
     expect(importCalls).toBe(1);

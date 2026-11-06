@@ -1,5 +1,6 @@
 -- Story 3.9: own commercial action catalog and visit commercial-action collection.
 begin;
+select pg_catalog.set_config('cirne.migration_invoker', current_user, true);
 select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('cirne:database:migrate'));
 set local lock_timeout = '5s';
 
@@ -27,7 +28,7 @@ grant create on schema api to cirne_visit_executor;
 set local role cirne_visit_executor;
 do $reference_grant$
 begin
-  execute pg_catalog.format('grant references on table api.visits to %I', session_user);
+  execute pg_catalog.format('grant references on table api.visits to %I', current_setting('cirne.migration_invoker'));
 end
 $reference_grant$;
 alter table api.visit_attachments drop constraint visit_attachments_purpose_check;
@@ -156,7 +157,7 @@ $visit_ownership$;
 set local role cirne_visit_executor;
 do $reference_revoke$
 begin
-  execute pg_catalog.format('revoke references on table api.visits from %I', session_user);
+  execute pg_catalog.format('revoke references on table api.visits from %I', current_setting('cirne.migration_invoker'));
 end
 $reference_revoke$;
 reset role;

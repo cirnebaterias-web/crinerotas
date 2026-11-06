@@ -20,7 +20,8 @@ export function LoginScreen() {
       window.location.replace(
         identity.roles.includes('manager') && identity.capabilities.includes('route.read_scoped')
           ? '/management/day'
-          : identity.capabilities.includes('scrap.read_operations') ? '/management/scrap' : '/home',
+          : identity.capabilities.includes('scrap.execute_pickups') ? '/logistics'
+            : identity.capabilities.includes('scrap.read_operations') ? '/management/scrap' : '/home',
       );
     } catch (failure) {
       setError(failure instanceof SellerHttpError && [400, 401, 403].includes(failure.status)
