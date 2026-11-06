@@ -1,6 +1,6 @@
 import type { VisitEvidenceIssue } from '@cirne/contracts';
 
-export const VISIT_RADIUS_M = 100;
+export const VISIT_RADIUS_M = 30;
 export const DESIRED_GPS_ACCURACY_M = 50;
 
 export function coordinateDecimal(value: number) {
@@ -46,7 +46,7 @@ export function evidenceIssueLabel(issue: VisitEvidenceIssue) {
     camera_unavailable: 'Câmera indisponível',
     gps_unavailable: 'GPS indisponível',
     gps_low_accuracy: 'Precisão do GPS acima de 50 m',
-    outside_radius: 'Posição fora do raio de 100 m',
+    outside_radius: 'Posição fora do limite de 30 m',
     client_location_missing: 'Loja sem coordenadas cadastradas',
   } as const)[issue];
 }

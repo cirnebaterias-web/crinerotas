@@ -17,6 +17,7 @@ interface Props {
   kind: 'checkin' | 'checkout';
   client: CanonicalRoute['stops'][number]['client'];
   busy?: boolean;
+  referenceLocation?: { latitude: string; longitude: string };
   onConfirm: (value: VisitEvidenceCaptureValue) => Promise<void>;
   onCancel: () => void;
 }
@@ -25,7 +26,7 @@ function decimal(value: number) {
   return String(Math.round(value * 100) / 100);
 }
 
-export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, onCancel }: Props) {
+export function VisitEvidenceCapture({ kind, client, busy = false, referenceLocation, onConfirm, onCancel }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [photo, setPhoto] = useState<CompressedStockPhoto>();
@@ -37,6 +38,10 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
   const [locating, setLocating] = useState(true);
   const [message, setMessage] = useState('Abrindo a câmera e obtendo a posição…');
   const [saving, setSaving] = useState(false);
+  const [streetConfirmed, setStreetConfirmed] = useState(false);
+  const referenceLatitude = referenceLocation?.latitude ?? client.latitude;
+  const referenceLongitude = referenceLocation?.longitude ?? client.longitude;
+  const missingClientLocation = kind === 'checkin' && (client.latitude === null || client.longitude === null);
 
   useEffect(() => {
     let active = true;
@@ -70,8 +75,8 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         accuracyM: position.coords.accuracy,
-        clientLatitude: client.latitude,
-        clientLongitude: client.longitude,
+        clientLatitude: referenceLatitude,
+        clientLongitude: referenceLongitude,
       });
       setIssues((current) => [...new Set([...current, ...assessment.issues])]);
       setLocation({
@@ -89,7 +94,7 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
       active = false;
       streamRef.current?.getTracks().forEach((track) => track.stop());
     };
-  }, [client.latitude, client.longitude]);
+  }, [referenceLatitude, referenceLongitude]);
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
   useEffect(() => {
@@ -126,7 +131,25 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
       setMessage('Tire a foto da fachada antes de continuar.');
       return;
     }
-    if (issues.length > 0 && justification.trim().length < 10) {
+    if (!location) {
+      setMessage('O GPS é obrigatório para confirmar esta etapa. Ative a localização e tente novamente.');
+      return;
+    }
+    if (kind === 'checkout' && !referenceLocation) {
+      setMessage('Checkout recusado. O ponto do check-in não está disponível neste aparelho; reabra a visita pela rota.');
+      return;
+    }
+    if (issues.includes('outside_radius')) {
+      setMessage(kind === 'checkout'
+        ? 'Checkout recusado. Volte ao ponto onde realizou o check-in e tente novamente.'
+        : 'Check-in recusado. Aproxime-se até 30 m do PDV e tente novamente.');
+      return;
+    }
+    if (missingClientLocation && !streetConfirmed) {
+      setMessage('Confirme que você está na rua indicada no endereço do cliente.');
+      return;
+    }
+    if (issues.length > 0 && !missingClientLocation && justification.trim().length < 10) {
       setMessage('Explique a exceção com pelo menos 10 caracteres.');
       return;
     }
@@ -137,7 +160,9 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
         ...(photo ? { photo } : {}),
         ...(location ? { location } : {}),
         issues,
-        ...(justification.trim() ? { justification: justification.trim() } : {}),
+        ...(missingClientLocation
+          ? { justification: 'Vendedor confirmou presença na rua do endereço exibido.' }
+          : justification.trim() ? { justification: justification.trim() } : {}),
       });
     } catch {
       setMessage('Não foi possível salvar a evidência no aparelho. Tente novamente.');
@@ -150,7 +175,13 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
     <p className="seller-kicker">{kind === 'checkin' ? 'CHECK-IN' : 'CHECKOUT'}</p>
     <h2 id="evidence-title">Foto da fachada e posição</h2>
     <p className="seller-muted">{client.name} · a foto deve ser tirada agora pela câmera. A galeria não está disponível.</p>
-    <p className="seller-muted">A posição será registrada para conferência. A referência do cadastro pode estar imprecisa; o GPS desta visita não a substitui automaticamente.</p>
+    <p className="seller-muted">{kind === 'checkout'
+      ? 'O checkout precisa ocorrer a até 30 m do ponto registrado no check-in.'
+      : 'O check-in precisa ocorrer a até 30 m da posição cadastrada do PDV.'}</p>
+    {missingClientLocation && <div className="seller-notice"><strong>PDV sem posição exata cadastrada</strong>
+      <p>Confira se você está nesta rua: {client.address}</p>
+      <label><input type="checkbox" checked={streetConfirmed}
+        onChange={(event) => setStreetConfirmed(event.target.checked)} /> Estou na rua indicada acima</label></div>}
     <div className="seller-evidence-camera">
       <video ref={videoRef} playsInline muted aria-label="Visualização da câmera traseira" />
       {preview && <img src={preview} alt="Foto da fachada capturada agora" />}
@@ -167,9 +198,9 @@ export function VisitEvidenceCapture({ kind, client, busy = false, onConfirm, on
     {issues.length > 0 && <div className="seller-evidence-exception">
       <strong>Revisão necessária</strong>
       <ul>{issues.map((issue) => <li key={issue}>{evidenceIssueLabel(issue)}</li>)}</ul>
-      <label htmlFor={`evidence-justification-${kind}`}>Justificativa obrigatória</label>
-      <textarea id={`evidence-justification-${kind}`} maxLength={500} value={justification}
-        onChange={(event) => setJustification(event.target.value)} />
+      {!missingClientLocation && <><label htmlFor={`evidence-justification-${kind}`}>Justificativa obrigatória</label>
+        <textarea id={`evidence-justification-${kind}`} maxLength={500} value={justification}
+          onChange={(event) => setJustification(event.target.value)} /></>}
     </div>}
     <p role="status">{message}</p>
     <div className="seller-evidence-actions">

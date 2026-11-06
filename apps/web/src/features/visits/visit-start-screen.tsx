@@ -24,6 +24,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const [step, setStep] = useState<VisitScreenStep>('start');
   const [showCheckout, setShowCheckout] = useState(false);
   const { draft, state, message: syncMessage } = view;
+  const checkinEvidence = view.evidence.find((item) => item.kind === 'checkin' && item.latitude && item.longitude);
 
   useEffect(() => {
     if (state === 'ready' && step === 'review') nextStepTitleRef.current?.focus();
@@ -297,6 +298,8 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         </section>}
         {showCheckout && draft.localStatus !== 'completed' && draft.client && <div className="seller-evidence-overlay">
           <VisitEvidenceCapture kind="checkout" client={draft.client} busy={view.busy}
+            referenceLocation={checkinEvidence?.latitude && checkinEvidence.longitude
+              ? { latitude: checkinEvidence.latitude, longitude: checkinEvidence.longitude } : undefined}
             onCancel={() => setShowCheckout(false)} onConfirm={completeVisit} />
         </div>}
         <a className="seller-button seller-secondary" href="/route">Retornar à rota</a>

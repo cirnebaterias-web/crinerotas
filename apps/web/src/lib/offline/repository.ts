@@ -54,6 +54,16 @@ function assertPartition(partition: OfflinePartition, record: { userId: string; 
   }
 }
 
+function evidenceDistanceMeters(from: LocalVisitEvidence, to: LocalVisitEvidence) {
+  if (!from.latitude || !from.longitude || !to.latitude || !to.longitude) return null;
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDelta = radians(Number(to.latitude) - Number(from.latitude));
+  const longitudeDelta = radians(Number(to.longitude) - Number(from.longitude));
+  const value = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(radians(Number(from.latitude))) *
+    Math.cos(radians(Number(to.latitude))) * Math.sin(longitudeDelta / 2) ** 2;
+  return 2 * 6_371_000 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
 export interface SaveDraftCommand {
   partition: OfflinePartition;
   routeVersionStopId: string;
@@ -338,6 +348,14 @@ export class OfflineRepository {
       const previous = await this.db.visitEvidence.where('[userId+deviceId+visitOfflineId+kind]').equals([
         partition.userId, partition.deviceId, evidence.visitOfflineId, evidence.kind,
       ]).first();
+      if (evidence.kind === 'checkout') {
+        const checkin = await this.db.visitEvidence.where('[userId+deviceId+visitOfflineId+kind]').equals([
+          partition.userId, partition.deviceId, evidence.visitOfflineId, 'checkin',
+        ]).first();
+        const distance = checkin ? evidenceDistanceMeters(checkin, evidence) : null;
+        if (distance === null) throw new Error('O check-in e o checkout precisam de GPS para validar a distância.');
+        if (distance > 30) throw new Error('Checkout recusado: volte ao ponto onde realizou o check-in.');
+      }
       if (evidence.kind === 'checkout' && (draft.localStatus === 'completed' || (previous && previous.status !== 'pending'))) {
         throw new Error('A visita já foi encerrada neste aparelho.');
       }

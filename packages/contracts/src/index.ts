@@ -1524,7 +1524,7 @@ export const localVisitEvidenceSchema = z.object({
   longitude: evidenceLocationSchema.shape.longitude,
   accuracyM: evidenceLocationSchema.shape.accuracyM,
   distanceM: evidenceLocationSchema.shape.distanceM,
-  radiusM: z.literal(100),
+  radiusM: z.union([z.literal(30), z.literal(100)]),
   desiredAccuracyM: z.literal(50),
   issues: z.array(visitEvidenceIssueSchema).max(5),
   justification: z.string().trim().min(10).max(500).optional(),

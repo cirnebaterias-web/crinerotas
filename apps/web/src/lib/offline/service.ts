@@ -522,7 +522,7 @@ export class OfflineFoundationService {
       ...(attachmentId ? { attachmentOfflineId: attachmentId } : {}),
       capturedAt: input.capturedAt,
       ...(input.location ?? {}),
-      radiusM: 100,
+      radiusM: 30,
       desiredAccuracyM: 50,
       issues: input.issues,
       ...(input.justification?.trim() ? { justification: input.justification.trim() } : {}),

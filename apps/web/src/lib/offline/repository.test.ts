@@ -924,6 +924,15 @@ describe('OfflineRepository', () => {
         },
       },
     );
+    await repository.saveVisitEvidence(partitionA, {
+      schemaVersion: 1, ...partitionA,
+      offlineId: '10000000-0000-4000-8000-000000000029',
+      visitOfflineId: started.draft.offlineId, kind: 'checkin',
+      capturedAt: '2026-10-05T12:00:00.000Z', latitude: '-7.1195', longitude: '-34.8450',
+      accuracyM: '10', distanceM: '15', radiusM: 30, desiredAccuracyM: 50,
+      issues: ['camera_unavailable'], justification: 'Câmera indisponível no teste sintético.',
+      status: 'pending', expiresAt: '2027-04-03T12:00:00.000Z',
+    });
     const checkout = {
       schemaVersion: 1 as const, ...partitionA,
       offlineId: '10000000-0000-4000-8000-000000000031',
@@ -944,6 +953,14 @@ describe('OfflineRepository', () => {
       status: 'pending' as const, blob: checkoutBlob,
     };
 
+    await expect(repository.saveVisitEvidence(partitionA, {
+      ...checkout,
+      offlineId: '10000000-0000-4000-8000-000000000028',
+      attachmentOfflineId: undefined,
+      longitude: '-34.8460',
+      issues: ['camera_unavailable'],
+      justification: 'Câmera indisponível no teste de distância.',
+    })).rejects.toThrow('volte ao ponto');
     await repository.saveVisitEvidence(partitionA, checkout, checkoutAttachment);
     const repeatedAttachment = {
       ...checkoutAttachment, offlineId: '10000000-0000-4000-8000-000000000034',
@@ -961,6 +978,6 @@ describe('OfflineRepository', () => {
       partitionA.userId, partitionA.deviceId, started.draft.offlineId,
     ]);
     expect(persisted).toMatchObject({ localStatus: 'completed', persistenceState: 'saved_on_device' });
-    expect(await repository.listVisitEvidence(partitionA, started.draft.offlineId)).toHaveLength(1);
+    expect(await repository.listVisitEvidence(partitionA, started.draft.offlineId)).toHaveLength(2);
   });
 });

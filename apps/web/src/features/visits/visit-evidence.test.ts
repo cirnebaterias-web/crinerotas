@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { coordinateDecimal, distanceMeters, locationAssessment } from './visit-evidence';
 
 describe('visit facade evidence location rules', () => {
-  it('accepts an accurate point inside 100 meters', () => {
+  it('accepts an accurate point inside 30 meters', () => {
     const result = locationAssessment({
       latitude: -7.115,
       longitude: -34.864,
       accuracyM: 12,
-      clientLatitude: '-7.1152',
-      clientLongitude: '-34.8642',
+      clientLatitude: '-7.1151',
+      clientLongitude: '-34.8641',
     });
     expect(result.issues).toEqual([]);
-    expect(result.distanceM).toBeLessThan(100);
+    expect(result.distanceM).toBeLessThan(30);
   });
 
   it('flags low accuracy and points outside the radius without accusing fraud', () => {
@@ -23,7 +23,7 @@ describe('visit facade evidence location rules', () => {
       clientLongitude: '-34.87',
     });
     expect(result.issues).toEqual(['gps_low_accuracy', 'outside_radius']);
-    expect(result.distanceM).toBeGreaterThan(100);
+    expect(result.distanceM).toBeGreaterThan(30);
   });
 
   it('requires review when the client has no registered coordinates', () => {
