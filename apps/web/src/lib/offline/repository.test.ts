@@ -832,7 +832,7 @@ describe('OfflineRepository', () => {
     });
   });
 
-  it('stores at most three compressed stock photos and isolates them by user', async () => {
+  it('stores at most five compressed stock photos and isolates them by user', async () => {
     const { repository } = makeRepository();
     await seedCanonical(repository);
     const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
@@ -856,17 +856,48 @@ describe('OfflineRepository', () => {
       '10000000-0000-4000-8000-000000000011',
       '10000000-0000-4000-8000-000000000012',
       '10000000-0000-4000-8000-000000000013',
+      '10000000-0000-4000-8000-000000000014',
+      '10000000-0000-4000-8000-000000000015',
     ];
     for (const id of ids) await repository.saveVisitAttachment(partitionA, makeAttachment(id));
-    expect(await repository.listVisitAttachments(partitionA, started.draft.offlineId)).toHaveLength(3);
+    expect(await repository.listVisitAttachments(partitionA, started.draft.offlineId)).toHaveLength(5);
     expect(await repository.listVisitAttachments(partitionB, started.draft.offlineId)).toEqual([]);
     await expect(repository.saveVisitAttachment(
       partitionA,
-      makeAttachment('10000000-0000-4000-8000-000000000014'),
-    )).rejects.toThrow('no máximo 3');
+      makeAttachment('10000000-0000-4000-8000-000000000016'),
+    )).rejects.toThrow('no máximo 5');
     await expect(repository.deleteVisitAttachment(partitionB, started.draft.offlineId, ids[0]!)).resolves.toBe(false);
     await expect(repository.deleteVisitAttachment(partitionA, started.draft.offlineId, ids[0]!)).resolves.toBe(true);
-    expect(await repository.listVisitAttachments(partitionA, started.draft.offlineId)).toHaveLength(2);
+    expect(await repository.listVisitAttachments(partitionA, started.draft.offlineId)).toHaveLength(4);
+  });
+
+  it('only completes stock with three to five stock photos and reopens after removal', async () => {
+    const { repository } = makeRepository();
+    await seedCanonical(repository);
+    const started = await repository.saveVisitStartAndEnqueue(visitStartCommand());
+    await repository.saveVisitStockAndEnqueue({
+      partition: partitionA, offlineId: started.draft.offlineId,
+      heliarQuantity: 0, mouraQuantity: 0, ownLines: [],
+      completedOwnBrands: ['Heliar', 'América', 'Durex', 'ACDelco'], competitorLines: [],
+      deviceSavedAt: '2026-11-06T20:00:00.000Z',
+      ids: { eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID() },
+    });
+    await expect(repository.completeStockCollection(
+      partitionA, started.draft.offlineId, '2026-11-06T20:01:00.000Z',
+    )).rejects.toThrow('3 a 5 fotos');
+    const ids = Array.from({ length: 3 }, () => crypto.randomUUID());
+    for (const offlineId of ids) await repository.saveVisitAttachment(partitionA, {
+      schemaVersion: 1, ...partitionA, offlineId, visitOfflineId: started.draft.offlineId,
+      purpose: 'stock_evidence', fileName: 'estoque.jpg', contentType: 'image/jpeg', byteSize: 4,
+      width: 10, height: 10, checksum: 'c'.repeat(64), capturedAt: '2026-11-06T20:00:30.000Z',
+      status: 'pending', blob: new Blob(['foto'], { type: 'image/jpeg' }),
+    });
+    await expect(repository.completeStockCollection(
+      partitionA, started.draft.offlineId, '2026-11-06T20:01:00.000Z',
+    )).resolves.toMatchObject({ stock: { collectionCompletedAt: '2026-11-06T20:01:00.000Z' } });
+    await repository.deleteVisitAttachment(partitionA, started.draft.offlineId, ids[0]!);
+    expect((await repository.getDraft(partitionA, started.draft.offlineId))?.stock?.collectionCompletedAt)
+      .toBeUndefined();
   });
 
   it('persists remote evidence confirmations atomically with their local photo', async () => {

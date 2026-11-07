@@ -37,6 +37,8 @@ function fixture() {
     saveVisitEvidence: vi.fn(),
     saveVisitAttachment: vi.fn(),
     deleteVisitAttachment: vi.fn(),
+    completeStockCollection: vi.fn(),
+    reopenStockCollection: vi.fn(),
     close: vi.fn(),
   };
   const publish = vi.fn();

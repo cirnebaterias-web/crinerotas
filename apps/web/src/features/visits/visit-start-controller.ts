@@ -19,7 +19,8 @@ type VisitService = Pick<OfflineFoundationService,
   'listCommercialActions' | 'saveVisitCommercialActions' | 'saveVisitScrap' |
   'listScrapPoints' |
   'getVisitPriceParameters' | 'listVisitAttachments' | 'saveVisitAttachment' |
-  'deleteVisitAttachment' | 'listVisitEvidence' | 'saveVisitEvidence' | 'close'>;
+  'deleteVisitAttachment' | 'completeStockCollection' | 'reopenStockCollection' |
+  'listVisitEvidence' | 'saveVisitEvidence' | 'close'>;
 
 export interface VisitStartView {
   state: 'loading' | 'ready' | 'blocked' | 'missing';
@@ -216,6 +217,26 @@ export class VisitStartController {
       this.attachments = this.attachments.filter((attachment) => attachment.offlineId !== offlineId);
       this.emitCurrent('Foto removida do aparelho.');
     })());
+  }
+
+  completeStockCollection() {
+    const userId = this.userId;
+    if (!this.active || !userId) throw new Error('A visita ainda não está pronta para edição.');
+    return this.service.completeStockCollection(userId, this.offlineId).then((draft) => {
+      this.localCommitRevision++;
+      this.emit({ ...this.lastView, draft, message: 'Coleta de estoque concluída.', attachments: this.attachments });
+      return draft;
+    });
+  }
+
+  reopenStockCollection() {
+    const userId = this.userId;
+    if (!this.active || !userId) throw new Error('A visita ainda não está pronta para edição.');
+    return this.service.reopenStockCollection(userId, this.offlineId).then((draft) => {
+      this.localCommitRevision++;
+      this.emit({ ...this.lastView, draft, message: 'Coleta de estoque reaberta para edição.' });
+      return draft;
+    });
   }
 
   completeVisit(value: VisitEvidenceCaptureValue) {

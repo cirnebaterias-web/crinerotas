@@ -57,9 +57,10 @@ function savedGroups(draft: LocalVisitDraft): CompetitorGroup[] {
 interface VisitCompetitorStockStepProps {
   draft: LocalVisitDraft;
   onSave: (values: StockInput) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStockStepProps) {
+export function VisitCompetitorStockStep({ draft, onSave, onDirtyChange }: VisitCompetitorStockStepProps) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const nextGroup = useRef(1);
   const nextRow = useRef(1);
@@ -94,6 +95,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
   const fieldId = (id: string, field: string) => 'competitor-stock-' + id + '-' + field;
   const fieldError = (id: string, field: string) => errors[id + '.' + field];
   const clearErrors = () => { setErrors({}); setFirstError(undefined); };
+  const markDirty = () => onDirtyChange?.(true);
 
   const selectBrand = (brand: CompetitorBrand) => {
     const existing = brand === 'Outra' ? undefined : groups.find((group) => group.brand === brand);
@@ -105,6 +107,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
     const id = 'new-group-' + nextGroup.current++;
     const rowId = 'new-row-' + nextRow.current++;
     const group = { id, brand, otherBrand: '', rows: [emptyRow(rowId)] };
+    markDirty();
     pendingFocus.current = brand === 'Outra' ? id + '.otherBrand' : rowId + '.amperage';
     setGroups((current) => [...current, group]);
     setActiveId(id);
@@ -115,11 +118,13 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
   };
 
   const updateGroup = (id: string, patch: Partial<CompetitorGroup>) => {
+    markDirty();
     setGroups((current) => current.map((group) => group.id === id ? { ...group, ...patch } : group));
     clearErrors();
   };
 
   const updateRow = (groupId: string, rowId: string, patch: Partial<CompetitorRow>) => {
+    markDirty();
     setGroups((current) => current.map((group) => group.id === groupId
       ? { ...group, rows: group.rows.map((row) => row.id === rowId ? { ...row, ...patch } : row) }
       : group));
@@ -127,6 +132,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
   };
 
   const addRow = (groupId: string) => {
+    markDirty();
     const id = 'new-row-' + nextRow.current++;
     pendingFocus.current = id + '.amperage';
     setGroups((current) => current.map((group) => group.id === groupId
@@ -136,6 +142,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
   };
 
   const removeRow = (groupId: string, rowId: string) => {
+    markDirty();
     pendingFocus.current = 'add-row';
     setGroups((current) => current.map((group) => group.id === groupId
       ? { ...group, rows: group.rows.filter((row) => row.id !== rowId) } : group));
@@ -144,6 +151,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
   };
 
   const removeGroup = (id: string) => {
+    markDirty();
     const remaining = groups.filter((group) => group.id !== id);
     setGroups(remaining);
     setActiveId(remaining[0]?.id ?? null);
@@ -239,6 +247,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
     clearErrors();
     try {
       await onSave(parsed.data);
+      onDirtyChange?.(false);
     } catch {
       setErrors({ form: 'Não foi possível salvar no aparelho. Os dados continuam nesta tela; tente novamente.' });
       setFirstError('form');
@@ -260,7 +269,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
     <form className="seller-stock-form" onSubmit={submit} noValidate>
       {groups.length === 0 && <label className="seller-stock-empty-choice">
         <input type="checkbox" checked={noCompetition}
-          onChange={(event) => { setNoCompetition(event.target.checked); clearErrors(); }} />
+          onChange={(event) => { markDirty(); setNoCompetition(event.target.checked); clearErrors(); }} />
         Não há estoque da concorrência neste PDV
       </label>}
 
@@ -378,7 +387,7 @@ export function VisitCompetitorStockStep({ draft, onSave }: VisitCompetitorStock
         ref={registerControl('form')}>{errors.form}</p>}
       <p className="seller-sr-only" role="status">{announcement}</p>
       <button className="seller-button seller-primary seller-stock-submit" disabled={saving} type="submit">
-        {saving ? 'Salvando no aparelho…' : 'Salvar concorrência e continuar'}
+        {saving ? 'Salvando no aparelho…' : 'Salvar estoque da concorrência e ir para fotos'}
       </button>
     </form>
   </section>;

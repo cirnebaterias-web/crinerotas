@@ -302,8 +302,8 @@ export class OfflineRepository {
       ]).filter((item) => item.purpose === metadata.purpose &&
         (metadata.purpose !== 'scrap_receipt' || item.targetOfflineId === metadata.targetOfflineId)).toArray();
       if (metadata.purpose === 'stock_evidence' &&
-          existing.length >= 3 && !existing.some(({ offlineId }) => offlineId === metadata.offlineId)) {
-        throw new Error('É permitido anexar no máximo 3 fotos do estoque.');
+          existing.length >= 5 && !existing.some(({ offlineId }) => offlineId === metadata.offlineId)) {
+        throw new Error('É permitido anexar no máximo 5 fotos do estoque.');
       }
       if (metadata.purpose === 'scrap_receipt' &&
           (existing.length >= 4 && !existing.some(({ offlineId }) => offlineId === metadata.offlineId))) {
@@ -313,6 +313,12 @@ export class OfflineRepository {
         throw new Error('A foto do termo deve identificar a coleta.');
       }
       await this.db.attachments.put(attachment);
+      if (metadata.purpose === 'stock_evidence' && draft.stock?.collectionCompletedAt) {
+        await this.db.visitDrafts.put(localVisitDraftSchema.parse({
+          ...draft,
+          stock: { ...draft.stock, collectionCompletedAt: undefined },
+        }));
+      }
       return attachment;
     });
   }
@@ -526,11 +532,61 @@ export class OfflineRepository {
   ) {
     const partition = offlinePartitionSchema.parse(partitionInput);
     const key: [string, string, string] = [partition.userId, partition.deviceId, offlineId];
-    return this.db.transaction('rw', this.db.attachments, async () => {
+    return this.db.transaction('rw', this.db.attachments, this.db.visitDrafts, async () => {
       const attachment = await this.db.attachments.get(key);
       if (!attachment || attachment.visitOfflineId !== visitOfflineId) return false;
       await this.db.attachments.delete(key);
+      if (attachment.purpose === 'stock_evidence') {
+        const draftKey: [string, string, string] = [partition.userId, partition.deviceId, visitOfflineId];
+        const draft = await this.db.visitDrafts.get(draftKey);
+        if (draft?.stock?.collectionCompletedAt) {
+          await this.db.visitDrafts.put(localVisitDraftSchema.parse({
+            ...draft,
+            stock: { ...draft.stock, collectionCompletedAt: undefined },
+          }));
+        }
+      }
       return true;
+    });
+  }
+
+  async completeStockCollection(partitionInput: OfflinePartition, visitOfflineId: string, completedAt: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const draftKey: [string, string, string] = [partition.userId, partition.deviceId, visitOfflineId];
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.attachments, async () => {
+      const draft = await this.db.visitDrafts.get(draftKey);
+      if (!draft?.stock || draft.stock.completedOwnBrands?.length !== 4 ||
+          draft.stock.competitorLines === undefined) {
+        throw new Error('Conclua o estoque próprio e o estoque da concorrência antes das fotos.');
+      }
+      const photos = await this.db.attachments.where('[userId+deviceId+visitOfflineId]').equals([
+        partition.userId, partition.deviceId, visitOfflineId,
+      ]).filter((item) => item.purpose === 'stock_evidence').count();
+      if (photos < 3 || photos > 5) throw new Error('Adicione de 3 a 5 fotos do estoque para concluir.');
+      const completed = localVisitDraftSchema.parse({
+        ...draft,
+        currentStep: 'prices',
+        stock: { ...draft.stock, collectionCompletedAt: completedAt },
+        updatedAt: completedAt,
+      });
+      await this.db.visitDrafts.put(completed);
+      return completed;
+    });
+  }
+
+  async reopenStockCollection(partitionInput: OfflinePartition, visitOfflineId: string) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    const draftKey: [string, string, string] = [partition.userId, partition.deviceId, visitOfflineId];
+    return this.db.transaction('rw', this.db.visitDrafts, async () => {
+      const draft = await this.db.visitDrafts.get(draftKey);
+      if (!draft?.stock) throw new Error('A coleta de estoque ainda não foi iniciada.');
+      const reopened = localVisitDraftSchema.parse({
+        ...draft,
+        currentStep: 'stock',
+        stock: { ...draft.stock, collectionCompletedAt: undefined },
+      });
+      await this.db.visitDrafts.put(reopened);
+      return reopened;
     });
   }
 

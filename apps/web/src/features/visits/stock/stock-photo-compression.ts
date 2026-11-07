@@ -1,5 +1,6 @@
 export const stockPhotoLimits = {
-  maxCount: 3,
+  minCount: 3,
+  maxCount: 5,
   maxDimension: 1600,
   targetBytes: 350 * 1024,
   maxBytes: 2 * 1024 * 1024,

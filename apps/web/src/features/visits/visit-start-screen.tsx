@@ -23,7 +23,13 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const [view, setView] = useState(initialVisitView);
   const [step, setStep] = useState<VisitScreenStep>('start');
   const [showCheckout, setShowCheckout] = useState(false);
+  const [showStockReopen, setShowStockReopen] = useState(false);
+  const [showStockExit, setShowStockExit] = useState(false);
+  const [competitorDirty, setCompetitorDirty] = useState(false);
   const { draft, state, message: syncMessage } = view;
+  const stockPhotos = view.attachments.filter((item) => item.purpose === 'stock_evidence');
+  const stockComplete = Boolean(draft?.stock?.collectionCompletedAt &&
+    stockPhotos.length >= 3 && stockPhotos.length <= 5);
   const checkinEvidence = view.evidence.find((item) => item.kind === 'checkin' && item.latitude && item.longitude);
 
   useEffect(() => {
@@ -85,6 +91,17 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   };
 
   useEffect(() => {
+    if (state !== 'ready' || !draft || stockComplete ||
+      !['prices', 'actions', 'scrap', 'review'].includes(step)) return;
+    const target: VisitScreenStep = !draft.stock?.completedOwnBrands || draft.stock.completedOwnBrands.length < 4
+      ? 'stock' : draft.stock.competitorLines === undefined ? 'competitor-stock' : 'stock-photos';
+    const url = new URL(window.location.href);
+    url.searchParams.set('step', target);
+    window.history.replaceState({}, '', url);
+    setStep(target);
+  }, [draft, state, step, stockComplete]);
+
+  useEffect(() => {
     if (state !== 'ready' || !draft || !['competitor-stock', 'prices', 'actions', 'scrap', 'review'].includes(step)
       || (draft.stock && (!draft.stock.completedOwnBrands || draft.stock.completedOwnBrands.length === 4))) return;
     const url = new URL(window.location.href);
@@ -138,7 +155,33 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     const controller = controllerRef.current;
     if (!controller) throw new Error('A visita ainda não está pronta para edição.');
     await controller.saveStock(values);
+    setCompetitorDirty(false);
     navigateStep('stock-photos');
+  };
+
+  const completeStockCollection = async () => {
+    const controller = controllerRef.current;
+    if (!controller) throw new Error('A visita ainda não está pronta para edição.');
+    await controller.completeStockCollection();
+    navigateStep('start');
+  };
+
+  const reopenStockCollection = async () => {
+    const controller = controllerRef.current;
+    if (!controller) throw new Error('A visita ainda não está pronta para edição.');
+    await controller.reopenStockCollection();
+    setShowStockReopen(false);
+    navigateStep('stock');
+  };
+
+  const openStockCollection = () => {
+    if (stockComplete) setShowStockReopen(true);
+    else navigateStep('stock');
+  };
+
+  const requestStockExit = () => {
+    if (['stock', 'competitor-stock', 'stock-photos'].includes(step)) setShowStockExit(true);
+    else navigateStep('start');
   };
 
   const savePrices = async (values: CompetitorPricesInput) => {
@@ -182,7 +225,6 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   };
 
   const showStockStep = step === 'stock';
-  const stockEntryStep: VisitScreenStep = 'stock';
 
   return <div className="seller-app seller-route-page">
     <header className="seller-topbar"><div className="seller-topbar-inner"><Brand /></div></header>
@@ -221,14 +263,15 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         {step === 'start' && draft.localStatus !== 'completed' && <section className="seller-task-list" aria-labelledby="visit-tasks-title">
           <p className="seller-kicker">TAREFAS DA VISITA</p>
           <h2 id="visit-tasks-title">O que você vai coletar?</h2>
-          <button className="seller-task-card" onClick={() => navigateStep(stockEntryStep)}>
+          <button className="seller-task-card" onClick={openStockCollection}
+            aria-label={`Coleta de estoque, ${stockComplete ? 'concluída. Abrir detalhes' : 'pendente. Abrir coleta'}`}>
             <span><strong>Coleta de estoque</strong><small>Produtos próprios, concorrência e fotos</small></span>
-            <span>{draft.stock?.competitorLines !== undefined ? 'Continuar' : 'Iniciar'}</span>
+            <span>{stockComplete ? 'Concluído' : draft.stock ? 'Continuar coleta' : 'Iniciar'}</span>
           </button>
-          <button className="seller-task-card" disabled={!draft.stock || draft.stock.competitorLines === undefined}
+          <button className="seller-task-card" disabled={!stockComplete}
             onClick={() => navigateStep('prices')}>
             <span><strong>Preços da concorrência</strong><small>Cotações e indisponibilidade</small></span>
-            <span>{draft.prices ? 'Editar' : draft.stock?.competitorLines !== undefined ? 'Iniciar' : 'Após estoque'}</span>
+            <span>{draft.prices ? 'Editar' : stockComplete ? 'Iniciar' : 'Após concluir estoque'}</span>
           </button>
           <button className="seller-task-card" disabled={!draft.prices} onClick={() => navigateStep('actions')}>
             <span><strong>Ações comerciais</strong><small>Heliar e concorrência</small></span>
@@ -239,26 +282,28 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
             <span>{draft.scrap ? 'Ver registro' : draft.commercialActions ? 'Iniciar' : 'Após ações comerciais'}</span>
           </button>
         </section>}
-        {showStockStep && <VisitStockStep
+        {showStockStep && <><p className="seller-kicker" role="status">ESTOQUE · ETAPA 1 DE 3 · PRODUTOS PRÓPRIOS</p><VisitStockStep
           key={draft.offlineId}
           draft={draft}
           onSave={saveStock}
           onContinue={() => navigateStep('competitor-stock')}
-        />}
+        /></>}
         {step === 'competitor-stock' && draft.stock && <>
+          <p className="seller-kicker" role="status">ESTOQUE · ETAPA 2 DE 3 · CONCORRÊNCIA</p>
           <button className="seller-button seller-secondary" type="button"
             onClick={() => navigateStep('stock', 'ACDelco')}>Voltar ao estoque próprio</button>
           <VisitCompetitorStockStep
             key={draft.offlineId}
             draft={draft}
             onSave={saveCompetitorStock}
+            onDirtyChange={setCompetitorDirty}
           />
         </>}
         {step === 'stock-photos' && draft.stock && <VisitStockPhotosStep
-          attachments={view.attachments}
+          attachments={stockPhotos}
           onAdd={addStockPhoto}
           onRemove={removeStockPhoto}
-          onDone={() => navigateStep('start')}
+          onDone={() => void completeStockCollection()}
         />}
         {step === 'prices' && draft.stock && <VisitCompetitorPricesStep
           key={draft.prices?.eventId ?? 'new-prices'}
@@ -267,7 +312,8 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           onSave={savePrices}
         />}
         {step !== 'start' && <button className="seller-button seller-secondary" type="button"
-          onClick={() => navigateStep('start')}>Voltar às tarefas</button>}
+          onClick={requestStockExit}>{['stock', 'competitor-stock', 'stock-photos'].includes(step)
+            ? 'Sair da coleta de estoque' : 'Voltar às tarefas'}</button>}
         {step === 'actions' && draft.prices && <VisitCommercialActionsStep
           draft={draft} actions={view.commercialActions} parameters={view.priceParameters ?? null}
           attachments={view.attachments} onAddEvidence={addCommercialActionEvidence} onSave={saveCommercialActions}
@@ -301,6 +347,31 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
             referenceLocation={checkinEvidence?.latitude && checkinEvidence.longitude
               ? { latitude: checkinEvidence.latitude, longitude: checkinEvidence.longitude } : undefined}
             onCancel={() => setShowCheckout(false)} onConfirm={completeVisit} />
+        </div>}
+        {showStockReopen && <div className="seller-evidence-overlay" role="dialog" aria-modal="true"
+          aria-labelledby="stock-reopen-title" aria-describedby="stock-reopen-description">
+          <section className="seller-stock-card">
+            <h2 id="stock-reopen-title">Reabrir coleta de estoque?</h2>
+            <p id="stock-reopen-description">A coleta já foi concluída. Ao reabrir, você poderá alterar quantidades, concorrentes e fotos; será necessário concluir novamente.</p>
+            <button className="seller-button seller-secondary" autoFocus type="button"
+              onClick={() => setShowStockReopen(false)}>Cancelar</button>{' '}
+            <button className="seller-button seller-primary" type="button"
+              onClick={() => void reopenStockCollection()}>Reabrir e editar</button>
+          </section>
+        </div>}
+        {showStockExit && <div className="seller-evidence-overlay" role="dialog" aria-modal="true"
+          aria-labelledby="stock-exit-title" aria-describedby="stock-exit-description">
+          <section className="seller-stock-card">
+            <h2 id="stock-exit-title">{competitorDirty ? 'Sair sem salvar?' : 'Sair da coleta de estoque?'}</h2>
+            <p id="stock-exit-description">{competitorDirty
+              ? 'As alterações no estoque da concorrência serão perdidas.'
+              : 'A coleta ainda não foi concluída. Você poderá continuar depois.'}</p>
+            <button className="seller-button seller-primary" autoFocus type="button"
+              onClick={() => setShowStockExit(false)}>Continuar preenchendo</button>{' '}
+            <button className="seller-button seller-secondary" type="button" onClick={() => {
+              setCompetitorDirty(false); setShowStockExit(false); navigateStep('start');
+            }}>Sair {competitorDirty ? 'sem salvar' : 'agora'}</button>
+          </section>
         </div>}
         <a className="seller-button seller-secondary" href="/route">Retornar à rota</a>
       </div>}

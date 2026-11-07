@@ -497,6 +497,22 @@ export class OfflineFoundationService {
     return this.repository.deleteVisitAttachment(partition, visitOfflineId, offlineId);
   }
 
+  async completeStockCollection(userId: string, visitOfflineId: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de concluir o estoque.');
+    return this.repository.completeStockCollection(partition, visitOfflineId, this.now());
+  }
+
+  async reopenStockCollection(userId: string, visitOfflineId: string) {
+    await this.repository.open();
+    const partition = { userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de reabrir o estoque.');
+    return this.repository.reopenStockCollection(partition, visitOfflineId);
+  }
+
   async saveVisitEvidence(input: {
     userId: string;
     visitOfflineId: string;

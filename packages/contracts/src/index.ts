@@ -1444,6 +1444,7 @@ export const localVisitDraftSchema = z.object({
   stock: stockInputSchema.extend({
     eventId: z.uuid(),
     deviceSavedAt: z.iso.datetime({ offset: true }),
+    collectionCompletedAt: z.iso.datetime({ offset: true }).optional(),
     serverSavedAt: z.iso.datetime({ offset: true }).optional(),
     persistenceState: z.enum(['saved_on_device', 'synced']),
   }).strict().optional(),

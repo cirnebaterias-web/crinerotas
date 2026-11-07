@@ -104,8 +104,20 @@ async function mockVisitSeller(
     });
     Object.defineProperty(navigator, 'geolocation', {
       configurable: true,
-      value: { getCurrentPosition: (_success: PositionCallback, error?: PositionErrorCallback) =>
-        error?.({ code: 1, message: 'Synthetic GPS denied', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError) },
+      value: { getCurrentPosition: (success: PositionCallback) => success({
+        coords: {
+          latitude: -8.047562,
+          longitude: -34.876964,
+          accuracy: 12.69,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+          toJSON: () => ({}),
+        },
+        timestamp: Date.now(),
+        toJSON: () => ({}),
+      }) },
     });
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (input, init) => {
@@ -197,7 +209,12 @@ async function startVisit(page: Page) {
   await page.getByRole('button', { name: 'Iniciar visita' }).click();
   await expect(page.getByRole('heading', { name: 'Foto da fachada e posição' })).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
-  await page.getByLabel('Justificativa obrigatória').fill('Câmera e GPS indisponíveis no cenário automatizado.');
+  const streetConfirmation = page.getByLabel('Estou na rua indicada acima');
+  if (await streetConfirmation.count()) await streetConfirmation.check();
+  const justification = page.getByLabel('Justificativa obrigatória');
+  if (await justification.count()) {
+    await justification.fill('Câmera e GPS indisponíveis no cenário automatizado.');
+  }
   await page.getByRole('button', { name: 'Confirmar e iniciar visita' }).click();
 }
 
@@ -258,13 +275,30 @@ async function saveOwnBrandsWithoutStock(page: Page) {
 
 async function saveNoCompetitorStockToPhotos(page: Page) {
   await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).check();
-  await page.getByRole('button', { name: 'Salvar concorrência e continuar' }).click();
+  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
   await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeVisible();
+}
+
+async function addStockPhotos(page: Page, count = 3) {
+  const pngDataUrl = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 80; canvas.height = 60;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#008744'; context.fillRect(0, 0, 80, 60);
+    return canvas.toDataURL('image/png');
+  });
+  const png = Buffer.from(pngDataUrl.split(',')[1]!, 'base64');
+  await page.locator('input[type="file"]').setInputFiles(Array.from({ length: count }, (_, index) => ({
+    name: `estoque-${index + 1}.png`, mimeType: 'image/png', buffer: png,
+  })));
 }
 
 async function saveNoCompetitorStock(page: Page) {
   await saveNoCompetitorStockToPhotos(page);
+  await addStockPhotos(page);
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
+  await expect(page.getByRole('button', { name: 'Coleta de estoque, concluída. Abrir detalhes' }))
+    .toContainText('Concluído');
   await page.getByRole('button', { name: /Preços da concorrência/ }).click();
   await expect(page.getByRole('heading', { name: 'Preços dos nossos produtos' })).toBeVisible();
 }
@@ -273,6 +307,30 @@ async function saveEmptyStockToPrices(page: Page) {
   await saveOwnBrandsWithoutStock(page);
   await saveNoCompetitorStock(page);
 }
+
+test('protects unsaved stock changes and requires confirmation to reopen a completed collection', async ({ page }) => {
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await startVisit(page);
+  await page.getByRole('button', { name: 'Coleta de estoque' }).click();
+  await saveOwnBrandsWithoutStock(page);
+
+  await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).check();
+  await page.getByRole('button', { name: 'Sair da coleta de estoque' }).click();
+  await expect(page.getByRole('dialog', { name: 'Sair sem salvar?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continuar preenchendo' }).click();
+
+  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
+  await addStockPhotos(page);
+  await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
+  const completedStock = page.getByRole('button', { name: 'Coleta de estoque, concluída. Abrir detalhes' });
+  await expect(completedStock).toContainText('Concluído');
+  await completedStock.click();
+  await expect(page.getByRole('dialog', { name: 'Reabrir coleta de estoque?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reabrir e editar' }).click();
+  await expect(page).toHaveURL(/\?step=stock$/);
+  await expect(page.getByRole('heading', { name: 'Estoque do cliente' })).toBeVisible();
+});
 
 test('starts online, confirms once and reopens the same visit after an offline hard refresh', async ({ page, context }) => {
   await mockVisitSeller(page);
@@ -355,9 +413,10 @@ test('saves repeatable stock with zero and other models offline, restores it and
   await page.getByLabel('Amperagem (Ah)').fill('80');
   await page.getByLabel('Tecnologia').selectOption('EFB');
   await page.getByLabel('Quantidade', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Salvar concorrência e continuar' }).click();
+  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
   await expect(page).toHaveURL(/\?step=stock-photos$/);
   await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeVisible();
+  await addStockPhotos(page);
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
   await page.getByRole('button', { name: /Preços da concorrência/ }).click();
   await expect(page).toHaveURL(/\?step=prices$/);
@@ -388,6 +447,7 @@ test('saves repeatable stock with zero and other models offline, restores it and
   await page.goto(pricesUrl, { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Voltar às tarefas' }).click();
   await page.getByRole('button', { name: /Coleta de estoque/ }).click();
+  await page.getByRole('button', { name: 'Reabrir e editar' }).click();
   await page.getByRole('button', { name: 'Heliar: 2 unidades. Abrir modelos' }).click();
   await expect(page.getByPlaceholder('Nome do modelo')).toHaveValue('Modelo sintético Heliar');
   await page.goto(pricesUrl, { waitUntil: 'domcontentloaded' });
@@ -396,13 +456,16 @@ test('saves repeatable stock with zero and other models offline, restores it and
   await expect(page.getByLabel('Quantidade', { exact: true }).nth(1)).toHaveValue('0');
   await page.getByRole('button', { name: 'Marca sintética', exact: false }).click();
   await expect(page.getByLabel('Nome da marca')).toHaveValue('Marca sintética');
+  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
+  await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
+  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
 
   await context.setOffline(false);
   await expect.poll(async () => (await offlineCounts(page)).events.length).toBe(0);
   const synchronized = await offlineCounts(page);
   expect(synchronized.drafts).toMatchObject([{
     stock: { heliarQuantity: 2, mouraQuantity: 7, persistenceState: 'synced' },
-    lastConfirmedSequence: 6,
+    lastConfirmedSequence: 7,
   }]);
   await page.goto('/route');
   await page.getByRole('button', { name: 'Continuar visita' }).click();
@@ -480,9 +543,10 @@ test('keeps stock validation and step transitions usable by keyboard on mobile',
   await expect(page.getByRole('heading', { name: 'Marcas concorrentes' })).toBeFocused();
   await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).focus();
   await page.keyboard.press('Space');
-  await page.getByRole('button', { name: 'Salvar concorrência e continuar' }).focus();
+  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeFocused();
+  await addStockPhotos(page);
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).focus();
   await page.keyboard.press('Enter');
   await page.getByRole('button', { name: /Preços da concorrência/ }).focus();
@@ -493,7 +557,7 @@ test('keeps stock validation and step transitions usable by keyboard on mobile',
   await page.screenshot({ path: testInfo.outputPath('stock-mobile-320.png'), fullPage: true });
 });
 
-test('compresses, limits and restores up to three stock photos offline', async ({ page, context }) => {
+test('requires three and limits/restores up to five stock photos offline', async ({ page, context }) => {
   await mockVisitSeller(page);
   await page.goto('/route');
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
@@ -523,8 +587,9 @@ test('compresses, limits and restores up to three stock photos offline', async (
   await expect(page.locator('.seller-field-error[role="alert"]')).toContainText('somente arquivos de imagem');
   expect((await offlineCounts(page)).attachments).toHaveLength(0);
   await input.setInputFiles({ name: 'estoque-1.png', mimeType: 'image/png', buffer: png });
-  await expect(page.getByText('1/3 fotos adicionadas')).toBeVisible();
-  await expect(page.getByAltText('Foto 1 do estoque')).toBeVisible();
+  await expect(page.getByText(/1 foto\(s\).*2 obrigatória\(s\) restante\(s\).*máximo 5/)).toBeVisible();
+  await expect(page.getByAltText('Foto 1 de 1 do estoque')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Adicione mais 2 foto/ })).toBeDisabled();
   const firstState = await offlineCounts(page);
   expect(firstState.attachments).toMatchObject([{
     purpose: 'stock_evidence', contentType: 'image/jpeg', status: 'pending',
@@ -533,16 +598,23 @@ test('compresses, limits and restores up to three stock photos offline', async (
   expect((firstState.attachments[0] as { checksum: string }).checksum).toMatch(/^[a-f0-9]{64}$/);
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('1/3 fotos adicionadas')).toBeVisible();
+  await expect(page.getByText(/1 foto\(s\).*máximo 5/)).toBeVisible();
   await input.setInputFiles([
     { name: 'estoque-2.png', mimeType: 'image/png', buffer: png },
     { name: 'estoque-3.png', mimeType: 'image/png', buffer: png },
   ]);
-  await expect(page.getByText('3/3 fotos adicionadas')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Adicionar fotos' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Remover foto 2' }).click();
-  await expect(page.getByText('2/3 fotos adicionadas')).toBeVisible();
-  expect((await offlineCounts(page)).attachments).toHaveLength(2);
+  await expect(page.getByText(/3 foto\(s\).*mínimo obrigatório atingido.*máximo 5/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Concluir coleta de estoque' })).toBeEnabled();
+  await input.setInputFiles([
+    { name: 'estoque-4.png', mimeType: 'image/png', buffer: png },
+    { name: 'estoque-5.png', mimeType: 'image/png', buffer: png },
+  ]);
+  await expect(page.getByRole('button', { name: 'Limite de 5 fotos atingido' })).toBeDisabled();
+  await input.setInputFiles({ name: 'estoque-6.png', mimeType: 'image/png', buffer: png });
+  await expect(page.locator('.seller-field-error[role="alert"]')).toContainText('no máximo 5 fotos');
+  await page.getByRole('button', { name: 'Remover foto 2 de 5' }).click();
+  await expect(page.getByText(/4 foto\(s\).*máximo 5/)).toBeVisible();
+  expect((await offlineCounts(page)).attachments).toHaveLength(4);
 });
 
 test('validates empty, negative and decimal stock quantities without advancing', async ({ page }) => {
@@ -775,8 +847,8 @@ test('ends a visit only after a camera-only checkout and a point-in-time GPS att
   const state = await offlineCounts(page);
   expect(state.drafts).toMatchObject([{ localStatus: 'completed', currentStep: 'complete' }]);
   expect(state.evidence).toEqual(expect.arrayContaining([
-    expect.objectContaining({ kind: 'checkin', radiusM: 100, desiredAccuracyM: 50 }),
-    expect.objectContaining({ kind: 'checkout', radiusM: 100, desiredAccuracyM: 50 }),
+    expect.objectContaining({ kind: 'checkin', radiusM: 30, desiredAccuracyM: 50 }),
+    expect.objectContaining({ kind: 'checkout', radiusM: 30, desiredAccuracyM: 50 }),
   ]));
 });
 

@@ -17,6 +17,8 @@ export function VisitStockPhotosStep({ attachments, onAdd, onRemove, onDone }: P
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const remaining = Math.max(0, stockPhotoLimits.minCount - attachments.length);
+  const canComplete = remaining === 0 && attachments.length <= stockPhotoLimits.maxCount;
 
   useEffect(() => { titleRef.current?.focus(); }, []);
 
@@ -60,28 +62,31 @@ export function VisitStockPhotosStep({ attachments, onAdd, onRemove, onDone }: P
   };
 
   return <section className="seller-stock-card seller-stock-photos" aria-labelledby="stock-photos-title">
-    <p className="seller-kicker">ETAPA FINAL · ESTOQUE</p>
+    <p className="seller-kicker">ESTOQUE · ETAPA 3 DE 3</p>
     <h2 id="stock-photos-title" ref={titleRef} tabIndex={-1}>Fotos do estoque</h2>
-    <p className="seller-muted">Opcional. Adicione até 3 fotos; elas serão comprimidas antes de serem salvas no aparelho.</p>
-    <p className="seller-photo-counter" aria-live="polite"><strong>{attachments.length}/3</strong> fotos adicionadas</p>
+    <p className="seller-muted">Adicione de 3 a 5 fotos do estoque. Fotografe uma visão geral e os principais produtos.</p>
+    <p className="seller-photo-counter" aria-live="polite"><strong>{attachments.length} foto(s)</strong> · {
+      remaining > 0 ? `${remaining} obrigatória(s) restante(s)` : 'mínimo obrigatório atingido'} · máximo 5</p>
 
     {attachments.length > 0 && <ul className="seller-photo-grid" aria-label="Fotos do estoque salvas">
       {attachments.map((attachment, index) => <li key={attachment.offlineId}>
         {/* The object URL is local and revoked whenever the attachment list changes. */}
-        <img src={urls[attachment.offlineId]} alt={`Foto ${index + 1} do estoque`} />
+        <img src={urls[attachment.offlineId]} alt={`Foto ${index + 1} de ${attachments.length} do estoque`} />
         <span>{formatPhotoBytes(attachment.byteSize)}</span>
         <button type="button" disabled={busy} onClick={() => void remove(attachment.offlineId)}
-          aria-label={`Remover foto ${index + 1}`}>Remover</button>
+          aria-label={`Remover foto ${index + 1} de ${attachments.length}`}>Remover</button>
       </li>)}
     </ul>}
 
     {error && <p className="seller-field-error" role="alert">{error}</p>}
     <input ref={inputRef} className="seller-visually-hidden" type="file" accept="image/*"
       capture="environment" multiple onChange={(event) => void selectFiles(event)} />
-    <button className="seller-button seller-secondary" type="button" disabled={busy || attachments.length >= 3}
-      onClick={() => inputRef.current?.click()}>{busy ? 'Comprimindo…' : 'Adicionar fotos'}</button>{' '}
-    <button className="seller-button seller-primary" type="button" disabled={busy} onClick={onDone}>
-      Concluir coleta de estoque
+    <button className="seller-button seller-secondary" type="button"
+      disabled={busy || attachments.length >= stockPhotoLimits.maxCount}
+      onClick={() => inputRef.current?.click()}>{busy ? 'Comprimindo…' : attachments.length >= stockPhotoLimits.maxCount
+        ? 'Limite de 5 fotos atingido' : 'Adicionar foto'}</button>{' '}
+    <button className="seller-button seller-primary" type="button" disabled={busy || !canComplete} onClick={onDone}>
+      {remaining > 0 ? `Adicione mais ${remaining} foto(s) para concluir` : 'Concluir coleta de estoque'}
     </button>
   </section>;
 }
