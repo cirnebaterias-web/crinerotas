@@ -87,7 +87,7 @@ test.describe('standalone scrap scheduling', () => {
       const stamp = { eventId: crypto.randomUUID(), deviceSavedAt: now, persistenceState: 'saved_on_device' };
       const draft = { schemaVersion: 1, userId: user.id, deviceId, offlineId, routeVersionStopId: '51000000-0000-4000-8000-000000000011',
         currentStep: 'scrap', deviceStartedAt: now, client: clientSnapshot, localStatus: 'draft', persistenceState: 'saved_on_device', updatedAt: now, lastConfirmedSequence: 4,
-        stock: { heliarQuantity: 0, mouraQuantity: 0, ownLines: [], completedOwnBrands: ['Heliar', 'América', 'Durex', 'ACDelco'], competitorLines: [], ...stamp },
+        stock: { heliarQuantity: 0, mouraQuantity: 0, ownLines: [], completedOwnBrands: ['Heliar', 'América', 'Durex', 'ACDelco'], competitorLines: [], collectionCompletedAt: now, ...stamp },
         prices: { availability: 'unavailable', unavailableReasonId: '51000000-0000-4000-8000-000000000012', ...stamp, eventId: crypto.randomUUID() },
         commercialActions: { ownAcknowledgements: [], competitor: { availability: 'not_identified' }, ...stamp, eventId: crypto.randomUUID() },
       };
@@ -98,8 +98,14 @@ test.describe('standalone scrap scheduling', () => {
         stops: [{ routeVersionStopId: draft.routeVersionStopId, plannedOrder: 1, executionOrder: 1, priority: 1, status: 'in_visit', executionVersion: 1, client: clientSnapshot }],
       };
       const db = await new Promise<IDBDatabase>((resolve, reject) => { const opening = indexedDB.open('cirne-rotas-offline'); opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
-      await new Promise<void>((resolve, reject) => { const tx = db.transaction(['visitDrafts', 'routeBundles', 'scrapPoints'], 'readwrite'); tx.objectStore('visitDrafts').put(draft); tx.objectStore('routeBundles').put(bundle);
+      await new Promise<void>((resolve, reject) => { const tx = db.transaction(['visitDrafts', 'routeBundles', 'scrapPoints', 'attachments'], 'readwrite'); tx.objectStore('visitDrafts').put(draft); tx.objectStore('routeBundles').put(bundle);
         tx.objectStore('scrapPoints').put({ userId: user.id, deviceId, id: '51000000-0000-4000-8000-000000000015', name: 'Ponto interior sintético', address: 'Rua de teste, 10 · Interior/RN', active: true, version: 1, cachedAt: now });
+        for (let index = 1; index <= 3; index += 1) tx.objectStore('attachments').put({
+          schemaVersion: 1, userId: user.id, deviceId, offlineId: `51000000-0000-4000-8000-00000000002${index}`,
+          visitOfflineId: offlineId, purpose: 'stock_evidence', fileName: `estoque-${index}.jpg`,
+          contentType: 'image/jpeg', byteSize: 4, width: 10, height: 10, checksum: String(index).repeat(64),
+          capturedAt: now, status: 'pending', blob: new Blob(['foto'], { type: 'image/jpeg' }),
+        });
         tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
       db.close(); sessionStorage.setItem('scrap-offline', 'true');
     }, { user: identity, customer: client, offlineId: visitId });
