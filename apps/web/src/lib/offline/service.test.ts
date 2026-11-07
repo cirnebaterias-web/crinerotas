@@ -400,6 +400,52 @@ describe('canonical route cache', () => {
       .resolves.toMatchObject({ ...catalog, ...partition });
   });
 
+  it('fetches and caches the published catalog for an online draft not yet confirmed by the server', async () => {
+    const { repository, service } = await setup();
+    await service.cacheCanonicalRoute(partition.userId, canonicalRoute());
+    const route = (await repository.listRouteBundles(partition)).find(
+      (candidate) => candidate.schemaVersion !== 1
+        && candidate.routeVersionId === canonicalRoute().routeVersionId,
+    )!;
+    const started = await repository.saveVisitStartAndEnqueue({
+      partition,
+      routeVersionStopId: route.stops[0]!.routeVersionStopId,
+      deviceStartedAt: '2026-09-11T12:01:00.000Z',
+      ids: {
+        offlineId: '55000000-0000-4000-8000-000000000003',
+        eventId: '66000000-0000-4000-8000-000000000003',
+        idempotencyKey: '77000000-0000-4000-8000-000000000003',
+      },
+    });
+    const catalog = {
+      schemaVersion: 1 as const,
+      parameterSetId: '90000000-0000-4000-8000-000000000003',
+      version: 1,
+      validFrom: '2026-09-01T00:00:00.000Z',
+      values: {
+        competitors: [{
+          id: '31000000-0000-4000-8000-000000000003',
+          category: 'competitor' as const,
+          code: 'published',
+          label: 'Catálogo publicado',
+          sortOrder: 1,
+        }],
+        technologies: [], conditions: [], unavailableReasons: [],
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(catalog));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(service.getVisitPriceParameters(partition.userId, started.draft.offlineId))
+      .resolves.toMatchObject({ ...catalog, ...partition });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${currentParameterSetPath}?at=${encodeURIComponent(started.draft.deviceStartedAt!)}`,
+      expect.objectContaining({ credentials: 'same-origin', cache: 'no-store' }),
+    );
+    await expect(repository.getPriceParameterSet(partition, catalog.parameterSetId))
+      .resolves.toMatchObject({ ...catalog, ...partition });
+  });
+
   it('commits a canonical route and session but reports unavailable without a verified worker', async () => {
     const { repository, service } = await setup();
 

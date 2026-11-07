@@ -331,6 +331,13 @@ export class OfflineFoundationService {
         draft.parameterSetId,
       ).catch(() => undefined);
     }
+    if (draft.deviceStartedAt && navigator.onLine) {
+      const fetched = await this.fetchAndCachePriceParameterSet(
+        partition,
+        draft.deviceStartedAt,
+      ).catch(() => undefined);
+      if (fetched) return fetched;
+    }
     const routes = await this.repository.listRouteBundles(partition);
     const route = routes.find((candidate) => candidate.stops.some(
       (stop) => stop.routeVersionStopId === draft.routeVersionStopId,
