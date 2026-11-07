@@ -2,29 +2,33 @@ schema: 1
 story: '3.11'
 story_title: 'Importação controlada da base de clientes por Excel'
 gate: PASS
-status_reason: 'Os 15 critérios de aceite estão cobertos por testes unitários, pgTAP, integração e E2E, sem achados bloqueantes de segurança, confiabilidade ou qualidade. AB-13 permanece como gate operacional para dados reais e não afeta o aceite da implementação sintética.'
+status_reason: 'O importador manual reconhece o modelo oficial de 21 colunas e preserva o legado de oito, reutilizando as regras estritas da Story 3.13. Os 15 ACs estão cobertos sem achado bloqueante; AB-13 continua impedindo uso de dados reais.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'story-sha256:32b1ad8a6fe6f79536ed41fb4cab59c7effe0817f960b3b9aa653f3567cac6e9'
-updated: '2026-10-11T01:52:37-03:00'
-expires: '2026-10-25T01:52:37-03:00'
+reviewed_revision: 'worktree-diff-sha256:f8f056927d474569d1cbcee260a773050cdec7ce4e229bcc3f2e4162921ff2d2'
+updated: '2026-11-07T11:46:43-03:00'
+expires: '2026-11-21T11:46:43-03:00'
 top_issues: []
 waiver: { active: false }
-quality_score: 100
+quality_score: 98
 evidence:
-  review: 'Docs/stories/3.11.story.md#qa-results'
-  tests_reviewed: 878
+  review: 'Docs/stories/3.11.story.md#re-review-date-2026-11-07'
+  tests_reviewed: 2344
   risks_identified: 0
   current_run:
-    unit_passed: 315
+    targeted_unit_passed: 56
+    unit_passed: 838
     unit_skipped: 1
-    pgtap_passed: 543
-    integration_passed: 19
-    e2e_passed: 1
+    pgtap_passed: 1478
+    integration_passed: 26
+    e2e_passed: 2
     lint: PASS
     typecheck: PASS
     production_build: PASS
-    database_reset: PASS
-    dependency_audit: PASS
+    database_tests: PASS
+    database_reset: 'BASELINE_BLOCKED: migration preexistente de ativação produtiva exige identidade operacional externa'
+    secret_scan: PASS
+    dependency_audit_high_critical: 0
+    dependency_audit_moderate: 15
     coderabbit_final_findings: 0
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
@@ -32,18 +36,20 @@ evidence:
 nfr_validation:
   security:
     status: PASS
-    notes: 'Capacidades, isolamento por carteira, RLS/grants, limites de upload/ZIP, rejeição de fórmulas e ausência de credenciais privilegiadas no navegador foram validados.'
+    notes: 'Mapeamento privado e validado, ausência de inferência de vendedor, rejeição de fórmulas nos campos importados, limites ZIP/linhas e autorização existente permanecem fechados por padrão.'
   performance:
     status: PASS
-    notes: 'Corpo HTTP, quantidade e expansão de entradas ZIP, linhas processadas e paginação possuem limites explícitos e testados.'
+    notes: 'Linhas vazias apenas formatadas não alocam lacunas; dados depois da linha 5.001 e arquivos/ZIPs excessivos são recusados pelos limites existentes.'
   reliability:
     status: PASS
-    notes: 'Aplicação atômica por linha, sucesso parcial, checksum idempotente, auditoria e consulta canônica do lote foram comprovados em banco e integração.'
+    notes: 'Checksum do formato oficial inclui o mapa de carteiras, permitindo reavaliação segura; importação, replay idempotente e consulta passaram no processo HTTP/CLI real.'
   maintainability:
     status: PASS
-    notes: 'Contratos compartilhados, handlers finos, serviço isolado, migrações incrementais e testes multinível mantêm as fronteiras arquiteturais.'
+    notes: 'O XLSX reutiliza o normalizador e a validação de configuração da Story 3.13, mantendo uma única regra para Carteira/status/OUTROS e compatibilidade legada coberta por testes.'
 recommendations:
   immediate: []
   future:
-    - action: 'Fechar AB-13 e executar o gate Pre-Deployment antes de importar qualquer arquivo ou dado real.'
-      refs: ['Docs/stories/3.11.story.md']
+    - action: 'Fechar AB-13, validar o mapa real Carteira → Vendedor e executar o gate Pre-Deployment antes de importar dados reais.'
+      refs: ['Docs/stories/3.11.story.md', 'Docs/stories/3.13.story.md']
+    - action: 'Corrigir em story separada o reset sintético bloqueado pela migration preexistente 20261116130000_product_catalog_production_activation.sql.'
+      refs: ['supabase/migrations/20261116130000_product_catalog_production_activation.sql']

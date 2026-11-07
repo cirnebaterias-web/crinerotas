@@ -4,13 +4,22 @@ import { clientSheetHeaders, clientImportPreviewSchema, clientImportRowSchema, c
   normalizeClientExternalReference, type ClientImportIssue, type ClientImportRow } from '@cirne/contracts';
 import { RouteRequestError } from '../routes/http';
 
+const importedColumnIndexes = [0, 1, 3, 4, 7, 8, 9, 15, 16, 17, 20] as const;
 function text(value: unknown) { return typeof value === 'string' ? value.trim() : typeof value === 'number' ? String(value) : ''; }
+function formula(value: unknown) {
+  return value !== null && typeof value === 'object' &&
+    ('formula' in value || 'sharedFormula' in value);
+}
 function coordinate(value: unknown) {
   const raw = text(value);
   if (!raw) return null;
   return /^-?\d+(?:[.,]\d+)?$/.test(raw) ? Number(raw.replace(',', '.')) : NaN;
 }
-export function normalizeClientSheet(values: unknown[][], portfolios: Record<string, string>) {
+export function normalizeClientSheet(
+  values: unknown[][],
+  portfolios: Record<string, string>,
+  source: { name?: string; checksum?: string } = {},
+) {
   if (values.length > 5001 || !clientSheetHeaders.every((header, index) =>
     normalizePortfolio(text(values[0]?.[index])) === normalizePortfolio(header))) {
     throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Confira os 21 cabeçalhos da aba Base clientes e o limite de 5.000 linhas.', false);
@@ -20,7 +29,8 @@ export function normalizeClientSheet(values: unknown[][], portfolios: Record<str
   let ignoredCount = 0;
   const references = new Map<string, number>();
   const candidates = values.slice(1).map((cells, index) => ({ cells, rowNumber: index + 2 }))
-    .filter(({ cells }) => cells.some((value) => text(value) !== ''))
+    .filter(({ cells }) => importedColumnIndexes.some((index) =>
+      text(cells[index]) !== '' || formula(cells[index])))
     .filter(({ cells }) => {
       if (normalizePortfolio(text(cells[3])) !== 'OUTROS') return true;
       ignoredCount += 1; return false;
@@ -34,6 +44,9 @@ export function normalizeClientSheet(values: unknown[][], portfolios: Record<str
     const addIssue = (code: string, message: string) => {
       if (issues.length - before < 2) issues.push({ rowNumber, code, message });
     };
+    if (importedColumnIndexes.some((index) => formula(cells[index]))) {
+      addIssue('FORMULA_NOT_ALLOWED', 'Fórmulas não são permitidas nos campos usados pela importação.');
+    }
     const portfolio = text(cells[3]);
     const portfolioKey = normalizePortfolio(portfolio);
     const status = normalizePortfolio(text(cells[4]));
@@ -68,8 +81,8 @@ export function normalizeClientSheet(values: unknown[][], portfolios: Record<str
   }
   const rejectedCount = new Set(issues.map((issue) => issue.rowNumber)).size;
   return { ignoredCount, preview: clientImportPreviewSchema.parse({
-    schemaVersion: 1, sourceName: 'Google Sheets - Base clientes',
-    sourceChecksum: createHash('sha256').update(JSON.stringify({ values, portfolios })).digest('hex'),
+    schemaVersion: 1, sourceName: source.name ?? 'Google Sheets - Base clientes',
+    sourceChecksum: source.checksum ?? createHash('sha256').update(JSON.stringify({ values, portfolios })).digest('hex'),
     totalCount: rows.length + rejectedCount, acceptedCount: rows.length, rejectedCount, rows, issues,
   }) };
 }

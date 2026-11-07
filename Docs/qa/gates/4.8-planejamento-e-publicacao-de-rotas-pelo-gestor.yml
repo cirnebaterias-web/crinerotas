@@ -2,31 +2,29 @@ schema: 1
 story: '4.8'
 story_title: 'Planejamento e publicação de rotas pelo gestor'
 gate: PASS
-status_reason: 'Os 12 critérios estão cobertos em contratos, autorização, persistência e fluxo desktop, sem achado crítico/alto ou lacuna P0. CodeRabbit encerrou com zero findings e migração, rollback, integração e jornadas Playwright foram comprovados localmente.'
+status_reason: 'A correção pós-aceite tornou o planejamento descobrível, protege alterações locais e recupera falhas sem expor detalhes técnicos. Os testes focados, build, lint, tipagem e verificações de segurança passaram sem lacuna P0.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'product-tree-sha256:0afa3dd543efd5cab6bd1511415853db0215c52d984469a49f7c2315f663ad8b'
-updated: '2026-10-29T21:26:39Z'
-expires: '2026-11-12T21:26:39Z'
+reviewed_revision: 'commit:e2025103bd233f11ab74b6f254d3d4353df23833'
+updated: '2026-11-07T10:43:22-03:00'
+expires: '2026-11-21T10:43:22-03:00'
 top_issues: []
 waiver: { active: false }
 quality_score: 100
 evidence:
-  tests_reviewed: 1336
+  tests_reviewed: 842
   risks_identified: 0
   current_run:
     lint: PASS
     typecheck: PASS
-    unit_passed: 447
-    unit_skipped: 1
+    unit_baseline_passed: 831
+    unit_baseline_skipped: 1
+    unit_focused_passed: 8
     production_build: PASS
-    pgtap_passed: 786
-    integration_passed: 25
-    e2e_mocked_passed: 77
-    e2e_real_planner_passed: 1
+    e2e_route_planning_passed: 2
     secretlint: PASS
-    rollback_reapply: PASS
+    dependency_audit: 'PASS: 0 critical, 0 high; 15 moderate transitivas já rastreadas.'
     git_diff_check: PASS
-    coderabbit: 'PASS: primeira rodada encontrou 5 achados válidos, todos corrigidos; segunda rodada terminou com 0 findings.'
+    coderabbit: 'PASS: evidência registrada após as correções pós-aceite; última rodada direcionada concluiu 17 arquivos com 0 findings.'
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     ac_gaps: []
