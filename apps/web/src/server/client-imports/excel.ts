@@ -2,16 +2,19 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import { normalizePortfolio, readClientPortfolioMappings } from '@cirne/config/client-sheet-sync';
 import {
   clientImportHeaders,
   clientImportPreviewSchema,
   clientImportRowSchema,
+  clientSheetHeaders,
   normalizeClientExternalReference,
   type ClientImportIssue,
   type ClientImportPreview,
   type ClientImportRow,
 } from '@cirne/contracts';
 import { RouteRequestError } from '../routes/http';
+import { normalizeClientSheet } from '../client-sheet-sync/normalize';
 
 const maxFileBytes = 5 * 1024 * 1024;
 const maxRows = 5000;
@@ -152,7 +155,11 @@ async function orderedWorkbookBytes(entries: Map<string, Buffer>) {
   return archive.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
-export async function parseClientWorkbook(sourceName: string, bytes: Uint8Array): Promise<ClientImportPreview> {
+export async function parseClientWorkbook(
+  sourceName: string,
+  bytes: Uint8Array,
+  portfolios: Record<string, string> = {},
+): Promise<ClientImportPreview> {
   if (!sourceName.toLowerCase().endsWith('.xlsx')) {
     throw new RouteRequestError(415, 'VALIDATION_FAILED', 'Envie um arquivo .xlsx.', false);
   }
@@ -167,6 +174,8 @@ export async function parseClientWorkbook(sourceName: string, bytes: Uint8Array)
   let worksheetFound = false;
   let headerFound = false;
   let dataRowsSeen = 0;
+  let format: 'canonical' | 'official' | null = null;
+  const officialValues: unknown[][] = [];
   try {
     const workbook = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from(streamingBytes), {
       worksheets: 'emit', sharedStrings: 'cache', hyperlinks: 'ignore', styles: 'cache', entries: 'ignore',
@@ -180,14 +189,37 @@ export async function parseClientWorkbook(sourceName: string, bytes: Uint8Array)
         const rowNumber = row.number;
         if (rowNumber === 1) {
           headerFound = true;
-          const headerValues = clientImportHeaders.map((_, index) =>
+          const canonicalHeaders = clientImportHeaders.map((_, index) =>
             text(cellValue(row.getCell(index + 1)).value).toLowerCase());
-          clientImportHeaders.forEach((expected, index) => {
-            if (headerValues[index] !== expected) {
-              issues.push(issue(1, 'INVALID_HEADER', `Cabeçalho ${index + 1} deve ser ${expected}.`));
-            }
-          });
-          if (issues.length > 0) break;
+          const officialHeaders = clientSheetHeaders.map((_, index) =>
+            cellValue(row.getCell(index + 1)).value);
+          const canonical = clientImportHeaders.every((expected, index) =>
+            canonicalHeaders[index] === expected);
+          const official = clientSheetHeaders.every((expected, index) =>
+            normalizePortfolio(text(officialHeaders[index])) === normalizePortfolio(expected));
+          if (official) {
+            format = 'official';
+            officialValues.push(officialHeaders);
+            continue;
+          }
+          if (canonical) {
+            format = 'canonical';
+            continue;
+          }
+          issues.push(issue(1, 'INVALID_HEADER',
+            'Use os 21 cabeçalhos do modelo oficial Base clientes ou os oito cabeçalhos canônicos legados.'));
+          break;
+        }
+        if (format === 'official') {
+          const cells = clientSheetHeaders.map((_, index) => cellValue(row.getCell(index + 1)));
+          const hasValue = cells.some((cell) => cell.formula || cell.value !== '');
+          if (!hasValue) continue;
+          dataRowsSeen += 1;
+          if (dataRowsSeen > maxRows || rowNumber > maxRows + 1) {
+            throw new RouteRequestError(422, 'VALIDATION_FAILED', `A planilha aceita no máximo ${maxRows} clientes.`, false);
+          }
+          while (officialValues.length < rowNumber - 1) officialValues.push([]);
+          officialValues.push(cells.map((cell) => cell.formula ? { formula: true } : cell.value));
           continue;
         }
         if (!headerFound) break;
@@ -236,8 +268,17 @@ export async function parseClientWorkbook(sourceName: string, bytes: Uint8Array)
   }
   if (!worksheetFound) throw new RouteRequestError(422, 'VALIDATION_FAILED', 'A planilha não possui uma aba de dados.', false);
   if (!headerFound) {
-    clientImportHeaders.forEach((expected, index) =>
-      issues.push(issue(1, 'INVALID_HEADER', `Cabeçalho ${index + 1} deve ser ${expected}.`)));
+    issues.push(issue(1, 'INVALID_HEADER', 'A planilha não possui uma linha de cabeçalhos.'));
+  }
+  if (format === 'official') {
+    const normalizedPortfolios = Object.fromEntries(Object.entries(portfolios)
+      .sort(([left], [right]) => left.localeCompare(right)));
+    const checksum = createHash('sha256').update(bytes).update('\0')
+      .update(JSON.stringify(normalizedPortfolios)).digest('hex');
+    return normalizeClientSheet(officialValues, portfolios, {
+      name: sourceName,
+      checksum,
+    }).preview;
   }
   if (issues.some((item) => item.rowNumber === 1)) return clientImportPreviewSchema.parse({
     schemaVersion: 1, sourceName, sourceChecksum: createHash('sha256').update(bytes).digest('hex'),
@@ -284,5 +325,7 @@ export async function readClientImportFile(request: Request) {
   }
   const file = form.get('file');
   if (!(file instanceof File)) throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Selecione uma planilha Excel.', false);
-  return parseClientWorkbook(file.name, new Uint8Array(await file.arrayBuffer()));
+  const mappingState = readClientPortfolioMappings(process.env);
+  return parseClientWorkbook(file.name, new Uint8Array(await file.arrayBuffer()),
+    mappingState.configured ? mappingState.portfolios : {});
 }

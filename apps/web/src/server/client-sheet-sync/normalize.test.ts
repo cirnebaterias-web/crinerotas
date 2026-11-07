@@ -19,7 +19,7 @@ describe('Google client sheet normalization', () => {
   });
   it.each([{ 20: 'https://evil.invalid/' }, { 20: 'x'.repeat(513) }, { 16: '=HYPERLINK("x")' }, { 16: { formula: 'x' } }])('keeps malformed Google metadata pending for review', (patch) => {
     expect(parse(row(patch)).preview).toMatchObject({ acceptedCount: 0, rejectedCount: 1,
-      issues: [expect.objectContaining({ code: 'GOOGLE_LOCATION_PENDING_REVIEW' })] });
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'GOOGLE_LOCATION_PENDING_REVIEW' })]) });
   });
   it('maps only canonical fields and preserves identifier leading zeros', () => {
     const result = parse(row());
@@ -31,6 +31,13 @@ describe('Google client sheet normalization', () => {
     const result = parse(row({ 0: '', 1: '', 3: ' outros ', 4: '', 7: 'invalid' }));
     expect(result.ignoredCount).toBe(1);
     expect(result.preview).toMatchObject({ totalCount: 0, rejectedCount: 0, rows: [], issues: [] });
+  });
+  it('ignores rows populated only in unsupported auxiliary columns', () => {
+    const auxiliaryOnly: unknown[] = Array.from({ length: clientSheetHeaders.length }, () => '');
+    auxiliaryOnly[10] = 'Tipo auxiliar';
+    auxiliaryOnly[12] = { formula: '1+1', result: 'Não usado' };
+    expect(normalizeClientSheet([[...clientSheetHeaders], auxiliaryOnly], mapping).preview)
+      .toMatchObject({ totalCount: 0, acceptedCount: 0, rejectedCount: 0, rows: [], issues: [] });
   });
   it.each(['', '0', 'Sim', 'SEM CLASSIFICAÇÃO', 'desconhecido'])('keeps status %s pending, never active', (status) => {
     const result = parse(row({ 4: status }));
@@ -53,6 +60,11 @@ describe('Google client sheet normalization', () => {
   });
   it('accepts calculated Google values as values without evaluating formula objects', () => {
     expect(parse(row({ 9: { formula: 'malicious' } })).preview.acceptedCount).toBe(0);
+  });
+  it('rejects formula cells in every canonical field used by the importer', () => {
+    expect(parse(row({ 7: { formula: '1+1', result: -5 }, 8: { formula: '1+1', result: -35 } })).preview)
+      .toMatchObject({ acceptedCount: 0, rejectedCount: 1,
+        issues: [expect.objectContaining({ code: 'FORMULA_NOT_ALLOWED' })] });
   });
   it('rejects wrong headers and excess rows without partial import', () => {
     expect(() => normalizeClientSheet([['nome']], mapping)).toThrow('21 cabeçalhos');

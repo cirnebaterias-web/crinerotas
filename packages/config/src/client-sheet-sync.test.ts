@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readClientSheetSyncConfig } from './client-sheet-sync';
+import { readClientPortfolioMappings, readClientSheetSyncConfig } from './client-sheet-sync';
 const env = { GOOGLE_CLIENT_SYNC_ENABLED: 'true', GOOGLE_CLIENT_SYNC_SPREADSHEET_ID: 'synthetic-sheet-id-000001',
   GOOGLE_CLIENT_SYNC_SERVICE_ACCOUNT_EMAIL: 'test@synthetic.iam.gserviceaccount.com',
   GOOGLE_CLIENT_SYNC_PRIVATE_KEY: 'synthetic-not-a-real-key'.repeat(10),
@@ -12,6 +12,16 @@ describe('private Google sync config', () => {
   it('normalizes explicit mapping keys only', () => {
     const result = readClientSheetSyncConfig(env);
     expect(result.configured && result.config.portfolios).toEqual({ TESTE: 'seller@example.invalid' });
+  });
+  it('exposes the same validated mapping independently of the Google connection', () => {
+    expect(readClientPortfolioMappings(env)).toEqual({
+      configured: true,
+      portfolios: { TESTE: 'seller@example.invalid' },
+    });
+    expect(readClientPortfolioMappings({})).toEqual({
+      configured: false,
+      reason: 'missing_configuration',
+    });
   });
   it.each(['{"Teste":"a@example.invalid"," TESTE ":"b@example.invalid"}',
     '{"TESTE":"a@example.invalid"," TESTE ":"b@example.invalid"}',
