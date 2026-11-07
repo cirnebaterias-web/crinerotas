@@ -26,7 +26,11 @@ begin
   limit 1;
 
   if publisher_id is null then
-    raise exception 'Operational price catalog requires an active administrator or manager publisher';
+    -- Clean and synthetic environments provision identities only after the
+    -- schema is available. Their identity provisioner creates and publishes
+    -- the synthetic catalog; production still publishes here as soon as an
+    -- authorized operator exists.
+    return;
   end if;
 
   select coalesce(max(version), 0) + 1 into next_version from api.parameter_sets;
