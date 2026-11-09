@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { proposeWeeklyRoutes, weeklyRoutePolicy } from './weekly-route-proposals';
+import { analyzeWeeklyRouteCandidate, classifyDailyRoute, maxDailyLegDistanceKm, pointInPolygon,
+  proposeWeeklyRoutes, weeklyRoutePolicy } from './weekly-route-proposals';
 
 const sellerId = '11111111-1111-4111-8111-111111111111';
 const id = (value: number) => `22222222-2222-4222-8222-${String(value).padStart(12, '0')}`;
 const candidate = (value: number, overrides: Record<string, unknown> = {}) => ({
-  clientId: id(value), name: `Cliente ${value}`, status: 'active', daysSinceLastPurchase: 60,
-  periodicityDays: 30, averageMonthlyVolume: 100, scrapDebtKg: 100,
+  clientId: id(value), name: `Cliente ${value}`, status: 'active' as const, daysSinceLastPurchase: 60,
+  periodicityDays: 30, averageMonthlyVolume: 100, recentVolume3: 300, previousVolume3: 300,
+  opportunitySegments: [], scrapDebtKg: 100, scrapBalanceState: 'debtor' as const,
   location: { latitude: -5.8, longitude: -35.2 }, hasNavigableAddress: true, ...overrides,
 });
 const proposal = (candidates: unknown[]) => proposeWeeklyRoutes({
@@ -49,6 +51,70 @@ describe('weekly route proposal rules', () => {
     expect(first.days).toHaveLength(5);
     expect(first.days.every(({ suggestions }) => suggestions.length === 10)).toBe(true);
     expect(new Set(first.days.flatMap(({ suggestions }) => suggestions.map(({ clientId }) => clientId))).size).toBe(50);
+  });
+
+  it('uses purchase periodicity and recent decline in the commercial priority explanation', () => {
+    const result = analyzeWeeklyRouteCandidate(candidate(1, {
+      daysSinceLastPurchase: 75, periodicityDays: 30, recentVolume3: 120,
+      previousVolume3: 240, averageMonthlyVolume: 80,
+    }), { latitude: -5.8, longitude: -35.2 });
+    expect(result).toMatchObject({ cycleDelayDays: 45, cycleDelayPercent: 150,
+      purchaseTrend: 'falling', potential: 'high' });
+    expect(result.reasons).toContain('45 dias além do ciclo (150% de atraso)');
+    expect(result.reasons).toContain('volume recente caiu 50%');
+  });
+
+  it('never puts two positioned consecutive stops more than 30 km apart on the same day', () => {
+    const result = proposal([
+      candidate(1, { location: { latitude: -5.8, longitude: -35.2 } }),
+      candidate(2, { location: { latitude: -5.8, longitude: -34.8 } }),
+    ]);
+    const assignedDays = result.days.flatMap(({ dayIndex, suggestions }) =>
+      suggestions.map(({ clientId }) => ({ clientId, dayIndex })));
+    expect(maxDailyLegDistanceKm).toBe(30);
+    expect(assignedDays.find(({ clientId }) => clientId === id(1))?.dayIndex)
+      .not.toBe(assignedDays.find(({ clientId }) => clientId === id(2))?.dayIndex);
+  });
+
+  it('keeps the latest positioned stop when an unpositioned address appears between stops', () => {
+    const result = proposal([
+      candidate(1, { location: { latitude: -5.8, longitude: -35.2 } }),
+      candidate(2, { location: null, hasNavigableAddress: true }),
+      candidate(3, { location: { latitude: -5.8, longitude: -34.8 } }),
+    ]);
+    const assignedDays = result.days.flatMap(({ dayIndex, suggestions }) =>
+      suggestions.map(({ clientId }) => ({ clientId, dayIndex })));
+    expect(assignedDays.find(({ clientId }) => clientId === id(1))?.dayIndex)
+      .not.toBe(assignedDays.find(({ clientId }) => clientId === id(3))?.dayIndex);
+  });
+
+  it('keeps an incompatible sixth geographic cluster explicit for manager review', () => {
+    const result = proposal(Array.from({ length: 6 }, (_, index) => candidate(index + 1, {
+      location: { latitude: -5.8, longitude: -35.2 + index * 0.4 },
+    })));
+    expect(result.counts).toMatchObject({ suggested: 5, needsReview: 1 });
+    expect(result.excluded).toContainEqual({ clientId: id(6), reason: 'daily_distance_limit' });
+  });
+
+  it('distinguishes weekly capacity overflow from geographic incompatibility', () => {
+    const result = proposal(Array.from({ length: 51 }, (_, index) => candidate(index + 1, {
+      location: { latitude: -5.8, longitude: -35.2 },
+    })));
+    expect(result.counts).toMatchObject({ suggested: 50, needsReview: 1 });
+    expect(result.excluded).toContainEqual({ clientId: id(51), reason: 'daily_capacity_reached' });
+  });
+
+  it('classifies weekly days as local or trip from the seller base city', () => {
+    const origin = { latitude: -5.8, longitude: -35.2 };
+    expect(classifyDailyRoute(origin, [{ latitude: -5.9, longitude: -35.25 }])).toBe('local');
+    expect(classifyDailyRoute(origin, [{ latitude: -6.6, longitude: -35.2 }])).toBe('trip');
+  });
+
+  it('selects only positioned clients inside a manager-drawn polygon', () => {
+    const polygon = [{ latitude: -6, longitude: -36 }, { latitude: -5, longitude: -36 },
+      { latitude: -5, longitude: -35 }, { latitude: -6, longitude: -35 }];
+    expect(pointInPolygon({ latitude: -5.5, longitude: -35.5 }, polygon)).toBe(true);
+    expect(pointInPolygon({ latitude: -4.9, longitude: -35.5 }, polygon)).toBe(false);
   });
 
   it('excludes inactive and unnavigable clients into explicit review groups', () => {

@@ -24,6 +24,12 @@ export const salesMetricsSchema = z
     intervalCount: count,
     averageMonthlyVolume: z.number().finite(),
     netVolume6: volume,
+    recentVolume3: volume.default(0),
+    previousVolume3: volume.default(0),
+    opportunitySegments: z
+      .array(z.enum(["first_line", "second_line", "motorcycle", "heavy"]))
+      .max(4)
+      .default([]),
     cycleState: z.enum([
       "no_history",
       "insufficient_history",
@@ -239,6 +245,12 @@ export const salesSignalStatsSchema = z
     purchaseDayCount12: count,
     intervalTotalDays12: z.number().int().nonnegative().max(366),
     netVolume6: volume,
+    recentVolume3: volume.default(0),
+    previousVolume3: volume.default(0),
+    opportunitySegments: z
+      .array(z.enum(["first_line", "second_line", "motorcycle", "heavy"]))
+      .max(4)
+      .default([]),
   })
   .strict();
 export const salesSignalBatchSchema = salesGenerationSchema

@@ -107,17 +107,21 @@ insert into sales414_input values
  (11,3,:'volume_start'::date+1,'return',-7,'RETURN-ONLY'),
  (12,4,:'volume_start'::date+1,'sale',777,'OTHER-CLIENT'),
  (13,7,(:'history_start'::date-interval '3 months')::date,'sale',9,'OLD-ONLY');
+insert into sales414_input values
+ (14,1,:'month_start','sale',1,'AUTOMOTIVA'),
+ (15,4,:'month_start','sale',1,'MOTO-REAL');
 -- 2.2 billion units proves the aggregate does not overflow PostgreSQL int4.
 insert into sales414_input select 100+n,8,:'volume_start'::date+2,'sale',1000000,'BIGINT-VOLUME' from generate_series(1,2200) n;
 select jsonb_agg(jsonb_build_object('sourceRow',source_row,'externalKey','S414-'||source_row,
  'clientExternalReference','4141'||lpad(client_number::text,10,'0'),'invoiceNumber','NF-'||source_row,
- 'saleDate',sale_date,'sku',sku,'productDescription','Synthetic battery','itemGroup','SLI','itemSubgroup','',
+ 'saleDate',sale_date,'sku',sku,'productDescription',case sku when 'AUTOMOTIVA' then 'Bateria automotiva'
+   when 'MOTO-REAL' then 'Bateria motocicleta' else 'Synthetic battery' end,'itemGroup','SLI','itemSubgroup','',
  'category','Leve','brand','Synthetic','line','','kind',kind,'volume',volume,
  'totalAmount',case when kind='return' then '-1.00' else '1.00' end) order by source_row) as rows from sales414_input \gset
 set local role authenticated;
 select set_config('request.jwt.claim.sub','41400000-0000-4000-8000-000000000001',true);
 select pg_temp.sales414_publish((:'rows')::jsonb,'41420000-0000-4000-8000-000000000001') as published \gset
-select is((:'published')::jsonb->>'sourceRowCount','2212','synthetic generation is complete, including large-volume facts');
+select is((:'published')::jsonb->>'sourceRowCount','2214','synthetic generation is complete, including large-volume facts');
 select api.get_sales_route_signals('41400000-0000-4000-8000-000000000003',
  array['41410000-0000-4000-8000-000000000008','41410000-0000-4000-8000-000000000007','41410000-0000-4000-8000-000000000003',
  '41410000-0000-4000-8000-000000000002','41410000-0000-4000-8000-000000000001']::uuid[]) as signal_batch \gset
@@ -135,9 +139,15 @@ select is((:'signal_batch')::jsonb->'signals'->0->>'lastPurchaseDate',:'month_st
 select is((:'signal_batch')::jsonb->'signals'->0->>'purchaseDayCount12','5','positive distinct days use twelve calendar months including current month');
 select is((:'signal_batch')::jsonb->'signals'->0->>'intervalTotalDays12',(:'month_start'::date-:'history_start'::date)::text,'interval sum is max minus min of distinct purchase dates');
 select is((:'signal_batch')::jsonb->'signals'->0->>'netVolume6','-10','signed six complete months include lower boundary and exclude current month');
+select ok((:'signal_batch')::jsonb->'signals'->0 ?& array['recentVolume3','previousVolume3','opportunitySegments'],
+ 'route signals expose recent trend windows and observed product opportunities');
+select ok((:'signal_batch')::jsonb->'signals'->0->'opportunitySegments' ? 'motorcycle',
+ 'automotiva is not motorcycle ownership while a real motorcycle product remains an opportunity');
 select is((:'signal_batch')::jsonb->'signals'->1,
  jsonb_build_object('client',jsonb_build_object('id','41410000-0000-4000-8000-000000000002','name','Sales414 client 2'),
- 'lastPurchaseDate',null,'purchaseDayCount12',0,'intervalTotalDays12',0,'netVolume6',0),'no-history client retained with explicit null and zero raw aggregates');
+ 'lastPurchaseDate',null,'purchaseDayCount12',0,'intervalTotalDays12',0,'netVolume6',0,
+ 'recentVolume3',0,'previousVolume3',0,'opportunitySegments','["motorcycle"]'::jsonb),
+ 'no-history client retained with explicit null and zero raw aggregates');
 select is((:'signal_batch')::jsonb->'signals'->2->'lastPurchaseDate','null'::jsonb,'return-only client has no positive purchase');
 select is((:'signal_batch')::jsonb->'signals'->2->>'purchaseDayCount12','0','return-only dates do not create purchase cadence');
 select is((:'signal_batch')::jsonb->'signals'->2->>'netVolume6','-7','return-only history may have negative registered volume');
@@ -277,7 +287,7 @@ select throws_ok(format('select api.get_sales_route_signals(%L,%L::uuid[],%L)',
  '41400000-0000-4000-8000-000000000003','{41410000-0000-4000-8000-000000000001}',(:'published')::jsonb->>'id'),
  'P0001','VERSION_CONFLICT','previously read generation conflicts after publication');
 reset role;
-select is((select count(*)::integer from private.sales_snapshot_lines where run_id=((:'published')::jsonb->>'id')::uuid),2212,'previous snapshot facts are retained');
+select is((select count(*)::integer from private.sales_snapshot_lines where run_id=((:'published')::jsonb->>'id')::uuid),2214,'previous snapshot facts are retained');
 select is((select count(*)::text from api.routes),:'route_count','reading signals never creates or publishes routes');
 select is((select count(*)::text from api.route_versions),:'version_count','reading signals never revises route composition');
 select * from finish();
