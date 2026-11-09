@@ -4,7 +4,7 @@ story_title: 'Experiencia movel compacta e acessivel para rota e visita'
 gate: PASS
 status_reason: 'A hierarquia movel foi compactada sem reduzir alvos de toque ou legibilidade, os estados operacionais ficaram explicitos e a paridade online/offline foi validada em testes unitarios, E2E e viewports moveis.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'commit:011d04263800de762b031056f7a4db9376cdf658'
+reviewed_revision: 'commit:59d76ac4366e5a6940cf140a0d406c4d492c8d57'
 updated: '2026-11-09T11:23:01-03:00'
 expires: '2026-11-23T11:23:01-03:00'
 top_issues: []
@@ -18,7 +18,7 @@ evidence:
     unit_passed: 838
     unit_skipped: 1
     production_build: PASS
-    e2e_route_visit_passed: 36
+    e2e_full_suite_passed: 122
     e2e_mobile_widths: [320, 390, 430]
     git_diff_check: PASS
     coderabbit: 'UNAVAILABLE: revisao manual do diff concluida sem findings bloqueantes.'
