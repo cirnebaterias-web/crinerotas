@@ -72,6 +72,15 @@ function validOrigin(value: string | undefined, protocol = 'https:') {
   } catch { return false; }
 }
 
+function validMapTileUrl(value: string | undefined) {
+  try {
+    const url = new URL(value ?? '');
+    const pathname = decodeURIComponent(url.pathname);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash &&
+      ['{z}', '{x}', '{y}'].every((placeholder) => pathname.includes(placeholder));
+  } catch { return false; }
+}
+
 function validTimeZone(value: string | undefined) {
   if (!value) return false;
   try {
@@ -135,6 +144,7 @@ function staticArtifactChecks(compose: string, caddyfile: string, dockerfile: st
     'Compose exige imagem/ambiente e rede interna.', 'Compose não preserva imagem/ambiente obrigatórios e rede interna.'),
     check('artifact.caddy-contract', caddyfile.includes('admin off') &&
       caddyfile.includes('reverse_proxy app:3000') && caddyfile.includes('wrap json') &&
+      caddyfile.includes('Referrer-Policy "strict-origin-when-cross-origin"') &&
       caddyfile.includes('log_append request_path {http.request.uri.path}') &&
       caddyfile.includes('request delete') && caddyfile.includes('resp_headers delete'),
     'Caddy desativa administração pública, usa upstream interno e redige logs.',
@@ -150,6 +160,7 @@ function resolvedComposeChecks(output: string, expectedImage: string | undefined
     const config = JSON.parse(output) as {
       services?: Record<string, {
         image?: string;
+        environment?: Record<string, string | null>;
         ports?: Array<{ published?: string | number; target?: string | number }>;
         networks?: Record<string, unknown>;
         read_only?: boolean;
@@ -165,6 +176,11 @@ function resolvedComposeChecks(output: string, expectedImage: string | undefined
     const appNetworks = Object.keys(app?.networks ?? {});
     const caddyNetworks = Object.keys(caddy?.networks ?? {});
     const caddyTargets = (caddy?.volumes ?? []).map((volume) => volume.target);
+    const tileUrl = app?.environment?.MANAGEMENT_MAP_TILE_URL ?? undefined;
+    const attribution = app?.environment?.MANAGEMENT_MAP_ATTRIBUTION ?? undefined;
+    const mapEnabled = Boolean(tileUrl) && Boolean(attribution);
+    const mapConfigurationValid = (!tileUrl && !attribution) ||
+      (mapEnabled && validMapTileUrl(tileUrl) && attribution!.trim().length > 0);
     return [
       check('compose.services', !!app && !!caddy && Object.keys(config.services ?? {}).length === 2,
         'Compose resolve exatamente aplicação e Caddy.', 'Compose deve resolver exatamente os serviços app e caddy.'),
@@ -181,6 +197,10 @@ function resolvedComposeChecks(output: string, expectedImage: string | undefined
         caddyTargets.includes('/etc/caddy/Caddyfile') && caddyTargets.includes('/data') && caddyTargets.includes('/config'),
       'Filesystems são somente leitura e certificados/configuração usam volumes próprios.',
       'Read-only ou volumes próprios do Caddy não foram resolvidos corretamente.'),
+      check('compose.management-map', mapConfigurationValid,
+        mapEnabled ? 'Mapa gerencial habilitado com tiles HTTPS e atribuição.' :
+          'Mapa gerencial não configurado; fallback textual permanecerá ativo.',
+        'Mapa gerencial deve definir URL HTTPS com {z}/{x}/{y} e atribuição juntas.'),
     ];
   } catch {
     return [{ id: 'compose.parse', status: 'fail', detail: 'Docker Compose não retornou configuração JSON válida.' }];

@@ -15,6 +15,10 @@ const resolvedCompose = JSON.stringify({
       image: `ghcr.io/cirnebaterias-web/cirne-rotas@sha256:${'a'.repeat(64)}`,
       read_only: true,
       networks: { app_internal: null, egress: null },
+      environment: {
+        MANAGEMENT_MAP_TILE_URL: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        MANAGEMENT_MAP_ATTRIBUTION: '&copy; OpenStreetMap contributors',
+      },
     },
     caddy: {
       read_only: true,
@@ -56,6 +60,8 @@ async function fixture(overrides: Record<string, string> = {}) {
     LOG_LEVEL: 'info',
     SUPABASE_PUBLIC_URL: 'https://project.supabase.co',
     SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_synthetic_value',
+    MANAGEMENT_MAP_TILE_URL: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    MANAGEMENT_MAP_ATTRIBUTION: '&copy; OpenStreetMap contributors',
     CONTABO_VPS_READY: 'confirmed', DNS_READY: 'confirmed', SMTP_READY: 'confirmed',
     SECRETS_READY: 'confirmed', BACKUP_EXTERNAL_READY: 'confirmed',
     MONITOR_EXTERNAL_READY: 'confirmed', ROLLBACK_DRILL_READY: 'confirmed',
@@ -69,7 +75,8 @@ async function fixture(overrides: Record<string, string> = {}) {
       '  caddy:', '    image: caddy:2.11.4-alpine', 'networks:', '  egress:', '  app_internal:', '    internal: true',
     ].join('\n')),
     writeFile(path.join(root, 'infrastructure/caddy/Caddyfile'), [
-      '{', '  admin off', '}', 'domain {', '  reverse_proxy app:3000', '  log {',
+      '{', '  admin off', '}', 'domain {', '  reverse_proxy app:3000',
+      '  header {', '    Referrer-Policy "strict-origin-when-cross-origin"', '  }', '  log {',
       '    format filter {', '      wrap json', '      fields {', '        request delete',
       '        resp_headers delete', '      }', '    }', '  }',
       '  log_append request_path {http.request.uri.path}', '}',
@@ -131,6 +138,20 @@ it('fails closed when Docker Compose cannot resolve the manifest', async () => {
   expect(result.status).toBe('invalid');
   expect(JSON.stringify(result)).not.toContain('token-that-must-not-leak');
   expect(result.checks).toContainEqual(expect.objectContaining({ id: 'dependency.compose', status: 'fail' }));
+});
+
+it('rejects incomplete or invalid map configuration resolved by Docker Compose', async () => {
+  const setup = await fixture();
+  const result = await pilotVpsPreflight({ ...setup, scope: 'artifact', platform: 'linux' },
+    async (command, args) => {
+      if (command === 'git') return { ok: true, output: 'b'.repeat(40) };
+      if (args[0] === 'image') return { ok: true, output: 'b'.repeat(40) };
+      const config = JSON.parse(resolvedCompose);
+      config.services.app.environment = { MANAGEMENT_MAP_TILE_URL: 'http://tiles.example.test/{z}/{x}/{y}.png' };
+      return { ok: true, output: JSON.stringify(config) };
+    });
+  expect(result.status).toBe('invalid');
+  expect(result.checks).toContainEqual(expect.objectContaining({ id: 'compose.management-map', status: 'fail' }));
 });
 
 it('rejects a resolved app image or revision that differs from the approved release', async () => {
