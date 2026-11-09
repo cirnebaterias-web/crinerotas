@@ -468,6 +468,10 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .seller-app { scroll-padding-top: 76px; }
   .seller-app :focus-visible { scroll-margin-top: 76px; }
 }
+@media (max-width: 360px) {
+  .seller-topbar-inner { gap: 6px; padding-inline: 12px; }
+  .seller-account .seller-avatar { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .seller-app *, .seller-app *::before, .seller-app *::after { animation: none !important; transition: none !important; }
 }
