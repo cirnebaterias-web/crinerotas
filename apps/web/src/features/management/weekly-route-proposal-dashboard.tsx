@@ -8,7 +8,7 @@ import { clientListResponseSchema, clientSellerListResponseSchema, clientSellers
 import type { ManagementMapPublicConfig } from '@cirne/config/server';
 import { approximateDistanceKm, classifyDailyRoute } from '@cirne/domain';
 import { WeeklyRoutePlanningMap } from './weekly-route-planning-map';
-import { scrapRequest } from '../scrap/scrap-ui';
+import { ScrapRequestError, scrapRequest } from '../scrap/scrap-ui';
 
 const endpoint = '/api/v1/management/weekly-route-proposals';
 const headers = { 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
@@ -72,7 +72,11 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
       const parameters = new URLSearchParams({ sellerId, weekStart });
       setPlanning(weeklyRoutePlanningResponseSchema.parse(await scrapRequest(`${endpoint}?${parameters}`)));
       setMessage('Sugestão criada como rascunho. Revise antes de publicar.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível gerar a sugestão.'); }
+    } catch (error) {
+      setMessage(error instanceof ScrapRequestError && error.status === 422 && error.serverMessage
+        ? error.serverMessage
+        : error instanceof Error ? error.message : 'Não foi possível gerar a sugestão.');
+    }
     finally { setBusy(false); }
   }
 

@@ -2,20 +2,20 @@ schema: 1
 story: '4.30'
 story_title: 'Planejamento inteligente e geografico das rotas comerciais'
 gate: PASS
-status_reason: 'Aplicação, migração em banco limpo e suíte pgTAP foram validadas; todos os critérios de aceite possuem cobertura e não há bloqueadores conhecidos.'
+status_reason: 'Hotfix pós-deploy alinha o validador SQL aos motivos de exclusão do domínio, preserva privilégios mínimos e possui regressão pgTAP; não há bloqueadores conhecidos.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'working-tree:be625f19b5c032c52cac081dda43be46bbd76d79@c045c21'
-updated: '2026-11-09T15:10:00-03:00'
+reviewed_revision: 'working-tree:e61fa58c6040237e1d4786fb971abc2df1a0a76e@adf86a3'
+updated: '2026-11-09T18:05:00-03:00'
 
 top_issues: []
 waiver:
   active: false
 
 quality_score: 100
-expires: '2026-11-23T15:10:00-03:00'
+expires: '2026-11-23T18:05:00-03:00'
 
 evidence:
-  tests_reviewed: 2325
+  tests_reviewed: 2327
   risks_identified: 0
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
@@ -24,13 +24,13 @@ evidence:
 nfr_validation:
   security:
     status: PASS
-    notes: 'GET mantém autenticação, papéis, capability e escopo do vendedor; tooltips usam textContent e não interpolam HTML não confiável.'
+    notes: 'Autenticação, capability e escopo permanecem inalterados; CREATE temporário no schema privado e membership de migration são revogados na mesma transação.'
   performance:
     status: PASS
     notes: 'RPC é limitada a lotes de 50 e a CTE de vendas foi materializada; filtros do mapa são locais e memoizados.'
   reliability:
     status: PASS
-    notes: 'Reset em banco limpo concluído; 1.480 testes pgTAP, 845 testes unitários e o E2E específico passaram.'
+    notes: '1.482 testes pgTAP e 845 testes unitários passaram; regressões cobrem exclusões por distância e capacidade.'
   maintainability:
     status: PASS
     notes: 'Regras geográficas e comerciais permanecem em domínio puro, com contratos versionados, migrations reproduzíveis e testes determinísticos.'
