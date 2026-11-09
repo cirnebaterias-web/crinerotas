@@ -70,6 +70,9 @@ export function syntheticClientSales(
       intervalCount: 2,
       averageMonthlyVolume: 3,
       netVolume6: 18,
+      recentVolume3: 13,
+      previousVolume3: 5,
+      opportunitySegments: ["second_line"],
       cycleState: "cycle_exceeded",
     },
     chart: [0, 10, -5, 0, 8, 5].map((netVolume, index) => ({

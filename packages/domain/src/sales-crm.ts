@@ -63,6 +63,9 @@ export function salesMetricsFromStats(
     intervalCount: intervals,
     averageMonthlyVolume: stats.netVolume6 / 6,
     netVolume6: stats.netVolume6,
+    recentVolume3: stats.recentVolume3 ?? 0,
+    previousVolume3: stats.previousVolume3 ?? 0,
+    opportunitySegments: stats.opportunitySegments ?? [],
     cycleState:
       days === null
         ? "no_history"
@@ -222,6 +225,9 @@ export function calculateClientSales(
           ? 0
           : dayNumber(positiveDates.at(-1)!) - dayNumber(positiveDates[0]!),
       netVolume6: chart.reduce((total, point) => total + point.netVolume, 0),
+      previousVolume3: chart.slice(0, 3).reduce((total, point) => total + point.netVolume, 0),
+      recentVolume3: chart.slice(3).reduce((total, point) => total + point.netVolume, 0),
+      opportunitySegments: [],
     },
     metadata.asOfDate,
   );

@@ -54,6 +54,9 @@ export const weeklyRouteCandidateSchema = z.object({
   daysSinceLastPurchase: z.number().int().nonnegative().nullable(),
   periodicityDays: z.number().positive().nullable(),
   averageMonthlyVolume: z.number().finite().nonnegative().nullable(),
+  recentVolume3: z.number().finite().nullable().default(null),
+  previousVolume3: z.number().finite().nullable().default(null),
+  opportunitySegments: z.array(z.enum(['first_line', 'second_line', 'motorcycle', 'heavy'])).max(4).default([]),
   scrapDebtKg: z.number().finite().nonnegative().nullable(),
   scrapBalanceState: z.enum(['debtor', 'creditor', 'settled', 'unavailable']).default('unavailable'),
   location: coordinateSchema.nullable(),
@@ -61,8 +64,33 @@ export const weeklyRouteCandidateSchema = z.object({
 }).strict();
 export type WeeklyRouteCandidate = z.infer<typeof weeklyRouteCandidateSchema>;
 
+export const weeklyRoutePlanningCandidateSchema = weeklyRouteCandidateSchema.extend({
+  score: z.number().finite().nonnegative(),
+  distanceFromBaseKm: z.number().finite().nonnegative().nullable(),
+  cycleDelayDays: z.number().finite().nonnegative().nullable(),
+  cycleDelayPercent: z.number().finite().nonnegative().nullable(),
+  purchaseTrend: z.enum(['growing', 'falling', 'stable', 'unavailable']),
+  potential: z.enum(['high', 'medium', 'standard']),
+  reasons: z.array(z.string().min(1).max(180)).min(1).max(5),
+}).strict();
+export type WeeklyRoutePlanningCandidate = z.infer<typeof weeklyRoutePlanningCandidateSchema>;
+
+export const weeklyRoutePlanningResponseSchema = z.object({
+  schemaVersion: z.literal(1),
+  weekStart: z.iso.date(),
+  sellerId: z.uuid(),
+  origin: weeklyRouteBaseCityOriginSchema,
+  generatedAt: z.iso.datetime({ offset: true }),
+  maxLegDistanceKm: z.literal(30),
+  candidates: z.array(weeklyRoutePlanningCandidateSchema).max(5000),
+  counts: z.object({ total: z.number().int().nonnegative(), eligible: z.number().int().nonnegative(),
+    positioned: z.number().int().nonnegative(), inactiveLost: z.number().int().nonnegative() }).strict(),
+}).strict();
+export type WeeklyRoutePlanningResponse = z.infer<typeof weeklyRoutePlanningResponseSchema>;
+
 export const weeklyRouteExclusionReasonSchema = z.enum([
   'inactive_lost', 'no_purchase_history', 'client_not_active', 'no_navigable_location',
+  'daily_distance_limit', 'daily_capacity_reached',
 ]);
 export type WeeklyRouteExclusionReason = z.infer<typeof weeklyRouteExclusionReasonSchema>;
 

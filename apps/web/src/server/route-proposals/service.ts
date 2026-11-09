@@ -1,10 +1,11 @@
 import { clientListResponseSchema, dailySellerLocationSchema, decideWeeklyRouteProposalRequestSchema,
   persistedWeeklyRouteProposalSchema, reviseWeeklyRouteProposalRequestSchema,
   saveWeeklyRouteProposalRequestSchema, sellerRouteProfileSchema, weeklyRouteProposalRequestSchema,
-  weeklyRouteProposalSchema, type DecideWeeklyRouteProposalRequest, type ImportedClient,
+  weeklyRoutePlanningResponseSchema, weeklyRouteProposalSchema,
+  type DecideWeeklyRouteProposalRequest, type ImportedClient,
   type ReviseWeeklyRouteProposalRequest,
   type WeeklyRouteProposalRequest } from '@cirne/contracts';
-import { proposeWeeklyRoutes, SellerBaseCityNotConfiguredError,
+import { analyzeWeeklyRouteCandidate, maxDailyLegDistanceKm, proposeWeeklyRoutes, SellerBaseCityNotConfiguredError,
   weeklyProposalReadiness } from '@cirne/domain';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -117,6 +118,9 @@ export async function generateWeeklyProposal(client: SupabaseClient, command: We
         daysSinceLastPurchase: metrics?.daysSinceLastPurchase ?? null,
         periodicityDays: metrics?.periodicityDays ?? null,
         averageMonthlyVolume: metrics?.averageMonthlyVolume ?? null,
+        recentVolume3: metrics?.recentVolume3 ?? null,
+        previousVolume3: metrics?.previousVolume3 ?? null,
+        opportunitySegments: metrics?.opportunitySegments ?? [],
         scrapDebtKg: debts.debts.get(customer.externalReference)?.debtKg ?? null,
         scrapBalanceState: debts.debts.get(customer.externalReference)?.state ?? 'unavailable',
         location: customer.latitude !== null && customer.longitude !== null
@@ -124,6 +128,60 @@ export async function generateWeeklyProposal(client: SupabaseClient, command: We
         hasNavigableAddress: Boolean(customer.googleLocation?.placeId || customer.googleLocation?.address || customer.address.trim()),
       };
     }) }));
+}
+
+export async function getWeeklyRoutePlanningCandidates(client: SupabaseClient,
+  command: WeeklyRouteProposalRequest, now = new Date()) {
+  const parsed = weeklyRouteProposalRequestSchema.parse(command);
+  const seller = (await listManagedClientSellers(client)).sellers.find(({ id }) => id === parsed.sellerId);
+  if (!seller) throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Vendedor não encontrado.', false);
+  const persisted = sellerRouteProfileSchema.parse(await clientImportRpc(client, 'get_seller_route_profile', {
+    p_seller_id: parsed.sellerId,
+  }));
+  const readiness = weeklyProposalReadiness(persisted, now);
+  if (!readiness.ready) {
+    const messages = { portfolio_unassigned: 'A carteira está sem titular.',
+      seller_inactive: 'O desligamento do vendedor já entrou em vigor.',
+      base_city_missing: 'A cidade-base do vendedor ainda não foi configurada.' } as const;
+    throw new RouteRequestError(422, 'VALIDATION_FAILED', messages[readiness.reason], false);
+  }
+  const origin = readiness.origin;
+  const portfolio = await listPortfolio(client, parsed.sellerId);
+  const [signals, debts] = await Promise.all([
+    readSignals(client, parsed.sellerId, parsed.weekStart, portfolio, now), readScrapDebts(client),
+  ]);
+  const all = portfolio.map((customer) => {
+    const metrics = signals.byId.get(customer.id);
+    return { clientId: customer.id, name: customer.name,
+      status: customer.status === 'active' ? 'active' as const : 'inactive' as const,
+      daysSinceLastPurchase: metrics?.daysSinceLastPurchase ?? null,
+      periodicityDays: metrics?.periodicityDays ?? null,
+      averageMonthlyVolume: metrics?.averageMonthlyVolume ?? null,
+      recentVolume3: metrics?.recentVolume3 ?? null,
+      previousVolume3: metrics?.previousVolume3 ?? null,
+      opportunitySegments: metrics?.opportunitySegments ?? [],
+      scrapDebtKg: debts.debts.get(customer.externalReference)?.debtKg ?? null,
+      scrapBalanceState: debts.debts.get(customer.externalReference)?.state ?? 'unavailable' as const,
+      location: customer.latitude !== null && customer.longitude !== null
+        ? { latitude: customer.latitude, longitude: customer.longitude } : null,
+      hasNavigableAddress: Boolean(customer.googleLocation?.placeId
+        || customer.googleLocation?.address || customer.address.trim()) };
+  });
+  const eligible = all.filter((candidate) => candidate.status === 'active'
+    && candidate.daysSinceLastPurchase !== null && candidate.daysSinceLastPurchase <= 180
+    && (candidate.location !== null || candidate.hasNavigableAddress));
+  const candidates = eligible.map((candidate) => {
+    const analysis = analyzeWeeklyRouteCandidate(candidate, origin);
+    return { ...candidate, score: analysis.score, distanceFromBaseKm: analysis.distance,
+      cycleDelayDays: analysis.cycleDelayDays, cycleDelayPercent: analysis.cycleDelayPercent,
+      purchaseTrend: analysis.purchaseTrend, potential: analysis.potential, reasons: analysis.reasons };
+  }).sort((left, right) => right.score - left.score || left.name.localeCompare(right.name, 'pt-BR'));
+  return weeklyRoutePlanningResponseSchema.parse({ schemaVersion: 1, weekStart: parsed.weekStart,
+    sellerId: parsed.sellerId, origin, generatedAt: now.toISOString(), maxLegDistanceKm: maxDailyLegDistanceKm,
+    candidates, counts: { total: all.length, eligible: candidates.length,
+      positioned: candidates.filter(({ location }) => location !== null).length,
+      inactiveLost: all.filter(({ daysSinceLastPurchase }) =>
+        daysSinceLastPurchase !== null && daysSinceLastPurchase > 180).length } });
 }
 
 export async function generateAndSaveWeeklyProposal(client: SupabaseClient,

@@ -1,0 +1,43 @@
+schema: 1
+story: '4.30'
+story_title: 'Planejamento inteligente e geografico das rotas comerciais'
+gate: PASS
+status_reason: 'Aplicação, migração em banco limpo e suíte pgTAP foram validadas; todos os critérios de aceite possuem cobertura e não há bloqueadores conhecidos.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'working-tree:be625f19b5c032c52cac081dda43be46bbd76d79@c045c21'
+updated: '2026-11-09T15:10:00-03:00'
+
+top_issues: []
+waiver:
+  active: false
+
+quality_score: 100
+expires: '2026-11-23T15:10:00-03:00'
+
+evidence:
+  tests_reviewed: 2325
+  risks_identified: 0
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    ac_gaps: []
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'GET mantém autenticação, papéis, capability e escopo do vendedor; tooltips usam textContent e não interpolam HTML não confiável.'
+  performance:
+    status: PASS
+    notes: 'RPC é limitada a lotes de 50 e a CTE de vendas foi materializada; filtros do mapa são locais e memoizados.'
+  reliability:
+    status: PASS
+    notes: 'Reset em banco limpo concluído; 1.480 testes pgTAP, 845 testes unitários e o E2E específico passaram.'
+  maintainability:
+    status: PASS
+    notes: 'Regras geográficas e comerciais permanecem em domínio puro, com contratos versionados, migrations reproduzíveis e testes determinísticos.'
+
+recommendations:
+  immediate: []
+  future:
+    - action: 'Medir o tempo da RPC com a planilha real e considerar cache dos quatro segmentos observados se o volume crescer materialmente.'
+      refs:
+        - 'apps/web/src/server/route-proposals/service.ts'

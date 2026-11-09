@@ -45,7 +45,8 @@ describe('client sales analytics: explicit observed windows', () => {
       chart: { from: '2026-05-01', through: '2026-10-31', monthCount: 6 } });
     expect(result.metrics).toEqual({ lastPurchaseDate: '2026-10-21', daysSinceLastPurchase: 13,
       periodicityDays: 10, positivePurchaseDateCount: 3, intervalCount: 2, averageMonthlyVolume: 17 / 6,
-      netVolume6: 17, cycleState: 'cycle_exceeded' });
+      netVolume6: 17, previousVolume3: 0, recentVolume3: 17, opportunitySegments: [],
+      cycleState: 'cycle_exceeded' });
     expect(result.chart.map((point) => point.netVolume)).toEqual([0, 0, 0, 0, -3, 20]);
     expect(result.chart[4]).toMatchObject({ salesVolume: 0, returnVolume: -3, hasRecords: true });
     expect(result.chart[0]?.hasRecords).toBe(false);
@@ -124,8 +125,12 @@ describe('client sales analytics: explicit observed windows', () => {
     expect(salesCrmContext({ ...metadata, observedThrough: '2026-10-30' }, now).coverageLimited).toBe(true);
   });
   it('derives the same cycle from sufficient SQL statistics and rejects impossible stats', () => {
-    expect(salesMetricsFromStats({ lastPurchaseDate: '2026-10-21', purchaseDayCount12: 3, intervalTotalDays12: 20, netVolume6: 17 }, metadata.asOfDate))
+    expect(salesMetricsFromStats({ lastPurchaseDate: '2026-10-21', purchaseDayCount12: 3,
+      intervalTotalDays12: 20, netVolume6: 17, recentVolume3: 17, previousVolume3: 0,
+      opportunitySegments: [] }, metadata.asOfDate))
       .toEqual(calculate([row('2026-10-01', 5), row('2026-10-11', 6), row('2026-10-21', 6)]).metrics);
-    expect(() => salesMetricsFromStats({ lastPurchaseDate: '2026-11-04', purchaseDayCount12: 1, intervalTotalDays12: 0, netVolume6: 0 }, metadata.asOfDate)).toThrow();
+    expect(() => salesMetricsFromStats({ lastPurchaseDate: '2026-11-04', purchaseDayCount12: 1,
+      intervalTotalDays12: 0, netVolume6: 0, recentVolume3: 0, previousVolume3: 0,
+      opportunitySegments: [] }, metadata.asOfDate)).toThrow();
   });
 });
