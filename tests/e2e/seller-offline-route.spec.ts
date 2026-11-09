@@ -84,6 +84,40 @@ async function mockSeller(page: Page, currentRoute: () => CanonicalRoute = () =>
   });
 }
 
+test('keeps the mobile route compact, readable and sticky at supported widths', async ({ browser, baseURL }) => {
+  const denseRoute: CanonicalRoute = {
+    ...route,
+    stops: Array.from({ length: 10 }, (_, index) => ({
+      ...route.stops[0]!,
+      routeVersionStopId: id(100 + index),
+      executionOrder: index + 1,
+      plannedOrder: index + 1,
+      client: {
+        ...route.stops[0]!.client,
+        id: id(200 + index),
+        name: `Cliente móvel ${index + 1}`,
+        address: `Rua móvel, ${index + 1} — Recife, PE`,
+      },
+    })),
+  };
+  for (const width of [320, 390, 430]) {
+    const mobileContext = await browser.newContext({ baseURL, viewport: { width, height: 844 }, serviceWorkers: 'block' });
+    const page = await mobileContext.newPage();
+    await mockSeller(page, () => denseRoute);
+    await page.goto('/route');
+    const context = page.locator('.seller-context-bar');
+    await expect(context).toBeVisible();
+    await expect(context).toContainText('0/10 concluídas');
+    const progressHeight = await page.locator('.seller-overview .seller-progress').evaluate((element) => element.getBoundingClientRect().height);
+    expect(progressHeight).toBeLessThanOrEqual(112);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.evaluate(() => window.scrollTo(0, 700));
+    await expect.poll(() => context.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBeLessThanOrEqual(9);
+    await expect(page.getByText('Rua móvel, 1 — Recife, PE', { exact: true })).toHaveCount(1);
+    await mobileContext.close();
+  }
+});
+
 test('Google destination survives route caching and offline reopening without changing old coordinates', async ({ page, context }) => {
   const googleLocation = { address: 'Av. Google sintética, 100', placeId: 'EjR_synthetic-123', status: 'REVISAR_ENDERECO_PARCIAL', precision: 'RANGE_INTERPOLATED' };
   const withGoogle: CanonicalRoute = { ...route, stops: route.stops.map((stop) => ({ ...stop,
