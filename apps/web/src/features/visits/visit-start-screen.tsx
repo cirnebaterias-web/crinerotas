@@ -17,6 +17,12 @@ import { VisitScrapStep } from './scrap/visit-scrap-step';
 
 type VisitScreenStep = 'start' | 'stock' | 'competitor-stock' | 'stock-photos' | 'prices' | 'actions' | 'scrap' | 'review' | 'complete';
 
+const visitStepLabels: Record<VisitScreenStep, string> = {
+  start: 'Tarefas', stock: 'Estoque 1/3', 'competitor-stock': 'Estoque 2/3',
+  'stock-photos': 'Estoque 3/3', prices: 'Preços', actions: 'Ações', scrap: 'Sucata',
+  review: 'Revisão', complete: 'Concluída',
+};
+
 export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const controllerRef = useRef<VisitStartController | null>(null);
   const nextStepTitleRef = useRef<HTMLHeadingElement>(null);
@@ -245,9 +251,12 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         <a className="seller-button seller-primary" href="/route">Voltar para a rota</a>
       </section>}
       {state === 'ready' && draft && <div className="seller-visit-start">
+        <div className="seller-context-bar seller-visit-context" aria-label={`Visita a ${draft.client?.name ?? 'cliente'}, etapa ${visitStepLabels[step]}`}>
+          <span><strong>{draft.client?.name ?? 'Atendimento salvo'}</strong><small title={draft.client?.address}>{draft.client?.address ?? 'Endereço não informado'}</small></span>
+          <span>{visitStepLabels[step]}</span>
+        </div>
         <p className="seller-kicker">VISITA EM ANDAMENTO</p>
         <h1>{draft.client?.name ?? 'Atendimento salvo'}<span className="seller-heading-dot">.</span></h1>
-        {draft.client?.address && <p className="seller-muted">{draft.client.address}</p>}
         {step === 'start' && <section className="seller-progress" aria-labelledby="visit-state-title">
           <h2 id="visit-state-title">Início da visita</h2>
           <p><strong>{draft.persistenceState === 'synced' ? 'Sincronizada' : 'Salva no aparelho'}</strong></p>
@@ -263,23 +272,23 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         {step === 'start' && draft.localStatus !== 'completed' && <section className="seller-task-list" aria-labelledby="visit-tasks-title">
           <p className="seller-kicker">TAREFAS DA VISITA</p>
           <h2 id="visit-tasks-title">O que você vai coletar?</h2>
-          <button className="seller-task-card" onClick={openStockCollection}
+          <button className="seller-task-card" data-state={stockComplete ? 'completed' : draft.stock ? 'in_progress' : 'available'} onClick={openStockCollection}
             aria-label={`Coleta de estoque, ${stockComplete ? 'concluída. Abrir detalhes' : 'pendente. Abrir coleta'}`}>
             <span><strong>Coleta de estoque</strong><small>Produtos próprios, concorrência e fotos</small></span>
-            <span>{stockComplete ? 'Concluído' : draft.stock ? 'Continuar coleta' : 'Iniciar'}</span>
+            <span>{stockComplete ? '✓ Concluído' : draft.stock ? 'Continuar' : 'Iniciar'}</span>
           </button>
-          <button className="seller-task-card" disabled={!stockComplete}
+          <button className="seller-task-card" data-state={!stockComplete ? 'locked' : draft.prices ? 'completed' : 'available'} disabled={!stockComplete}
             onClick={() => navigateStep('prices')}>
             <span><strong>Preços da concorrência</strong><small>Cotações e indisponibilidade</small></span>
-            <span>{draft.prices ? 'Editar' : stockComplete ? 'Iniciar' : 'Após concluir estoque'}</span>
+            <span>{draft.prices ? '✓ Concluído' : stockComplete ? 'Iniciar' : '🔒 Após estoque'}</span>
           </button>
-          <button className="seller-task-card" disabled={!draft.prices} onClick={() => navigateStep('actions')}>
+          <button className="seller-task-card" data-state={!draft.prices ? 'locked' : draft.commercialActions ? 'completed' : 'available'} disabled={!draft.prices} onClick={() => navigateStep('actions')}>
             <span><strong>Ações comerciais</strong><small>Heliar e concorrência</small></span>
-            <span>{draft.commercialActions ? 'Editar' : draft.prices ? 'Iniciar' : 'Após preços'}</span>
+            <span>{draft.commercialActions ? '✓ Concluído' : draft.prices ? 'Iniciar' : '🔒 Após preços'}</span>
           </button>
-          <button className="seller-task-card" disabled={!draft.commercialActions} onClick={() => navigateStep('scrap')}>
+          <button className="seller-task-card" data-state={!draft.commercialActions ? 'locked' : draft.scrap ? 'completed' : 'available'} disabled={!draft.commercialActions} onClick={() => navigateStep('scrap')}>
             <span><strong>Sucata</strong><small>Coleta realizada, agendamento ou sem sucata</small></span>
-            <span>{draft.scrap ? 'Ver registro' : draft.commercialActions ? 'Iniciar' : 'Após ações comerciais'}</span>
+            <span>{draft.scrap ? '✓ Concluído' : draft.commercialActions ? 'Iniciar' : '🔒 Após ações'}</span>
           </button>
         </section>}
         {showStockStep && <><p className="seller-kicker" role="status">ESTOQUE · ETAPA 1 DE 3 · PRODUTOS PRÓPRIOS</p><VisitStockStep

@@ -21,7 +21,7 @@ export function NavigationActions({ client, offline, busy }: {
   }
 
   return <div className="seller-navigation">
-    <ClientLocationSource location={client.googleLocation} />
+    <ClientLocationSource location={client.googleLocation} hideAddress />
     <div className="seller-navigation-buttons">
       {disabled ? <button className="seller-button seller-primary" disabled aria-describedby={descriptionId}>Navegar <span aria-hidden="true">↗</span></button>
         : <a className="seller-button seller-primary" href={url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"

@@ -101,7 +101,8 @@ test('Google destination survives route caching and offline reopening without ch
   await page.unrouteAll({ behavior: 'wait' });
   await context.setOffline(true);
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(page.getByText(`Endereço Google: ${googleLocation.address}`)).toBeVisible();
+  await expect(page.getByText(`Endereço Google: ${googleLocation.address}`)).toHaveCount(0);
+  await expect(page.getByText(/Place ID: Informado na fonte/)).toBeVisible();
   await expect(page.getByRole('button', { name: /^Navegar/ })).toBeDisabled();
   await expect(page.getByText(/ainda não validada em campo/)).toBeVisible();
 });

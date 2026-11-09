@@ -20,7 +20,8 @@ describe('navigation source metadata', () => {
   it('retains source information offline, but does not offer external navigation', () => {
     const html = renderToStaticMarkup(<NavigationActions client={client} offline busy={false} />);
     expect(html).not.toContain('href=');
-    expect(html).toContain('Endereço Google');
+    expect(html).not.toContain('Endereço Google');
+    expect(html).toContain('Place ID: Informado na fonte');
     expect(html).toContain('Copiar endereço');
   });
   it('keeps old snapshots navigable with an explicit missing-source state', () => {
