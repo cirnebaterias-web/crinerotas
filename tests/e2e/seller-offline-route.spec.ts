@@ -110,7 +110,11 @@ test('keeps the mobile route compact, readable and sticky at supported widths', 
     await expect(context).toContainText('0/10 concluídas');
     const progressHeight = await page.locator('.seller-overview .seller-progress').evaluate((element) => element.getBoundingClientRect().height);
     expect(progressHeight).toBeLessThanOrEqual(112);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    const overflow = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('body *'))
+      .filter((element) => element.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+      .map((element) => ({ tag: element.tagName, className: element.className,
+        right: Math.round(element.getBoundingClientRect().right), width: element.scrollWidth })));
+    expect(overflow).toEqual([]);
     await page.evaluate(() => window.scrollTo(0, 700));
     await expect.poll(() => context.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBeLessThanOrEqual(9);
     await expect(page.getByText('Rua móvel, 1 — Recife, PE', { exact: true })).toHaveCount(1);

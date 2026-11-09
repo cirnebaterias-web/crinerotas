@@ -463,7 +463,7 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .seller-state { padding: 40px 8px; }
   .seller-task-card { min-height: 64px; padding: 12px; border-radius: 12px; }
   .seller-task-card small { font-size: 13px; }
-  .seller-visit-start > h1, .seller-visit-start > .seller-kicker { display: none; }
+  .seller-active-visit > h1, .seller-active-visit > .seller-kicker { display: none; }
   .seller-visit-context { top: 8px; margin-bottom: 16px; }
   .seller-app { scroll-padding-top: 76px; }
   .seller-app :focus-visible { scroll-margin-top: 76px; }

@@ -161,7 +161,7 @@ export function OfflineRouteScreen() {
       {result?.kind === 'blocked' && <section className="seller-state"><h2>Acesso local bloqueado</h2><p>{result.message}</p><a className="seller-button seller-primary" href="/login">Entrar quando houver conexão</a></section>}
       {result?.kind === 'empty' && <section className="seller-state"><h2>Sem rota offline</h2><p>{result.message}</p><a className="seller-button seller-primary" href="/route">Tentar carregar minha rota</a></section>}
       {result?.kind === 'ready' && !route && <section className="seller-state"><h2>Rota real ainda não salva</h2><p>Conecte-se e abra sua rota publicada uma vez. A demonstração local nunca substitui seus dados.</p><a className="seller-button seller-primary" href="/route">Tentar carregar minha rota</a></section>}
-      {route && bundle && <div className="seller-context-bar" role="status" aria-label={`Rota offline, ${progress.completed} de ${progress.total} visitas concluídas`}>
+      {route && bundle && <div className="seller-context-bar" aria-label={`Rota offline, ${progress.completed} de ${progress.total} visitas concluídas`}>
         <span><strong>Hoje</strong><small>{progress.completed}/{progress.total} concluídas</small></span>
         <span className="is-offline">Offline</span>
       </div>}

@@ -267,7 +267,7 @@ export function RouteScreen() {
       {!busy && loginRequired && <section className="seller-state"><span className="seller-state-icon" aria-hidden="true">↗</span><h2>Entre para ver sua rota</h2><p>Use sua conta de vendedor para acessar o roteiro do dia.</p><a className="seller-button seller-primary" href="/login">Ir para o login</a></section>}
       {!busy && !loginRequired && !today && <section className="seller-state"><h2>Vamos tentar de novo?</h2><p>A indisponibilidade não significa que você está sem rota.</p><button className="seller-button seller-primary" onClick={() => void load()}>Tentar novamente</button></section>}
       {today?.availability === 'empty' && <section className="seller-state"><span className="seller-state-icon" aria-hidden="true">☷</span><h2>Nenhuma rota publicada para hoje</h2><p>Assim que sua rota for publicada, as paradas aparecerão aqui. Consulte seu gestor.</p><button className="seller-button seller-primary" onClick={() => void load()} disabled={busy}>Atualizar rota</button></section>}
-      {route && <div className="seller-context-bar" role="status" aria-label={`Rota de hoje, ${progress.completed} de ${progress.total} visitas concluídas, ${offline ? 'sem conexão' : 'online'}`}>
+      {route && <div className="seller-context-bar" aria-label={`Rota de hoje, ${progress.completed} de ${progress.total} visitas concluídas, ${offline ? 'sem conexão' : 'online'}`}>
         <span><strong>Hoje</strong><small>{progress.completed}/{progress.total} concluídas</small></span>
         <span className={offline ? 'is-offline' : ''}>{offline ? 'Sem conexão' : 'Online'}</span>
       </div>}

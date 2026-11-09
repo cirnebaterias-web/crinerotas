@@ -250,7 +250,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         <p>Abra a rota salva e inicie ou continue a visita pela parada correspondente.</p>
         <a className="seller-button seller-primary" href="/route">Voltar para a rota</a>
       </section>}
-      {state === 'ready' && draft && <div className="seller-visit-start">
+      {state === 'ready' && draft && <div className="seller-visit-start seller-active-visit">
         <div className="seller-context-bar seller-visit-context" aria-label={`Visita a ${draft.client?.name ?? 'cliente'}, etapa ${visitStepLabels[step]}`}>
           <span><strong>{draft.client?.name ?? 'Atendimento salvo'}</strong><small title={draft.client?.address}>{draft.client?.address ?? 'Endereço não informado'}</small></span>
           <span>{visitStepLabels[step]}</span>
