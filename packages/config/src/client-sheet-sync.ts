@@ -9,6 +9,9 @@ const schema = z.object({
   GOOGLE_CLIENT_SYNC_SCHEDULER_ACTOR_ID: z.preprocess((v) => v === '' ? undefined : v, z.uuid().transform((id) => id.toLowerCase()).optional()),
 });
 export function normalizePortfolio(value: string) { return value.normalize('NFKC').trim().toUpperCase(); }
+export type ClientPortfolioMappingsState =
+  | { configured: true; portfolios: Record<string, string> }
+  | { configured: false; reason: 'missing_configuration' | 'invalid_configuration' };
 export type ClientSheetConfig = {
   spreadsheetId: string; email: string; privateKey: string; portfolios: Record<string, string>;
   scheduleEnabled: boolean; schedulerActorId?: string;
@@ -17,23 +20,17 @@ export type ClientSheetConfigState =
   | { configured: true; reason: 'ready'; config: ClientSheetConfig }
   | { configured: false; reason: 'disabled' | 'missing_configuration' | 'invalid_configuration' };
 
-export function readClientSheetSyncConfig(env: Record<string, string | undefined>): ClientSheetConfigState {
-  if (env.GOOGLE_CLIENT_SYNC_ENABLED === undefined || env.GOOGLE_CLIENT_SYNC_ENABLED === 'false') {
-    return { configured: false, reason: 'disabled' };
-  }
-  if (env.GOOGLE_CLIENT_SYNC_ENABLED !== 'true') return { configured: false, reason: 'invalid_configuration' };
-  const required = ['GOOGLE_CLIENT_SYNC_SPREADSHEET_ID', 'GOOGLE_CLIENT_SYNC_SERVICE_ACCOUNT_EMAIL',
-    'GOOGLE_CLIENT_SYNC_PRIVATE_KEY', 'GOOGLE_CLIENT_SYNC_PORTFOLIOS_JSON'] as const;
-  if (required.some((key) => !env[key]?.trim())) return { configured: false, reason: 'missing_configuration' };
+export function readClientPortfolioMappings(
+  env: Record<string, string | undefined>,
+): ClientPortfolioMappingsState {
+  const source = env.GOOGLE_CLIENT_SYNC_PORTFOLIOS_JSON;
+  if (!source?.trim()) return { configured: false, reason: 'missing_configuration' };
   try {
-    const parsed = schema.parse(env);
-    if (parsed.GOOGLE_CLIENT_SYNC_SCHEDULE_ENABLED === 'true' && !parsed.GOOGLE_CLIENT_SYNC_SCHEDULER_ACTOR_ID) throw new Error();
-    const raw: unknown = JSON.parse(parsed.GOOGLE_CLIENT_SYNC_PORTFOLIOS_JSON);
+    const raw: unknown = JSON.parse(source);
     // Preserve original keys until collision checks; Zod key transforms and JSON.parse
     // otherwise silently collapse distinct spellings or repeated JSON members.
     const mappings = z.record(z.string().min(1).max(120), z.email().max(254)).parse(raw);
     if (Object.keys(mappings).length > 500) throw new Error();
-    const source = parsed.GOOGLE_CLIENT_SYNC_PORTFOLIOS_JSON;
     const sourceKeys = new Set<string>();
     for (const token of source.matchAll(/"(?:\\.|[^"\\])*"/g)) {
       if (!source.slice(token.index + token[0].length).trimStart().startsWith(':')) continue;
@@ -47,11 +44,30 @@ export function readClientSheetSyncConfig(env: Record<string, string | undefined
       if (!key || normalized.has(key) || key === 'OUTROS' || key === 'VERIFICAR') throw new Error();
       normalized.set(key, email.toLowerCase());
     }
+    return { configured: true, portfolios: Object.fromEntries(normalized) };
+  } catch {
+    return { configured: false, reason: 'invalid_configuration' };
+  }
+}
+
+export function readClientSheetSyncConfig(env: Record<string, string | undefined>): ClientSheetConfigState {
+  if (env.GOOGLE_CLIENT_SYNC_ENABLED === undefined || env.GOOGLE_CLIENT_SYNC_ENABLED === 'false') {
+    return { configured: false, reason: 'disabled' };
+  }
+  if (env.GOOGLE_CLIENT_SYNC_ENABLED !== 'true') return { configured: false, reason: 'invalid_configuration' };
+  const required = ['GOOGLE_CLIENT_SYNC_SPREADSHEET_ID', 'GOOGLE_CLIENT_SYNC_SERVICE_ACCOUNT_EMAIL',
+    'GOOGLE_CLIENT_SYNC_PRIVATE_KEY', 'GOOGLE_CLIENT_SYNC_PORTFOLIOS_JSON'] as const;
+  if (required.some((key) => !env[key]?.trim())) return { configured: false, reason: 'missing_configuration' };
+  try {
+    const parsed = schema.parse(env);
+    if (parsed.GOOGLE_CLIENT_SYNC_SCHEDULE_ENABLED === 'true' && !parsed.GOOGLE_CLIENT_SYNC_SCHEDULER_ACTOR_ID) throw new Error();
+    const mappingState = readClientPortfolioMappings(env);
+    if (!mappingState.configured) throw new Error();
     return { configured: true, reason: 'ready', config: {
       spreadsheetId: parsed.GOOGLE_CLIENT_SYNC_SPREADSHEET_ID,
       email: parsed.GOOGLE_CLIENT_SYNC_SERVICE_ACCOUNT_EMAIL,
       privateKey: parsed.GOOGLE_CLIENT_SYNC_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      portfolios: Object.fromEntries(normalized), scheduleEnabled: parsed.GOOGLE_CLIENT_SYNC_SCHEDULE_ENABLED === 'true',
+      portfolios: mappingState.portfolios, scheduleEnabled: parsed.GOOGLE_CLIENT_SYNC_SCHEDULE_ENABLED === 'true',
       schedulerActorId: parsed.GOOGLE_CLIENT_SYNC_SCHEDULER_ACTOR_ID,
     } };
   } catch { return { configured: false, reason: 'invalid_configuration' }; }

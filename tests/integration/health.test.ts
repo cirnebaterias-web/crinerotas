@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import { clientSheetHeaders } from '@cirne/contracts';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { root, run, supabaseBinary } from '../../scripts/process';
 
@@ -94,6 +95,8 @@ beforeAll(async () => {
     SUPABASE_PUBLISHABLE_KEY: localStatus.PUBLISHABLE_KEY,
   };
   actorManifest = JSON.parse(await readFile(path.join(root, '.local', 'identity-actors.json'), 'utf8'));
+  const configuredSeller = actorManifest.actors.seller_a;
+  if (!configuredSeller) throw new Error('Synthetic seller mapping actor missing');
 
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     const port = await freePort();
@@ -109,6 +112,9 @@ beforeAll(async () => {
         OPERATIONAL_TIME_ZONE: 'America/Sao_Paulo',
         LOG_LEVEL: 'info',
         NEXT_TELEMETRY_DISABLED: '1',
+        GOOGLE_CLIENT_SYNC_PORTFOLIOS_JSON: JSON.stringify({
+          'CARTEIRA-HTTP': configuredSeller.email,
+        }),
         ...identityEnvironment,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -247,14 +253,13 @@ it('validates, imports, replays and lists a synthetic client workbook through th
   if (!manager || !seller) throw new Error('Synthetic client-import actors missing');
   const directory = await mkdtemp(path.join(tmpdir(), 'cirne-client-import-'));
   const filePath = path.join(directory, 'clientes-sinteticos.xlsx');
-  const externalReference = `IMPORT-HTTP-${crypto.randomUUID()}`;
+  const externalReference = crypto.randomUUID().replace(/[a-f-]/g, '').padEnd(14, '0').slice(0, 14);
   try {
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Clientes');
-    sheet.addRow(['referencia_externa', 'nome', 'endereco', 'latitude', 'longitude',
-      'referencia_carteira', 'vendedor_email', 'status']);
-    sheet.addRow([externalReference, '! Cliente HTTP Sintético', 'Rua Sintética 311', -5.79, -35.21,
-      'CARTEIRA-HTTP', seller.email, 'active']);
+    const sheet = workbook.addWorksheet('Base clientes');
+    sheet.addRow([...clientSheetHeaders]);
+    sheet.addRow(['! Cliente HTTP Sintético', externalReference, 'Cliente HTTP', 'CARTEIRA-HTTP',
+      'ATIVO', 'Natal', 'Centro', -5.79, -35.21, 'Rua Sintética 311']);
     await workbook.xlsx.writeFile(filePath);
 
     const template = await fetch(`${origin}/api/v1/client-imports/template`, {
