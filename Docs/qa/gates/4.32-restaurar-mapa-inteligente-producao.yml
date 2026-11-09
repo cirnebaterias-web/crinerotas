@@ -1,0 +1,44 @@
+schema: 1
+story: '4.32'
+story_title: 'Restaurar mapa inteligente da sugestao semanal em producao'
+gate: PASS
+status_reason: 'A causa foi a ausencia da configuracao publica do provedor na replica. O mapa foi habilitado com rollout saudavel, e o preflight de deploy agora exige URL, atribuicao e politica de referencia validas.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'ba941dce11b93ac0214089e33710d093194e968b'
+updated: '2026-11-09T20:45:07-03:00'
+
+top_issues: []
+waiver:
+  active: false
+
+quality_score: 100
+expires: '2026-11-23T20:36:03-03:00'
+
+evidence:
+  tests_reviewed: 851
+  risks_identified: 0
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6]
+    ac_gaps: []
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'A configuracao e publica e nao contem segredo. strict-origin-when-cross-origin envia a terceiros somente a origem, sem caminho, filtros ou identificadores; logs e redaction do Caddy permanecem inalterados.'
+  performance:
+    status: PASS
+    notes: 'O navegador solicita apenas os tiles do viewport; nao foi adicionado proxy, prefetch, download offline ou cache customizado.'
+  reliability:
+    status: PASS
+    notes: 'Rollout start-first concluiu sem rollback; replica, tile PNG e live publico foram verificados. O fallback textual continua ativo quando o mapa nao e configurado.'
+  maintainability:
+    status: PASS
+    notes: 'O preflight verifica o ambiente resolvido pelo Compose, exige o mapa no escopo deploy e possui regressao para ausencia, configuracao parcial ou HTTP; exemplo e runbook documentam o contrato.'
+
+recommendations:
+  immediate: []
+  future:
+    - action: 'Avaliar provedor com SLA ou tiles proprios se o uso do piloto crescer, mantendo URL e atribuicao configuraveis.'
+      refs:
+        - 'infrastructure/env/.env.example'
+        - 'Docs/runbooks/deploy-contabo.md'
