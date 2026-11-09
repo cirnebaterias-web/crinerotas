@@ -1,6 +1,6 @@
 begin;
 
-select plan(37);
+select plan(39);
 
 select has_table('api','weekly_route_proposals','weekly proposals exist');
 select has_table('api','seller_daily_route_locations','daily seller locations exist');
@@ -74,6 +74,29 @@ select is(:'rejected'::jsonb ->> 'status','rejected','manager can reject with re
 reset role;
 select is((select count(*)::integer from private.audit_events where target_type='weekly_route_proposal'
   and target_id=(:'saved'::jsonb ->> 'proposalId')::uuid),3,'save revise and decision are audited once');
+
+do $test_executor_role$
+begin
+  execute pg_catalog.format('grant cirne_route_executor to %I with set true granted by current_user',current_user);
+end
+$test_executor_role$;
+set local role cirne_route_executor;
+select lives_ok(format($sql$select private.validate_weekly_route_proposal(%L::uuid,%L::date,%L::jsonb)$sql$,
+  :'seller_id','2026-11-09',jsonb_set(jsonb_set(jsonb_set(:'save_command'::jsonb -> 'proposal',
+    '{excluded}',jsonb_build_array(jsonb_build_object('clientId','97777777-7777-4777-8777-777777777777',
+      'reason','daily_distance_limit'))),'{counts,evaluated}','1'::jsonb),'{counts,needsReview}','1'::jsonb)),
+  'distance-limited clients remain valid proposal exclusions');
+select lives_ok(format($sql$select private.validate_weekly_route_proposal(%L::uuid,%L::date,%L::jsonb)$sql$,
+  :'seller_id','2026-11-09',jsonb_set(jsonb_set(jsonb_set(:'save_command'::jsonb -> 'proposal',
+    '{excluded}',jsonb_build_array(jsonb_build_object('clientId','97777777-7777-4777-8777-777777777777',
+      'reason','daily_capacity_reached'))),'{counts,evaluated}','1'::jsonb),'{counts,needsReview}','1'::jsonb)),
+  'capacity-limited clients remain valid proposal exclusions');
+reset role;
+do $test_executor_role$
+begin
+  execute pg_catalog.format('revoke cirne_route_executor from %I granted by current_user',current_user);
+end
+$test_executor_role$;
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :'seller_id', true);

@@ -10,6 +10,7 @@ export class ScrapRequestError extends Error {
     public readonly status: number,
     public readonly code?: string,
     public readonly details?: Record<string, unknown>,
+    public readonly serverMessage?: string,
   ) {
     super(message);
   }
@@ -27,7 +28,9 @@ export async function scrapRequest(path: string, options?: RequestInit): Promise
     if (response.status === 401) throw new ScrapRequestError('Entre novamente para continuar.', 401, parsed.success ? parsed.data.error.code : undefined, details);
     if (response.status === 403) throw new ScrapRequestError('Seu perfil não tem permissão para esta operação.', 403, parsed.success ? parsed.data.error.code : undefined, details);
     if (response.status === 409) throw new ScrapRequestError(parsed.success ? parsed.data.error.message : 'O registro mudou. Atualize a tela antes de confirmar novamente.', 409, parsed.success ? parsed.data.error.code : undefined, details);
-    throw new ScrapRequestError('Não foi possível confirmar a operação. Seus dados continuam nesta tela.', response.status, parsed.success ? parsed.data.error.code : undefined, details);
+    throw new ScrapRequestError('Não foi possível confirmar a operação. Seus dados continuam nesta tela.', response.status,
+      parsed.success ? parsed.data.error.code : undefined, details,
+      parsed.success ? parsed.data.error.message : undefined);
   }
   return response.json();
 }
