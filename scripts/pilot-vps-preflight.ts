@@ -155,7 +155,11 @@ function staticArtifactChecks(compose: string, caddyfile: string, dockerfile: st
   ];
 }
 
-function resolvedComposeChecks(output: string, expectedImage: string | undefined): PilotVpsPreflightCheck[] {
+function resolvedComposeChecks(
+  output: string,
+  expectedImage: string | undefined,
+  requireManagementMap: boolean,
+): PilotVpsPreflightCheck[] {
   try {
     const config = JSON.parse(output) as {
       services?: Record<string, {
@@ -179,8 +183,9 @@ function resolvedComposeChecks(output: string, expectedImage: string | undefined
     const tileUrl = app?.environment?.MANAGEMENT_MAP_TILE_URL ?? undefined;
     const attribution = app?.environment?.MANAGEMENT_MAP_ATTRIBUTION ?? undefined;
     const mapEnabled = Boolean(tileUrl) && Boolean(attribution);
-    const mapConfigurationValid = (!tileUrl && !attribution) ||
+    const mapPairValid = (!tileUrl && !attribution) ||
       (mapEnabled && validMapTileUrl(tileUrl) && attribution!.trim().length > 0);
+    const mapConfigurationValid = mapPairValid && (!requireManagementMap || mapEnabled);
     return [
       check('compose.services', !!app && !!caddy && Object.keys(config.services ?? {}).length === 2,
         'Compose resolve exatamente aplicação e Caddy.', 'Compose deve resolver exatamente os serviços app e caddy.'),
@@ -200,7 +205,8 @@ function resolvedComposeChecks(output: string, expectedImage: string | undefined
       check('compose.management-map', mapConfigurationValid,
         mapEnabled ? 'Mapa gerencial habilitado com tiles HTTPS e atribuição.' :
           'Mapa gerencial não configurado; fallback textual permanecerá ativo.',
-        'Mapa gerencial deve definir URL HTTPS com {z}/{x}/{y} e atribuição juntas.'),
+        requireManagementMap && !mapEnabled ? 'Deploy do piloto exige o mapa gerencial configurado.' :
+          'Mapa gerencial deve definir URL HTTPS com {z}/{x}/{y} e atribuição juntas.'),
     ];
   } catch {
     return [{ id: 'compose.parse', status: 'fail', detail: 'Docker Compose não retornou configuração JSON válida.' }];
@@ -241,7 +247,11 @@ export async function pilotVpsPreflight(
     'Docker Compose resolveu o manifesto.', 'Docker Compose indisponível ou manifesto inválido.'));
   const image = values.get('CIRNE_APP_IMAGE');
   const releaseSha = values.get('CIRNE_RELEASE_SHA');
-  if (composeResult.ok) checks.push(...resolvedComposeChecks(composeResult.output, image));
+  if (composeResult.ok) checks.push(...resolvedComposeChecks(
+    composeResult.output,
+    image,
+    options.scope === 'deploy',
+  ));
 
   const [gitResult, imageRevisionResult] = await Promise.all([
     execute('git', ['rev-parse', 'HEAD'], 10000),

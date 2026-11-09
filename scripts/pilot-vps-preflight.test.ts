@@ -154,6 +154,22 @@ it('rejects incomplete or invalid map configuration resolved by Docker Compose',
   expect(result.checks).toContainEqual(expect.objectContaining({ id: 'compose.management-map', status: 'fail' }));
 });
 
+it('requires the map for pilot deployment while preserving the optional artifact fallback', async () => {
+  const setup = await fixture();
+  const withoutMapRunner = async (command: string, args: readonly string[]) => {
+    if (command === 'git') return { ok: true, output: 'b'.repeat(40) };
+    if (args[0] === 'image') return { ok: true, output: 'b'.repeat(40) };
+    const config = JSON.parse(resolvedCompose);
+    delete config.services.app.environment;
+    return { ok: true, output: JSON.stringify(config) };
+  };
+  const artifact = await pilotVpsPreflight({ ...setup, scope: 'artifact', platform: 'linux' }, withoutMapRunner);
+  const deployment = await pilotVpsPreflight({ ...setup, scope: 'deploy', platform: 'linux' }, withoutMapRunner);
+  expect(artifact.checks).toContainEqual(expect.objectContaining({ id: 'compose.management-map', status: 'pass' }));
+  expect(deployment.status).toBe('invalid');
+  expect(deployment.checks).toContainEqual(expect.objectContaining({ id: 'compose.management-map', status: 'fail' }));
+});
+
 it('rejects a resolved app image or revision that differs from the approved release', async () => {
   const setup = await fixture();
   const result = await pilotVpsPreflight({ ...setup, scope: 'artifact', platform: 'linux' },

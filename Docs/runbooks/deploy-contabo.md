@@ -37,7 +37,7 @@ npm run ops:vps:preflight -- \
 
 O arquivo privado deve registrar também `CIRNE_RELEASE_SHA`, exatamente o commit completo aprovado no workflow. O preflight compara esse SHA com o checkout, com o rótulo OCI da imagem puxada e com o digest resolvido pelo Compose. Resultado diferente de `ready` ou exit code diferente de zero interrompe o deploy. Não copiar valores do ambiente para tickets, comentários ou logs.
 
-O preflight valida a configuração efetiva do mapa no JSON resolvido pelo Docker Compose, incluindo o arquivo privado `pilot.env`. `MANAGEMENT_MAP_TILE_URL` deve ser HTTPS e conter `{z}`, `{x}` e `{y}` no caminho; a atribuição pública deve ser definida junto. Se o mapa fizer parte da validação do release, o check `compose.management-map` deve informar que o mapa está habilitado. Configuração ausente mantém a aplicação saudável com o fallback textual, mas deve bloquear o encerramento operacional desse release. Atribuição e política do provedor precisam ser preservadas; tiles não são armazenados offline.
+O preflight valida a configuração efetiva do mapa no JSON resolvido pelo Docker Compose, incluindo o arquivo privado `pilot.env`. `MANAGEMENT_MAP_TILE_URL` deve ser HTTPS e conter `{z}`, `{x}` e `{y}` no caminho; a atribuição pública deve ser definida junto. Em `--scope artifact`, a ausência dos dois valores preserva o fallback textual. Em `--scope deploy`, o check `compose.management-map` exige o mapa habilitado e bloqueia o deploy do piloto se os dois valores estiverem ausentes, parciais ou inválidos. Atribuição e política do provedor precisam ser preservadas; tiles não são armazenados offline.
 
 ## Procedimento
 
