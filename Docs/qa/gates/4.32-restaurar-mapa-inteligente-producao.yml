@@ -2,10 +2,10 @@ schema: 1
 story: '4.32'
 story_title: 'Restaurar mapa inteligente da sugestao semanal em producao'
 gate: PASS
-status_reason: 'A causa foi a ausencia da configuracao publica do provedor na replica. O mapa foi habilitado com rollout saudavel, e o preflight agora valida URL, atribuicao e politica de referencia antes dos proximos deploys.'
+status_reason: 'A causa foi a ausencia da configuracao publica do provedor na replica. O mapa foi habilitado com rollout saudavel, e o preflight de deploy agora exige URL, atribuicao e politica de referencia validas.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: '56ba5012eba1dd0d7e0bbb868748849627a58b9c'
-updated: '2026-11-09T20:36:03-03:00'
+reviewed_revision: 'ba941dce11b93ac0214089e33710d093194e968b'
+updated: '2026-11-09T20:45:07-03:00'
 
 top_issues: []
 waiver:
@@ -15,7 +15,7 @@ quality_score: 100
 expires: '2026-11-23T20:36:03-03:00'
 
 evidence:
-  tests_reviewed: 850
+  tests_reviewed: 851
   risks_identified: 0
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6]
@@ -33,7 +33,7 @@ nfr_validation:
     notes: 'Rollout start-first concluiu sem rollback; replica, tile PNG e live publico foram verificados. O fallback textual continua ativo quando o mapa nao e configurado.'
   maintainability:
     status: PASS
-    notes: 'O preflight verifica o ambiente resolvido pelo Compose e possui regressao para configuracao parcial ou HTTP; exemplo e runbook documentam o contrato.'
+    notes: 'O preflight verifica o ambiente resolvido pelo Compose, exige o mapa no escopo deploy e possui regressao para ausencia, configuracao parcial ou HTTP; exemplo e runbook documentam o contrato.'
 
 recommendations:
   immediate: []
