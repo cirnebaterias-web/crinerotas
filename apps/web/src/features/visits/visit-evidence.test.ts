@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coordinateDecimal, distanceMeters, locationAssessment } from './visit-evidence';
+import { coordinateDecimal, distanceMeters, locationAssessment, outsideRadiusDecision } from './visit-evidence';
 
 describe('visit facade evidence location rules', () => {
   it('accepts an accurate point inside 30 meters', () => {
@@ -46,5 +46,26 @@ describe('visit facade evidence location rules', () => {
   it('preserves GPS coordinates to six decimal places', () => {
     expect(coordinateDecimal(-7.11523749)).toBe('-7.115237');
     expect(coordinateDecimal(-34.86421951)).toBe('-34.86422');
+  });
+
+  it('allows a distant check-in only after a valid justification', () => {
+    expect(outsideRadiusDecision({
+      kind: 'checkin',
+      issues: ['outside_radius'],
+      justification: 'Curta',
+    })).toBe('justification_required');
+    expect(outsideRadiusDecision({
+      kind: 'checkin',
+      issues: ['outside_radius'],
+      justification: 'Testando o fluxo fora do estabelecimento.',
+    })).toBe('allowed');
+  });
+
+  it('keeps a distant checkout blocked even with a justification', () => {
+    expect(outsideRadiusDecision({
+      kind: 'checkout',
+      issues: ['outside_radius'],
+      justification: 'Testando o fluxo fora do estabelecimento.',
+    })).toBe('blocked');
   });
 });

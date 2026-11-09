@@ -3,6 +3,18 @@ import type { VisitEvidenceIssue } from '@cirne/contracts';
 export const VISIT_RADIUS_M = 30;
 export const DESIRED_GPS_ACCURACY_M = 50;
 
+export type OutsideRadiusDecision = 'allowed' | 'justification_required' | 'blocked';
+
+export function outsideRadiusDecision(input: {
+  kind: 'checkin' | 'checkout';
+  issues: VisitEvidenceIssue[];
+  justification: string;
+}): OutsideRadiusDecision {
+  if (!input.issues.includes('outside_radius')) return 'allowed';
+  if (input.kind === 'checkout') return 'blocked';
+  return input.justification.trim().length >= 10 ? 'allowed' : 'justification_required';
+}
+
 export function coordinateDecimal(value: number) {
   return String(Math.round(value * 1_000_000) / 1_000_000);
 }

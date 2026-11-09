@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CanonicalRoute, VisitEvidenceIssue } from '@cirne/contracts';
 import { compressStockPhoto, type CompressedStockPhoto } from './stock/stock-photo-compression';
-import { coordinateDecimal, evidenceIssueLabel, locationAssessment } from './visit-evidence';
+import { coordinateDecimal, evidenceIssueLabel, locationAssessment, outsideRadiusDecision } from './visit-evidence';
 
 export interface VisitEvidenceCaptureValue {
   capturedAt: string;
@@ -139,10 +139,13 @@ export function VisitEvidenceCapture({ kind, client, busy = false, referenceLoca
       setMessage('Checkout recusado. O ponto do check-in não está disponível neste aparelho; reabra a visita pela rota.');
       return;
     }
-    if (issues.includes('outside_radius')) {
-      setMessage(kind === 'checkout'
-        ? 'Checkout recusado. Volte ao ponto onde realizou o check-in e tente novamente.'
-        : 'Check-in recusado. Aproxime-se até 30 m do PDV e tente novamente.');
+    const radiusDecision = outsideRadiusDecision({ kind, issues, justification });
+    if (radiusDecision === 'blocked') {
+      setMessage('Checkout recusado. Volte ao ponto onde realizou o check-in e tente novamente.');
+      return;
+    }
+    if (radiusDecision === 'justification_required') {
+      setMessage('Para testar fora do raio, explique a exceção com pelo menos 10 caracteres.');
       return;
     }
     if (missingClientLocation && !streetConfirmed) {
@@ -177,7 +180,7 @@ export function VisitEvidenceCapture({ kind, client, busy = false, referenceLoca
     <p className="seller-muted">{client.name} · a foto deve ser tirada agora pela câmera. A galeria não está disponível.</p>
     <p className="seller-muted">{kind === 'checkout'
       ? 'O checkout precisa ocorrer a até 30 m do ponto registrado no check-in.'
-      : 'O check-in precisa ocorrer a até 30 m da posição cadastrada do PDV.'}</p>
+      : 'Preferencialmente, faça o check-in a até 30 m do PDV. Durante o teste, uma distância maior exige justificativa.'}</p>
     {missingClientLocation && <div className="seller-notice"><strong>PDV sem posição exata cadastrada</strong>
       <p>Confira se você está nesta rua: {client.address}</p>
       <label><input type="checkbox" checked={streetConfirmed}
