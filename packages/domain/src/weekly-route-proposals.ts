@@ -1,14 +1,22 @@
 import {
-  weeklyRouteBaseCityOriginSchema, weeklyRouteCandidateSchema, weeklyRoutePolicySchema,
-  weeklyRouteProposalSchema, type WeeklyRouteCandidate, type WeeklyRouteProposal,
+  currentWeeklyRoutePolicySchema, weeklyRouteBaseCityOriginSchema, weeklyRouteCandidateSchema,
+  weeklyRouteProposalSchema, type WeeklyRouteCandidate, type WeeklyRouteExclusionReason,
+  type WeeklyRouteProposal, type WeeklyRouteStrategyPreference,
 } from '@cirne/contracts';
 
 export const maxDailyLegDistanceKm = 30 as const;
 export const tripFromBaseDistanceKm = 80 as const;
+export const coverageCadenceDays = 28 as const;
+const distanceBoundaryToleranceKm = 1e-9;
 
-export const weeklyRoutePolicy = weeklyRoutePolicySchema.parse({
-  version: 'weekly-route-rules-v2', inactiveAfterDays: 180, dailyClientLimit: 10,
+function isTripDistance(distanceKm: number) {
+  return distanceKm + distanceBoundaryToleranceKm >= tripFromBaseDistanceKm;
+}
+
+export const weeklyRoutePolicy = currentWeeklyRoutePolicySchema.parse({
+  version: 'weekly-route-rules-v3', inactiveAfterDays: 180, dailyClientLimit: 10,
   dailyGpsMaxAgeMinutes: 5, dailyGpsMaxAccuracyM: 100,
+  coverageCadenceDays, tripFromBaseDistanceKm,
   weights: { recency: 50, volume: 15, scrapDebt: 20, proximity: 15 },
 });
 
@@ -22,6 +30,31 @@ function shiftDate(date: string, days: number) {
   return new Date((dayNumber(date) + days) * 86_400_000).toISOString().slice(0, 10);
 }
 
+function saoPauloDate(instant: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric',
+    month: '2-digit', day: '2-digit' }).formatToParts(new Date(instant));
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function analyzeVisitCoverage(candidate: WeeklyRouteCandidate, weekStart: string) {
+  if (candidate.visitHistoryStatus === 'unavailable') return {
+    coverageState: 'unavailable' as const, coverageOverdueDays: null, nextVisitDueOn: null,
+  };
+  if (candidate.lastCompletedVisitAt === null) return {
+    coverageState: 'never_visited' as const, coverageOverdueDays: null, nextVisitDueOn: null,
+  };
+  const nextVisitDueOn = shiftDate(saoPauloDate(candidate.lastCompletedVisitAt), coverageCadenceDays);
+  const overdueDays = dayNumber(weekStart) - dayNumber(nextVisitDueOn);
+  if (overdueDays > 0) return {
+    coverageState: 'overdue' as const, coverageOverdueDays: overdueDays, nextVisitDueOn,
+  };
+  if (dayNumber(nextVisitDueOn) <= dayNumber(shiftDate(weekStart, 4))) return {
+    coverageState: 'due_this_week' as const, coverageOverdueDays: 0, nextVisitDueOn,
+  };
+  return { coverageState: 'covered' as const, coverageOverdueDays: 0, nextVisitDueOn };
+}
+
 export function approximateDistanceKm(origin: { latitude: number; longitude: number }, target: { latitude: number; longitude: number }) {
   const radians = (value: number) => value * Math.PI / 180;
   const deltaLatitude = radians(target.latitude - origin.latitude);
@@ -31,7 +64,8 @@ export function approximateDistanceKm(origin: { latitude: number; longitude: num
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function analyzeWeeklyRouteCandidate(candidate: WeeklyRouteCandidate, origin: { latitude: number; longitude: number }) {
+export function analyzeWeeklyRouteCandidate(candidate: WeeklyRouteCandidate,
+  origin: { latitude: number; longitude: number }, weekStart?: string) {
   const days = candidate.daysSinceLastPurchase!;
   const recencyBasis = candidate.periodicityDays ? days / candidate.periodicityDays : days / weeklyRoutePolicy.inactiveAfterDays;
   const recency = Math.min(1, Math.max(0, recencyBasis)) * weeklyRoutePolicy.weights.recency;
@@ -65,16 +99,24 @@ export function analyzeWeeklyRouteCandidate(candidate: WeeklyRouteCandidate, ori
   else reasons.push('saldo de sucata indisponível');
   if (distance === null) reasons.push('destino navegável sem distância calculável');
   else reasons.push(`${Math.round(distance * 10) / 10} km aproximados da origem`);
+  const coverage = analyzeVisitCoverage(candidate, weekStart ?? saoPauloDate(new Date().toISOString()));
+  if (coverage.coverageState === 'unavailable') reasons.unshift('histórico de visitas indisponível');
+  else if (coverage.coverageState === 'never_visited') reasons.unshift('sem visita concluída registrada');
+  else if (coverage.coverageState === 'overdue') reasons.unshift(
+    `${coverage.coverageOverdueDays} dias além da rotina de visita de ${coverageCadenceDays} dias`);
+  else if (coverage.coverageState === 'due_this_week') reasons.unshift('visita de rotina vence nesta semana');
+  else reasons.unshift(`rotina de visita coberta até ${coverage.nextVisitDueOn}`);
   return { score: Math.round(([recency, commercialVolume, scrap, proximity].reduce<number>((sum, value) =>
     value === null ? sum : sum + value, 0)) * 100) / 100,
-    distance: distance === null ? null : Math.round(distance * 10) / 10,
-    cycleDelayDays, cycleDelayPercent, purchaseTrend, potential, reasons: reasons.slice(0, 5) };
+    rawDistance: distance,
+    distance: distance === null ? null : Math.round(distance * 100) / 100,
+    cycleDelayDays, cycleDelayPercent, purchaseTrend, potential, ...coverage, reasons: reasons.slice(0, 8) };
 }
 
 export function classifyDailyRoute(origin: { latitude: number; longitude: number },
   locations: Array<{ latitude: number; longitude: number }>) {
   if (locations.length === 0) return 'local' as const;
-  return locations.some((location) => approximateDistanceKm(origin, location) >= tripFromBaseDistanceKm)
+  return locations.some((location) => isTripDistance(approximateDistanceKm(origin, location)))
     ? 'trip' as const : 'local' as const;
 }
 
@@ -108,9 +150,16 @@ function compatibleWithDay(candidate: WeeklyRouteCandidate,
   return !previous || approximateDistanceKm(previous, candidate.location) <= maxDailyLegDistanceKm;
 }
 
+const coverageRank = { overdue: 0, never_visited: 1, due_this_week: 2,
+  covered: 3, unavailable: 4 } as const;
+
+function isCoverageDue(state: keyof typeof coverageRank) {
+  return state === 'overdue' || state === 'never_visited' || state === 'due_this_week';
+}
+
 export function proposeWeeklyRoutes(input: {
   weekStart: string; generatedAt: string; origin: unknown; candidates: readonly unknown[];
-  sources?: unknown;
+  sources?: unknown; strategyPreference?: WeeklyRouteStrategyPreference;
 }): WeeklyRouteProposal {
   const weekStart = input.weekStart;
   if (dayNumber(weekStart) % 7 !== 4) throw new RangeError('A semana deve iniciar em uma segunda-feira.');
@@ -120,7 +169,7 @@ export function proposeWeeklyRoutes(input: {
   const candidates = input.candidates.map((candidate) => weeklyRouteCandidateSchema.parse(candidate));
   if (new Set(candidates.map(({ clientId }) => clientId)).size !== candidates.length) throw new RangeError('Cliente repetido.');
 
-  const excluded: Array<{ clientId: string; reason: 'inactive_lost' | 'no_purchase_history' | 'client_not_active' | 'no_navigable_location' | 'daily_distance_limit' | 'daily_capacity_reached' }> = [];
+  const excluded: Array<{ clientId: string; reason: WeeklyRouteExclusionReason }> = [];
   const eligible = candidates.flatMap((candidate) => {
     if (candidate.status !== 'active') { excluded.push({ clientId: candidate.clientId, reason: 'client_not_active' }); return []; }
     if (candidate.daysSinceLastPurchase === null) { excluded.push({ clientId: candidate.clientId, reason: 'no_purchase_history' }); return []; }
@@ -130,13 +179,39 @@ export function proposeWeeklyRoutes(input: {
     if (!candidate.location && !candidate.hasNavigableAddress) {
       excluded.push({ clientId: candidate.clientId, reason: 'no_navigable_location' }); return [];
     }
-    return [{ candidate, ...analyzeWeeklyRouteCandidate(candidate, origin) }];
-  }).sort((left, right) => right.score - left.score
+    return [{ candidate, ...analyzeWeeklyRouteCandidate(candidate, origin, weekStart) }];
+  }).sort((left, right) => coverageRank[left.coverageState] - coverageRank[right.coverageState]
+    || (right.coverageOverdueDays ?? 0) - (left.coverageOverdueDays ?? 0)
+    || right.score - left.score
     || (left.distance ?? Number.MAX_SAFE_INTEGER) - (right.distance ?? Number.MAX_SAFE_INTEGER)
     || left.candidate.clientId.localeCompare(right.candidate.clientId));
 
-  const workingDays = Array.from({ length: 5 }, () => [] as Array<typeof eligible[number]>);
-  eligible.forEach((entry) => {
+  const inferredAnchor = eligible.find(({ candidate }) => candidate.location !== null);
+  const inferredKind = !inferredAnchor ? 'pending' as const
+    : inferredAnchor.rawDistance !== null && isTripDistance(inferredAnchor.rawDistance)
+      ? 'trip' as const : 'local' as const;
+  const requestedKind = input.strategyPreference ?? 'auto';
+  const desiredKind = requestedKind === 'auto' ? inferredKind : requestedKind;
+  const anchor = desiredKind === 'pending' ? undefined : eligible.find(({ candidate, rawDistance }) =>
+    candidate.location !== null && rawDistance !== null
+      && (desiredKind === 'trip' ? isTripDistance(rawDistance) : !isTripDistance(rawDistance)));
+  const strategyKind = desiredKind === 'pending' || !anchor ? 'pending' as const : desiredKind;
+  const strategyEligible = eligible.filter((entry) => {
+    if (strategyKind === 'pending') return entry.candidate.location === null;
+    if (entry.candidate.location === null) return true;
+    if (strategyKind === 'local') return entry.rawDistance !== null && !isTripDistance(entry.rawDistance);
+    return entry.rawDistance !== null && isTripDistance(entry.rawDistance)
+      && anchor?.candidate.location !== null
+      && approximateDistanceKm(anchor!.candidate.location!, entry.candidate.location) <= maxDailyLegDistanceKm;
+  });
+  const strategyEligibleIds = new Set(strategyEligible.map(({ candidate }) => candidate.clientId));
+  eligible.forEach(({ candidate }) => {
+    if (!strategyEligibleIds.has(candidate.clientId)) excluded.push({ clientId: candidate.clientId,
+      reason: 'weekly_strategy_mismatch' });
+  });
+
+  const workingDays = Array.from({ length: 5 }, () => [] as Array<typeof strategyEligible[number]>);
+  strategyEligible.forEach((entry) => {
     const compatible = workingDays.map((suggestions, dayIndex) => ({ suggestions, dayIndex,
       distance: entry.candidate.location && previousLocatedStop(suggestions)
         ? approximateDistanceKm(previousLocatedStop(suggestions)!, entry.candidate.location) : 0 }))
@@ -150,18 +225,30 @@ export function proposeWeeklyRoutes(input: {
         ? 'daily_capacity_reached' : 'daily_distance_limit' });
   });
   const days = workingDays.map((entries, dayIndex) => ({ dayIndex, serviceDate: shiftDate(weekStart, dayIndex),
-    suggestions: entries.map(({ candidate, score, distance, reasons }, index) => ({ clientId: candidate.clientId, name: candidate.name,
+    suggestions: entries.map(({ candidate, score, distance, reasons, coverageState, coverageOverdueDays,
+      nextVisitDueOn }, index) => ({ clientId: candidate.clientId, name: candidate.name,
       dayIndex, plannedOrder: index + 1, score,
       approximateDistanceKm: distance, reasons, locationPending: candidate.location === null,
-      scrapBalanceState: candidate.scrapBalanceState })) }));
+      scrapBalanceState: candidate.scrapBalanceState, lastCompletedVisitAt: candidate.lastCompletedVisitAt,
+      coverageState, coverageOverdueDays, nextVisitDueOn })) }));
+  const suggested = days.flatMap(({ suggestions }) => suggestions);
+  const coverageDue = eligible.filter(({ coverageState }) => isCoverageDue(coverageState)).length;
+  const coveragePlanned = suggested.filter(({ coverageState }) => isCoverageDue(coverageState)).length;
   return weeklyRouteProposalSchema.parse({ schemaVersion: 1, mode: 'rules', weekStart,
     sellerId: origin.sellerId, generatedAt: input.generatedAt, policy: weeklyRoutePolicy, origin,
     sources: input.sources ?? { sales: { status: 'unavailable', generationId: null, asOfDate: null },
-      scrap: { status: 'unavailable', generationId: null, publishedAt: null } },
-    days, excluded, counts: { evaluated: candidates.length, suggested: days.flatMap(({ suggestions }) => suggestions).length,
+      scrap: { status: 'unavailable', generationId: null, publishedAt: null },
+      visits: { status: 'unavailable', asOfDate: null } },
+    strategy: { kind: strategyKind,
+      region: strategyKind === 'local' ? `${origin.city}/${origin.state}`
+        : strategyKind === 'trip' && anchor?.distance !== null
+          ? `Cluster a ${Math.round(anchor!.distance!)} km de ${origin.city}/${origin.state}` : null,
+      distanceFromBaseKm: anchor?.distance ?? null },
+    days, excluded, counts: { evaluated: candidates.length, suggested: suggested.length,
       inactiveLost: excluded.filter(({ reason }) => reason === 'inactive_lost').length,
       noPurchaseHistory: excluded.filter(({ reason }) => reason === 'no_purchase_history').length,
       needsReview: excluded.filter(({ reason }) => reason === 'client_not_active'
         || reason === 'no_navigable_location' || reason === 'daily_distance_limit'
-        || reason === 'daily_capacity_reached').length } });
+        || reason === 'daily_capacity_reached' || reason === 'weekly_strategy_mismatch').length,
+      coverageDue, coveragePlanned, coveragePending: Math.max(0, coverageDue - coveragePlanned) } });
 }

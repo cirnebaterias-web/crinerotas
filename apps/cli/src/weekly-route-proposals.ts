@@ -1,6 +1,7 @@
 import { apiErrorResponseSchema, decideWeeklyRouteProposalRequestSchema, persistedWeeklyRouteProposalSchema,
   reviseWeeklyRouteProposalRequestSchema, weeklyRouteBaseCityOriginSchema, weeklyRouteCandidateSchema,
-  weeklyRouteProposalSchema } from '@cirne/contracts';
+  weeklyRouteProposalMutationRequestSchema, weeklyRouteProposalMutationResponseSchema,
+  weeklyRouteProposalSchema, weeklyRouteStrategyPreferenceSchema } from '@cirne/contracts';
 import { proposeWeeklyRoutes } from '@cirne/domain';
 import { z } from 'zod';
 import { safeSyncOrigin } from './client-sheet-sync';
@@ -8,6 +9,7 @@ import { safeSyncOrigin } from './client-sheet-sync';
 const inputSchema = z.object({
   weekStart: z.iso.date(), generatedAt: z.iso.datetime({ offset: true }),
   origin: weeklyRouteBaseCityOriginSchema, candidates: z.array(weeklyRouteCandidateSchema).max(5000),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.optional(),
 }).strict();
 
 export function generateWeeklyRouteProposal(input: unknown) {
@@ -21,8 +23,11 @@ export function weeklyRouteProposalSummary(input: unknown) {
     status: 'ok' as const, mode: proposal.mode, policyVersion: proposal.policy.version,
     inactiveAfterDays: proposal.policy.inactiveAfterDays,
     sellerId: proposal.sellerId, weekStart: proposal.weekStart,
+    strategy: proposal.strategy,
     counts: proposal.counts,
-    days: proposal.days.map(({ serviceDate, suggestions }) => ({ serviceDate, clientCount: suggestions.length })),
+    days: proposal.days.map(({ serviceDate, suggestions }) => ({ serviceDate, clientCount: suggestions.length,
+      coverageDue: suggestions.filter(({ coverageState }) =>
+        coverageState === 'never_visited' || coverageState === 'overdue' || coverageState === 'due_this_week').length })),
   };
 }
 
@@ -50,8 +55,9 @@ async function call(baseUrl: string, token: string, path: string, init: RequestI
 
 export async function saveWeeklyRouteProposal(baseUrl: string, token: string, command: unknown,
   transport: typeof fetch = fetch) {
-  return persistedWeeklyRouteProposalSchema.parse(await call(baseUrl, token,
-    '/api/v1/management/weekly-route-proposals', { method: 'POST', body: JSON.stringify(command) }, transport));
+  const parsed = weeklyRouteProposalMutationRequestSchema.parse(command);
+  return weeklyRouteProposalMutationResponseSchema.parse(await call(baseUrl, token,
+    '/api/v1/management/weekly-route-proposals', { method: 'POST', body: JSON.stringify(parsed) }, transport));
 }
 
 export async function inspectPersistedWeeklyRouteProposal(baseUrl: string, token: string, proposalId: string,

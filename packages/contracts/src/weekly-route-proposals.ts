@@ -5,16 +5,28 @@ const coordinateSchema = z.object({
   longitude: z.number().finite().min(-180).max(180),
 }).strict();
 
-export const weeklyRoutePolicySchema = z.object({
+const weeklyRoutePolicyWeightsSchema = z.object({
+  recency: z.literal(50), volume: z.literal(15), scrapDebt: z.literal(20), proximity: z.literal(15),
+}).strict();
+
+const legacyWeeklyRoutePolicySchema = z.object({
   version: z.literal('weekly-route-rules-v2'),
   inactiveAfterDays: z.literal(180),
   dailyClientLimit: z.literal(10),
   dailyGpsMaxAgeMinutes: z.literal(5),
   dailyGpsMaxAccuracyM: z.literal(100),
-  weights: z.object({
-    recency: z.literal(50), volume: z.literal(15), scrapDebt: z.literal(20), proximity: z.literal(15),
-  }).strict(),
+  weights: weeklyRoutePolicyWeightsSchema,
 }).strict();
+
+export const currentWeeklyRoutePolicySchema = legacyWeeklyRoutePolicySchema.extend({
+  version: z.literal('weekly-route-rules-v3'),
+  coverageCadenceDays: z.literal(28),
+  tripFromBaseDistanceKm: z.literal(80),
+}).strict();
+
+export const weeklyRoutePolicySchema = z.discriminatedUnion('version', [
+  legacyWeeklyRoutePolicySchema, currentWeeklyRoutePolicySchema,
+]);
 export type WeeklyRoutePolicy = z.infer<typeof weeklyRoutePolicySchema>;
 
 export const weeklyRouteBaseCityOriginSchema = coordinateSchema.extend({
@@ -42,8 +54,12 @@ export const routeProposalOriginSchema = z.discriminatedUnion('kind', [
 ]);
 export type RouteProposalOrigin = z.infer<typeof routeProposalOriginSchema>;
 
+export const weeklyRouteStrategyPreferenceSchema = z.enum(['auto', 'local', 'trip']);
+export type WeeklyRouteStrategyPreference = z.infer<typeof weeklyRouteStrategyPreferenceSchema>;
+
 export const weeklyRouteProposalRequestSchema = z.object({
   schemaVersion: z.literal(1), weekStart: z.iso.date(), sellerId: z.uuid(),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.optional(),
 }).strict();
 export type WeeklyRouteProposalRequest = z.infer<typeof weeklyRouteProposalRequestSchema>;
 
@@ -61,6 +77,8 @@ export const weeklyRouteCandidateSchema = z.object({
   scrapBalanceState: z.enum(['debtor', 'creditor', 'settled', 'unavailable']).default('unavailable'),
   location: coordinateSchema.nullable(),
   hasNavigableAddress: z.boolean(),
+  visitHistoryStatus: z.enum(['available', 'unavailable']).default('unavailable'),
+  lastCompletedVisitAt: z.iso.datetime({ offset: true }).nullable().default(null),
 }).strict();
 export type WeeklyRouteCandidate = z.infer<typeof weeklyRouteCandidateSchema>;
 
@@ -71,7 +89,10 @@ export const weeklyRoutePlanningCandidateSchema = weeklyRouteCandidateSchema.ext
   cycleDelayPercent: z.number().finite().nonnegative().nullable(),
   purchaseTrend: z.enum(['growing', 'falling', 'stable', 'unavailable']),
   potential: z.enum(['high', 'medium', 'standard']),
-  reasons: z.array(z.string().min(1).max(180)).min(1).max(5),
+  coverageState: z.enum(['never_visited', 'overdue', 'due_this_week', 'covered', 'unavailable']),
+  coverageOverdueDays: z.number().int().nonnegative().nullable(),
+  nextVisitDueOn: z.iso.date().nullable(),
+  reasons: z.array(z.string().min(1).max(180)).min(1).max(8),
 }).strict();
 export type WeeklyRoutePlanningCandidate = z.infer<typeof weeklyRoutePlanningCandidateSchema>;
 
@@ -90,7 +111,7 @@ export type WeeklyRoutePlanningResponse = z.infer<typeof weeklyRoutePlanningResp
 
 export const weeklyRouteExclusionReasonSchema = z.enum([
   'inactive_lost', 'no_purchase_history', 'client_not_active', 'no_navigable_location',
-  'daily_distance_limit', 'daily_capacity_reached',
+  'daily_distance_limit', 'daily_capacity_reached', 'weekly_strategy_mismatch',
 ]);
 export type WeeklyRouteExclusionReason = z.infer<typeof weeklyRouteExclusionReasonSchema>;
 
@@ -98,9 +119,14 @@ export const weeklyRouteSuggestionSchema = z.object({
   clientId: z.uuid(), name: z.string(), dayIndex: z.number().int().min(0).max(4),
   plannedOrder: z.number().int().min(1).max(10), score: z.number().finite().nonnegative(),
   approximateDistanceKm: z.number().finite().nonnegative().nullable(),
-  reasons: z.array(z.string().min(1).max(180)).min(1).max(5),
+  reasons: z.array(z.string().min(1).max(180)).min(1).max(8),
   scrapBalanceState: z.enum(['debtor', 'creditor', 'settled', 'unavailable']),
   locationPending: z.boolean(),
+  lastCompletedVisitAt: z.iso.datetime({ offset: true }).nullable().default(null),
+  coverageState: z.enum(['never_visited', 'overdue', 'due_this_week', 'covered', 'unavailable'])
+    .default('unavailable'),
+  coverageOverdueDays: z.number().int().nonnegative().nullable().default(null),
+  nextVisitDueOn: z.iso.date().nullable().default(null),
 }).strict();
 export type WeeklyRouteSuggestion = z.infer<typeof weeklyRouteSuggestionSchema>;
 
@@ -113,13 +139,24 @@ export const weeklyRouteProposalSchema = z.object({
       asOfDate: z.iso.date().nullable() }).strict(),
     scrap: z.object({ status: z.enum(['available', 'unavailable']), generationId: z.uuid().nullable(),
       publishedAt: z.iso.datetime({ offset: true }).nullable() }).strict(),
+    visits: z.object({ status: z.enum(['available', 'unavailable']),
+      asOfDate: z.iso.date().nullable() }).strict().default({ status: 'unavailable', asOfDate: null }),
   }).strict(),
+  strategy: z.object({
+    kind: z.enum(['local', 'trip', 'pending']),
+    region: z.string().trim().min(1).max(160).nullable(),
+    distanceFromBaseKm: z.number().finite().nonnegative().nullable(),
+  }).strict().default({ kind: 'pending', region: null, distanceFromBaseKm: null }),
   days: z.array(z.object({ dayIndex: z.number().int().min(0).max(4), serviceDate: z.iso.date(),
     suggestions: z.array(weeklyRouteSuggestionSchema).max(10) }).strict()).length(5),
   excluded: z.array(z.object({ clientId: z.uuid(), reason: weeklyRouteExclusionReasonSchema }).strict()),
   counts: z.object({ evaluated: z.number().int().nonnegative(), suggested: z.number().int().nonnegative(),
     inactiveLost: z.number().int().nonnegative(), noPurchaseHistory: z.number().int().nonnegative(),
-    needsReview: z.number().int().nonnegative() }).strict(),
+    needsReview: z.number().int().nonnegative(),
+    coverageDue: z.number().int().nonnegative().default(0),
+    coveragePlanned: z.number().int().nonnegative().default(0),
+    coveragePending: z.number().int().nonnegative().default(0),
+  }).strict(),
 }).strict();
 export type WeeklyRouteProposal = z.infer<typeof weeklyRouteProposalSchema>;
 
@@ -139,15 +176,64 @@ export const persistedWeeklyRouteProposalSchema = z.object({
   publishedBy: z.uuid().nullable(),
   publishedAt: z.iso.datetime({ offset: true }).nullable(),
   routeIds: z.array(z.uuid()).max(5),
+  predecessorId: z.uuid().nullable().optional(),
+  predecessorVersion: z.number().int().positive().nullable().optional(),
 }).strict();
 export type PersistedWeeklyRouteProposal = z.infer<typeof persistedWeeklyRouteProposalSchema>;
 
 export const saveWeeklyRouteProposalRequestSchema = z.object({
   schemaVersion: z.literal(1),
   idempotencyKey: z.uuid(),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.default('auto'),
   proposal: weeklyRouteProposalSchema,
 }).strict();
 export type SaveWeeklyRouteProposalRequest = z.infer<typeof saveWeeklyRouteProposalRequestSchema>;
+
+export const regenerateWeeklyRouteProposalRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  idempotencyKey: z.uuid(),
+  expectedVersion: z.number().int().positive(),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.default('auto'),
+  proposal: weeklyRouteProposalSchema,
+}).strict();
+export type RegenerateWeeklyRouteProposalRequest = z.infer<typeof regenerateWeeklyRouteProposalRequestSchema>;
+
+export const weeklyRouteProposalMutationRequestSchema = z.object({
+  schemaVersion: z.literal(1),
+  weekStart: z.iso.date(),
+  sellerId: z.uuid(),
+  idempotencyKey: z.uuid(),
+  operation: z.enum(['open_or_generate', 'regenerate']).default('open_or_generate'),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.optional(),
+  proposalId: z.uuid().optional(),
+  expectedVersion: z.number().int().positive().optional(),
+}).strict().superRefine((value, context) => {
+  if (value.operation === 'regenerate' && (!value.proposalId || !value.expectedVersion)) {
+    context.addIssue({ code: 'custom', path: ['proposalId'],
+      message: 'Informe a proposta e a versão esperada para regenerar.' });
+  }
+});
+export type WeeklyRouteProposalMutationRequest = z.infer<typeof weeklyRouteProposalMutationRequestSchema>;
+
+export const weeklyRouteProposalMutationResponseSchema = z.object({
+  schemaVersion: z.literal(1),
+  outcome: z.enum(['created', 'existing', 'regenerated']),
+  record: persistedWeeklyRouteProposalSchema,
+}).strict();
+export type WeeklyRouteProposalMutationResponse = z.infer<typeof weeklyRouteProposalMutationResponseSchema>;
+
+export const weeklyRouteVisitCoverageResponseSchema = z.object({
+  schemaVersion: z.literal(1),
+  sellerId: z.uuid(),
+  source: z.literal('api.visits'),
+  observedAt: z.iso.datetime({ offset: true }),
+  clients: z.array(z.object({
+    clientId: z.uuid(),
+    lastCompletedVisitAt: z.iso.datetime({ offset: true }).nullable(),
+    visitId: z.uuid().nullable(),
+  }).strict()).max(5000),
+}).strict();
+export type WeeklyRouteVisitCoverageResponse = z.infer<typeof weeklyRouteVisitCoverageResponseSchema>;
 
 export const reviseWeeklyRouteProposalRequestSchema = z.object({
   schemaVersion: z.literal(1),

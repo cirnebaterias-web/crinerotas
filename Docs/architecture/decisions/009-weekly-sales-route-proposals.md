@@ -2,7 +2,7 @@
 
 ## Estado
 
-Desenho preparado em 04/11/2026 a partir da solicitação do usuário e das duas respostas de regra operacional. Implementação pendente. Complementa o planejamento manual da Story 4.8 e os sinais comerciais da Story 4.14; amplia o escopo anterior da arquitetura §7.5, que excluía IA e otimização de rotas do MVP. Não indica que uma integração de IA já esteja configurada.
+Desenho preparado em 04/11/2026 e atualizado em 09/11/2026 pela Story 4.33. A proposta determinística por regras, a revisão versionada e o mapa inteligente estão implementados; integração externa de IA e otimização rodoviária continuam futuras. Complementa o planejamento manual da Story 4.8 e os sinais comerciais da Story 4.14; amplia o escopo anterior da arquitetura §7.5 sem indicar que um fornecedor de IA já esteja configurado.
 
 ## Requisitos confirmados
 
@@ -61,6 +61,16 @@ Sinais de prioridade:
 - Débito oficial de sucata, evolução e última coleta, identificado como objetivo de negociação/coleta e não como probabilidade de venda.
 - Proximidade da origem e agrupamento dos clientes do mesmo corredor/região para reduzir deslocamentos.
 
+### 2.1. Rotina de cobertura e estratégia semanal
+
+Oportunidade de compra e obrigação de visita são eixos independentes. Todo cliente ativo com compra positiva há até 180 dias permanece no universo automático, mesmo comprando dentro de seu ciclo. A política `weekly-route-rules-v3` usa cadência inicial de 28 dias a partir da última visita **concluída**. Rascunho, publicação, início, cancelamento, não visita e uma nova compra não quitam essa cobertura.
+
+Estados de cobertura: sem visita concluída registrada, vencida, vencendo na semana, coberta e fonte indisponível. Fonte indisponível não equivale a primeira visita e não autoriza afirmar que a rotina está em dia. Coberturas vencidas são ordenadas pelo maior atraso antes do score comercial; clientes ainda comprando completam a capacidade disponível e permanecem visíveis para evitar que a rotina seja substituída apenas por oportunidades.
+
+A semana escolhe uma estratégia coerente `local`, `trip` ou `pending`. Distância conhecida de 80 km ou mais da cidade-base caracteriza viagem; 30 km continua sendo o limite entre paradas consecutivas conhecidas, sem limitar o acesso da base ao primeiro cliente. A capacidade máxima é 50 visitas por semana, não uma promessa de cobertura integral; pendências por capacidade, distância, cluster ou localização são contabilizadas e explicadas.
+
+O gestor pode regenerar explicitamente com preferência `auto`, `local` ou `trip`. `auto` mantém a inferência pelo cliente de maior prioridade de cobertura/comercial; `local` considera clientes posicionados abaixo de 80 km da cidade-base e `trip` considera um cluster posicionado a partir de 80 km. A preferência não contorna elegibilidade, limite diário, trechos de 30 km, versão ou aprovação. Quando não há cliente posicionado compatível, o resultado permanece `pending` em vez de fabricar uma região.
+
 Pesos e critérios de desempate devem ser explícitos e versionados. Não apresentar ranking heurístico como previsão estatística calibrada de fechamento. Sem dados suficientes, emitir indicação de baixa confiança/revisão.
 
 O motor distribui clientes em cinco dias, respeita rotas/compromissos existentes e não preenche 10 obrigatoriamente. Dez é teto normal, não meta que justifique viagens inviáveis. Evitar repetição automática do mesmo cliente na semana; retorno motivado pode ser incluído pelo gestor.
@@ -80,6 +90,8 @@ Fornecedor, credencial server-side e teto de gasto precisam ser definidos para a
 ### 4. Revisão e publicação
 
 Estados da proposta: rascunho → aguardando revisão → aprovada/publicada ou rejeitada/substituída. Uma aprovação se refere a uma versão exata; alterações posteriores invalidam aquela aprovação para a nova versão.
+
+Solicitar a mesma semana abre a proposta ativa sem mutação. Regeneração é uma ação explícita com `expectedVersion`, idempotência e vínculo com a versão predecessora. Quando já existe publicação, a nova sugestão nasce em rascunho e a publicação anterior permanece disponível ao vendedor até a aprovação transacional da sucessora. Alterações locais não salvas bloqueiam publicação e troca silenciosa de contexto.
 
 O gestor vê cinco dias por vendedor, clientes, objetivo/motivo, sinais de compra, débito de sucata, contagem diária, origem usada e pendências. Pode trocar o dia, remover/incluir cliente e reordenar antes de aprovar.
 

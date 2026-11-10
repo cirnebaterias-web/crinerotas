@@ -1,0 +1,59 @@
+schema: 1
+story: '4.33'
+story_title: 'Cobertura recorrente da carteira e planejador semanal inteligente'
+gate: PASS
+status_reason: 'Os sete achados anteriores permanecem resolvidos; a revisão incremental remove a corrida de rolagem no início do círculo e sincroniza o E2E com o zoom real. Os três E2E passaram novamente sem reduzir as verificações de seleção, popup, toque ou preservação do mapa.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'b66509c0f9a615466b6c42709eb6e65b3a2bf2d9'
+updated: '2026-11-09T23:02:32-03:00'
+top_issues: []
+waiver:
+  active: false
+quality_score: 100
+expires: '2026-11-23T23:02:32-03:00'
+resolved_issues:
+  - 'REL-433-001: geração recebe projeção estrita; regeneração pública exercitada pelo serviço.'
+  - 'REL-433-002: replay consultado antes das fontes; SQL tolera snapshot novo, compara intenção e estratégia, preserva resposta e escopo atual.'
+  - 'REL-433-003: inclusão manual reutiliza conclusão, estado de cobertura e próxima data reais; persistência recalcula contagens.'
+  - 'REQ-433-001: selecionados sem coordenadas entram com localização pendente; mensagens explicitam capacidade, distância e duplicidade.'
+  - 'REQ-433-002: filtro sucata, preferência auto/local/trip, região/distância e clientes pendentes com motivos disponíveis.'
+  - 'REL-433-004: decisões usam distância bruta e testes cobrem 79,99/80/80,01 km.'
+  - 'TEST-433-001: serviço e dashboard têm testes comportamentais; três E2E cobrem popup longo/390 px, mouse/toque e preservação do mapa.'
+evidence:
+  tests_reviewed: 122
+  risks_identified: 0
+  independently_executed:
+    - 'HEAD 810fc45: Vitest direcionado, 6 arquivos/45 testes aprovados.'
+    - 'HEAD 810fc45: pgTAP Story 4.33, 1 arquivo/74 testes aprovados.'
+    - 'HEAD b66509c: E2E weekly-route-intelligence, 3/3 aprovados em 13,0 s; popup/390 px, círculo por mouse, cancelamento, centro/zoom, identidade da instância e toque exercitados.'
+    - 'git diff --check: aprovado; inspeção do diff incremental e do fluxo SQL/contratos/UI concluída.'
+  developer_reported:
+    - 'HEAD b66509c: lint, typecheck e build production aprovados.'
+    - 'HEAD b66509c: suíte completa 152 arquivos/870 aprovados e 1 ignorado; E2E 3/3 aprovados; cenário de mouse 5/5 consecutivos aprovados.'
+    - 'Banco limpo: reset aprovado e pgTAP completo 34 arquivos/1568 aprovados.'
+    - 'Concorrência real com a mesma chave: um proposal, um command e um audit; versões obsoletas conflitam sem duplicar.'
+  coderabbit: 'Indisponível: binário local não instalado, tentativa registrada. Nenhum resultado de aprovação automatizada atribuído à ferramenta.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    ac_gaps: []
+    note: 'Rastreabilidade combina testes e inspeção; não significa ensaio independente de todas as combinações de entrada.'
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Capacidade e escopo atual verificados inclusive em replay; grants restritos; preferência divergente rejeitada; texto do popup seguro.'
+  performance:
+    status: PASS
+    notes: 'Leituras em lotes, índice de conclusões e reconciliação de camadas preservados; não houve ensaio de carga/latência nesta revisão.'
+  reliability:
+    status: PASS
+    notes: 'Regeneração, reenvio, locks/unicidade e proteção da edição permanecem aprovados. Início do círculo usa rolagem imediata, evitando deslocar o canvas entre ativação e primeiro pointer; testes aguardam zoom efetivo e toleram o snapping de pixel do Leaflet.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos compartilhados, preferência canônica com legacy auto, política versionada e testes nas fronteiras anteriormente descobertas reduzem divergência entre camadas.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Evoluir a referência diária de visitas para instante completo e testar conclusão posterior à geração no mesmo dia; hoje uma alteração de fatos pode exigir regeneração antes de salvar, com edição local preservada.'
+      refs: ['supabase/migrations/20261116140000_story433_route_routine.sql', 'apps/web/src/server/route-proposals/service.ts']
+    - action: 'Executar inspeção em Android físico quando o piloto ampliar o uso; toque atual foi exercitado por Chromium/CDP.'
+      refs: ['tests/e2e/weekly-route-intelligence.spec.ts']
