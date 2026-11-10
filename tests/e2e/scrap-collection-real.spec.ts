@@ -67,7 +67,7 @@ test('seller collects scrap through a real visit and manager reads the verified 
   await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV', exact: true }).check();
   await page.getByRole('button', { name: 'Salvar concorrência e continuar', exact: true }).click();
   await page.getByRole('button', { name: 'Concluir coleta de estoque', exact: true }).click();
-  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
+  await page.getByRole('button', { name: /Pesquisa de preços/ }).click();
   await page.getByRole('radio', { name: 'Preço não disponível', exact: true }).check();
   // Use a reason from the published real parameter set, not a fabricated identifier.
   const reason = page.getByRole('combobox', { name: 'Motivo da indisponibilidade', exact: true });

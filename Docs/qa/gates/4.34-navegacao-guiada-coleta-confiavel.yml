@@ -1,0 +1,26 @@
+schema: 1
+story: '4.34'
+story_title: 'Navegação guiada e coleta confiável durante a visita'
+gate: PASS
+status_reason: 'Saída acidental, histórico de navegação e defaults silenciosos foram corrigidos; gates automatizados e regressão dirigida passaram sem achados bloqueantes.'
+reviewer: 'Quinn (Test Architect)'
+updated: '2026-11-10T09:18:23-03:00'
+quality_score: 96
+waiver: { active: false }
+top_issues: []
+evidence:
+  tests_reviewed: 126
+  risks_identified: 4
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    ac_gaps: []
+nfr_validation:
+  security: { status: PASS, notes: 'Sem nova superfície externa ou persistência; dados continuam nos contratos e commit local existentes.' }
+  performance: { status: PASS, notes: 'Somente estado e apresentação locais; nenhuma chamada ou loop adicional.' }
+  reliability: { status: PASS, notes: 'Dirty state, falha de commit, offline, refresh e retorno do navegador possuem cobertura.' }
+  maintainability: { status: PASS, notes: 'Sugestão de tecnologia foi isolada e testada; navegação usa URL observável.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Homologar em Android físico com teclado aberto e botão do sistema durante o piloto.'
+      refs: ['apps/web/src/features/visits/visit-start-screen.tsx', 'apps/web/src/features/visits/prices/visit-competitor-prices-step.tsx']
