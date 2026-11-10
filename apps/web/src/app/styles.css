@@ -389,6 +389,12 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .seller-price-catalog-control span { padding: 0 0 0 11px; color: #506257; font-size: 13px; font-weight: 700; }
 .seller-stock-form .seller-price-catalog-control input { width: 100%; min-width: 0; min-height: 44px; margin: 0; padding: 8px 10px 8px 6px; border: 0; border-radius: 0; font-size: 16px; font-weight: 750; font-variant-numeric: tabular-nums; }
 .seller-price-product-row > .seller-field-error { flex-basis: 100%; margin: 0; }
+.seller-price-confirmation-fields { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(150px, 1fr); gap: 6px 10px; flex-basis: 100%; padding: 10px; border-radius: 10px; background: #f7faf8; }
+.seller-price-review { display: grid; gap: 18px; }
+.seller-price-review-list { display: grid; gap: 10px; }
+.seller-price-review-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 14px; border: 1px solid var(--cirne-border); border-radius: 12px; background: #fff; }
+.seller-price-review-item h3, .seller-price-review-item p { margin: 0; }
+.seller-price-review-item strong { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-variant-numeric: tabular-nums; }
 .seller-price-additional-list { margin-top: 2px; }
 .seller-price-additional-list > h3 { margin: 0; font-size: 15px; }
 .seller-add-quotation, .seller-remove-quotation { width: 100%; }
@@ -405,6 +411,9 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .seller-stock-row-fields, .seller-stock-competitor-fields, .seller-price-row-fields { grid-template-columns: 1fr; gap: 12px; }
   .seller-price-observation { grid-column: auto; }
   .seller-price-catalog-control { flex-basis: 128px; }
+  .seller-price-confirmation-fields { grid-template-columns: 1fr; }
+  .seller-price-review-item { grid-template-columns: 1fr; }
+  .seller-price-review-item strong { grid-column: 1; grid-row: auto; }
   .seller-stock-brand-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .seller-stock-actions { flex-direction: column-reverse; }
   .seller-stock-actions .seller-button { width: 100%; }

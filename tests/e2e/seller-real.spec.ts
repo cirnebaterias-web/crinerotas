@@ -80,7 +80,8 @@ test('removed client keeps its original offline visit after real republication a
   await context.setOffline(false);
   await expect(page.getByText(visitConfirmedMessage)).toBeVisible();
   await expect(page.getByText('Sincronizada', { exact: true })).toBeVisible();
-  await page.getByRole('link', { name: 'Retornar à rota' }).click();
+  await page.getByRole('button', { name: 'Pausar visita e voltar à rota' }).click();
+  await page.getByRole('link', { name: 'Pausar e voltar à rota' }).click();
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
   const savedVisits = page.getByRole('region', { name: 'Visitas salvas de outras versões' });
   await expect(savedVisits.getByRole('heading', { name: originalStop.client.name, exact: true })).toBeVisible();
@@ -268,7 +269,7 @@ test('seller saves real stock and reopens the canonical visit offline without du
   await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).check();
   await page.getByRole('button', { name: 'Salvar concorrência e continuar' }).click();
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
-  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
+  await page.getByRole('button', { name: /Pesquisa de preços/ }).click();
   await expect(page).toHaveURL(/\?step=prices$/);
   await expect.poll(() => storedStockState(page)).toBe('saved_on_device');
   await context.setOffline(false);

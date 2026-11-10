@@ -31,12 +31,19 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const [showCheckout, setShowCheckout] = useState(false);
   const [showStockReopen, setShowStockReopen] = useState(false);
   const [showStockExit, setShowStockExit] = useState(false);
+  const [showRouteExit, setShowRouteExit] = useState(false);
   const [competitorDirty, setCompetitorDirty] = useState(false);
+  const [pricesDirty, setPricesDirty] = useState(false);
+  const navigationStateRef = useRef({ step, competitorDirty, pricesDirty });
   const { draft, state, message: syncMessage } = view;
   const stockPhotos = view.attachments.filter((item) => item.purpose === 'stock_evidence');
   const stockComplete = Boolean(draft?.stock?.collectionCompletedAt &&
     stockPhotos.length >= 3 && stockPhotos.length <= 5);
   const checkinEvidence = view.evidence.find((item) => item.kind === 'checkin' && item.latitude && item.longitude);
+
+  useEffect(() => {
+    navigationStateRef.current = { step, competitorDirty, pricesDirty };
+  }, [step, competitorDirty, pricesDirty]);
 
   useEffect(() => {
     if (state === 'ready' && step === 'review') nextStepTitleRef.current?.focus();
@@ -55,10 +62,21 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   useEffect(() => {
     const readStep = () => {
       const requested = new URLSearchParams(window.location.search).get('step');
-      setStep(requested === 'stock' || requested === 'competitor-stock' || requested === 'stock-photos' ||
+      const next = requested === 'stock' || requested === 'competitor-stock' || requested === 'stock-photos' ||
         requested === 'prices' || requested === 'actions' || requested === 'scrap' || requested === 'review' || requested === 'complete'
         ? requested
-        : 'start');
+        : 'start';
+      const current = navigationStateRef.current;
+      const hasUnsavedChanges = current.competitorDirty || current.pricesDirty;
+      if (next !== current.step && hasUnsavedChanges) {
+        const restored = new URL(window.location.href);
+        if (current.step === 'start') restored.searchParams.delete('step');
+        else restored.searchParams.set('step', current.step);
+        window.history.pushState({}, '', restored);
+        setShowStockExit(true);
+        return;
+      }
+      setStep(next);
     };
     readStep();
     const service = new OfflineFoundationService();
@@ -92,6 +110,10 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     else url.searchParams.set('step', next);
     if (next !== 'stock') url.searchParams.delete('brand');
     else if (brand) url.searchParams.set('brand', brand);
+    if (next !== 'prices') {
+      url.searchParams.delete('priceView');
+      url.searchParams.delete('priceBrand');
+    }
     window.history.pushState({}, '', url);
     setStep(next);
   };
@@ -190,10 +212,19 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     else navigateStep('start');
   };
 
+  const returnToTasks = () => {
+    if (step === 'prices' && pricesDirty) {
+      setShowStockExit(true);
+      return;
+    }
+    requestStockExit();
+  };
+
   const savePrices = async (values: CompetitorPricesInput) => {
     const controller = controllerRef.current;
     if (!controller) throw new Error('A visita ainda não está pronta para edição.');
     await controller.savePrices(values);
+    setPricesDirty(false);
     navigateStep('actions');
   };
 
@@ -279,7 +310,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           </button>
           <button className="seller-task-card" data-state={!stockComplete ? 'locked' : draft.prices ? 'completed' : 'available'} disabled={!stockComplete}
             onClick={() => navigateStep('prices')}>
-            <span><strong>Preços da concorrência</strong><small>Cotações e indisponibilidade</small></span>
+            <span><strong>Pesquisa de preços</strong><small>Nossos produtos, concorrentes e indisponibilidade</small></span>
             <span>{draft.prices ? '✓ Concluído' : stockComplete ? 'Iniciar' : '🔒 Após estoque'}</span>
           </button>
           <button className="seller-task-card" data-state={!draft.prices ? 'locked' : draft.commercialActions ? 'completed' : 'available'} disabled={!draft.prices} onClick={() => navigateStep('actions')}>
@@ -319,10 +350,10 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           draft={draft}
           parameters={view.priceParameters ?? null}
           onSave={savePrices}
+          onDirtyChange={setPricesDirty}
         />}
-        {step !== 'start' && <button className="seller-button seller-secondary" type="button"
-          onClick={requestStockExit}>{['stock', 'competitor-stock', 'stock-photos'].includes(step)
-            ? 'Sair da coleta de estoque' : 'Voltar às tarefas'}</button>}
+        {step !== 'start' && step !== 'complete' && <button className="seller-button seller-secondary" type="button"
+          onClick={returnToTasks}>Voltar</button>}
         {step === 'actions' && draft.prices && <VisitCommercialActionsStep
           draft={draft} actions={view.commercialActions} parameters={view.priceParameters ?? null}
           attachments={view.attachments} onAddEvidence={addCommercialActionEvidence} onSave={saveCommercialActions}
@@ -371,18 +402,30 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         {showStockExit && <div className="seller-evidence-overlay" role="dialog" aria-modal="true"
           aria-labelledby="stock-exit-title" aria-describedby="stock-exit-description">
           <section className="seller-stock-card">
-            <h2 id="stock-exit-title">{competitorDirty ? 'Sair sem salvar?' : 'Sair da coleta de estoque?'}</h2>
-            <p id="stock-exit-description">{competitorDirty
-              ? 'As alterações no estoque da concorrência serão perdidas.'
+            <h2 id="stock-exit-title">{competitorDirty || pricesDirty ? 'Sair sem salvar?' : 'Pausar esta tarefa?'}</h2>
+            <p id="stock-exit-description">{competitorDirty || pricesDirty
+              ? 'As alterações ainda não salvas serão perdidas.'
               : 'A coleta ainda não foi concluída. Você poderá continuar depois.'}</p>
             <button className="seller-button seller-primary" autoFocus type="button"
               onClick={() => setShowStockExit(false)}>Continuar preenchendo</button>{' '}
             <button className="seller-button seller-secondary" type="button" onClick={() => {
-              setCompetitorDirty(false); setShowStockExit(false); navigateStep('start');
-            }}>Sair {competitorDirty ? 'sem salvar' : 'agora'}</button>
+              setCompetitorDirty(false); setPricesDirty(false); setShowStockExit(false); navigateStep('start');
+            }}>Sair {competitorDirty || pricesDirty ? 'sem salvar' : 'agora'}</button>
           </section>
         </div>}
-        <a className="seller-button seller-secondary" href="/route">Retornar à rota</a>
+        {step === 'start' && draft.localStatus !== 'completed' && <button className="seller-button seller-secondary"
+          type="button" onClick={() => setShowRouteExit(true)}>Pausar visita e voltar à rota</button>}
+        {step === 'complete' && <a className="seller-button seller-secondary" href="/route">Voltar à rota</a>}
+        {showRouteExit && <div className="seller-evidence-overlay" role="dialog" aria-modal="true"
+          aria-labelledby="route-exit-title" aria-describedby="route-exit-description">
+          <section className="seller-stock-card">
+            <h2 id="route-exit-title">Pausar visita e voltar à rota?</h2>
+            <p id="route-exit-description">A visita continua em andamento. O que já foi salvo permanecerá neste aparelho.</p>
+            <button className="seller-button seller-primary" autoFocus type="button"
+              onClick={() => setShowRouteExit(false)}>Continuar a visita</button>{' '}
+            <a className="seller-button seller-secondary" href="/route">Pausar e voltar à rota</a>
+          </section>
+        </div>}
       </div>}
     </main>
   </div>;

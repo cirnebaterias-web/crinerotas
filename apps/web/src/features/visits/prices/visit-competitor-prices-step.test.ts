@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findCatalogPriceRow } from './visit-competitor-prices-step';
+import { findCatalogPriceRow, suggestedTechnologyId } from './visit-competitor-prices-step';
 
 describe('findCatalogPriceRow', () => {
   const rows = [
@@ -16,5 +16,14 @@ describe('findCatalogPriceRow', () => {
   it('uses the model fallback only for rows without a product code', () => {
     expect(findCatalogPriceRow(rows, 'SKU-LEGACY', 'modelo legado')?.rowId).toBe('legacy');
     expect(findCatalogPriceRow(rows, 'SKU-003', 'MODELO REPETIDO')).toBeUndefined();
+  });
+
+  it('never selects the first published technology when the model has no matching technology', () => {
+    const technologies = [
+      { id: 'first', code: 'synthetic', label: 'Tecnologia sintética' },
+      { id: 'agm', code: 'agm', label: 'AGM' },
+    ];
+    expect(suggestedTechnologyId('Bateria comum', technologies)).toBe('');
+    expect(suggestedTechnologyId('Modelo AGM 70 Ah', technologies)).toBe('agm');
   });
 });

@@ -299,7 +299,7 @@ async function saveNoCompetitorStock(page: Page) {
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
   await expect(page.getByRole('button', { name: 'Coleta de estoque, concluída. Abrir detalhes' }))
     .toContainText('Concluído');
-  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
+  await page.getByRole('button', { name: /Pesquisa de preços/ }).click();
   await expect(page.getByRole('heading', { name: 'Preços dos nossos produtos' })).toBeVisible();
 }
 
@@ -316,7 +316,7 @@ test('protects unsaved stock changes and requires confirmation to reopen a compl
   await saveOwnBrandsWithoutStock(page);
 
   await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).check();
-  await page.getByRole('button', { name: 'Sair da coleta de estoque' }).click();
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Sair sem salvar?' })).toBeVisible();
   await page.getByRole('button', { name: 'Continuar preenchendo' }).click();
 
@@ -330,6 +330,23 @@ test('protects unsaved stock changes and requires confirmation to reopen a compl
   await page.getByRole('button', { name: 'Reabrir e editar' }).click();
   await expect(page).toHaveURL(/\?step=stock$/);
   await expect(page.getByRole('heading', { name: 'Estoque do cliente' })).toBeVisible();
+});
+
+test('keeps route exit on the visit hub and makes Android back return one level', async ({ page }) => {
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await startVisit(page);
+
+  await expect(page.getByRole('link', { name: 'Retornar à rota' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Pausar visita e voltar à rota' }).click();
+  await expect(page.getByRole('dialog', { name: 'Pausar visita e voltar à rota?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continuar a visita' }).click();
+
+  await page.getByRole('button', { name: 'Coleta de estoque' }).click();
+  await expect(page.getByRole('button', { name: 'Voltar', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: /rota/i })).toHaveCount(0);
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'O que você vai coletar?' })).toBeVisible();
 });
 
 test('starts online, confirms once and reopens the same visit after an offline hard refresh', async ({ page, context }) => {
@@ -418,7 +435,7 @@ test('saves repeatable stock with zero and other models offline, restores it and
   await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeVisible();
   await addStockPhotos(page);
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
-  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
+  await page.getByRole('button', { name: /Pesquisa de preços/ }).click();
   await expect(page).toHaveURL(/\?step=prices$/);
   const saved = await offlineCounts(page);
   expect(saved.events).toHaveLength(5);
@@ -445,7 +462,7 @@ test('saves repeatable stock with zero and other models offline, restores it and
 
   const pricesUrl = page.url();
   await page.goto(pricesUrl, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'Voltar às tarefas' }).click();
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
   await page.getByRole('button', { name: /Coleta de estoque/ }).click();
   await page.getByRole('button', { name: 'Reabrir e editar' }).click();
   await page.getByRole('button', { name: 'Heliar: 2 unidades. Abrir modelos' }).click();
@@ -458,7 +475,7 @@ test('saves repeatable stock with zero and other models offline, restores it and
   await expect(page.getByLabel('Nome da marca')).toHaveValue('Marca sintética');
   await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
-  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
+  await page.getByRole('button', { name: /Pesquisa de preços/ }).click();
 
   await context.setOffline(false);
   await expect.poll(async () => (await offlineCounts(page)).events.length).toBe(0);
@@ -549,7 +566,7 @@ test('keeps stock validation and step transitions usable by keyboard on mobile',
   await addStockPhotos(page);
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).focus();
   await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: /Preços da concorrência/ }).focus();
+  await page.getByRole('button', { name: /Pesquisa de preços/ }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Preços dos nossos produtos' })).toBeFocused();
   await page.setViewportSize({ width: 320, height: 844 });
@@ -697,6 +714,8 @@ test('saves repeatable competitor prices offline, restores them and confirms the
   await page.getByRole('button', { name: /Heliar: 0 preços/ }).click();
   await page.getByLabel('Buscar modelo').fill('HG38JD 24-320');
   await page.getByLabel('Preço de venda de HG38JD 24-320').fill('399,90');
+  await page.getByLabel('Tecnologia confirmada').selectOption(technologyId);
+  await page.getByLabel('Condição confirmada').selectOption(conditionId);
   await page.getByRole('button', { name: 'Salvar Heliar' }).click();
   await page.getByRole('button', { name: 'Continuar para preços da concorrência' }).click();
   await page.getByRole('button', { name: 'Concorrente Sintético', exact: true }).click();
@@ -708,7 +727,9 @@ test('saves repeatable competitor prices offline, restores them and confirms the
   await expect(page.getByLabel('Modelo ou amperagem').nth(1)).toBeFocused();
   await page.getByRole('button', { name: 'Remover bateria 2 da marca Concorrente Sintético' }).click();
   await expect(page.getByRole('button', { name: 'Adicionar outra bateria' })).toBeFocused();
-  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await page.getByRole('button', { name: 'Revisar preços informados' }).click();
+  await expect(page.getByRole('heading', { name: 'Confira antes de salvar' })).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar e salvar preços' }).click();
 
   await expect(page).toHaveURL(/\?step=actions$/);
   await expect(page.getByRole('heading', { name: 'Heliar', exact: true })).toBeVisible();
@@ -743,8 +764,8 @@ test('saves repeatable competitor prices offline, restores them and confirms the
   const actionsUrl = page.url();
   await page.goto(actionsUrl, { waitUntil: 'domcontentloaded' });
   await expect(page.getByText('1 ação(ões) concorrente(s) registrada(s).')).toBeVisible();
-  await page.getByRole('button', { name: 'Voltar às tarefas' }).click();
-  await page.getByRole('button', { name: /Preços da concorrência/ }).click();
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
+  await page.getByRole('button', { name: /Pesquisa de preços/ }).click();
   await page.getByRole('button', { name: /Heliar: 1 preços/ }).click();
   await page.getByLabel('Buscar modelo').fill('HG38JD 24-320');
   await expect(page.getByLabel('Preço de venda de HG38JD 24-320')).toHaveValue('399.90');
@@ -785,8 +806,12 @@ test('reuses own products found in stock and allows pricing another catalog prod
   await page.getByRole('button', { name: /Heliar: 0 preços/ }).click();
   await expect(page.getByText('Em estoque: 2 un.')).toBeVisible();
   await page.getByLabel('Preço de venda de HG38JD 24-320').fill('529');
+  await page.getByLabel('Tecnologia confirmada').selectOption(technologyId);
+  await page.getByLabel('Condição confirmada').selectOption(conditionId);
   await page.getByLabel('Buscar modelo').fill('HTZ12S-BS');
   await page.getByLabel('Preço de venda de HTZ12S-BS').fill('279,90');
+  await page.getByLabel('Tecnologia confirmada').selectOption(technologyId);
+  await page.getByLabel('Condição confirmada').selectOption(conditionId);
   await page.getByRole('button', { name: 'Salvar Heliar' }).click();
   await expect(page.getByRole('button', { name: /Heliar: 2 preços/ })).toContainText('Preços preparados');
   await page.getByRole('button', { name: /Heliar: 2 preços/ }).click();
@@ -812,12 +837,12 @@ test('rejects a non-positive price and accepts explicit unavailability with a pu
   await page.getByLabel('Tecnologia').selectOption(technologyId);
   await page.getByLabel('Preço de venda (R$)').fill('0');
   await page.getByLabel('Condição').selectOption(conditionId);
-  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await page.getByRole('button', { name: 'Revisar preços informados' }).click();
   await expect(page.getByText('Informe um preço de venda maior que zero. Exemplo: 399,90.')).toBeVisible();
   await expect(page.getByLabel('Preço de venda (R$)')).toBeFocused();
-  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await page.getByRole('button', { name: 'Revisar preços informados' }).click();
   await expect(page.getByLabel('Preço de venda (R$)')).toBeFocused();
-  await expect(page).toHaveURL(/\?step=prices$/);
+  await expect(page).toHaveURL(/\?step=prices&priceView=competitors$/);
 
   await page.getByLabel('Preço não disponível').check();
   await page.getByLabel('Motivo da indisponibilidade').selectOption(unavailableReasonId);
@@ -863,7 +888,7 @@ test('does not invent a prices response when the approved catalog is unavailable
   await saveEmptyStockToPrices(page);
   await expect(page.getByText('Configuração comercial indisponível.', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Continuar para preços da concorrência' }).click();
-  await expect(page.getByRole('button', { name: 'Salvar preços e continuar' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Revisar preços informados' })).toBeDisabled();
   const state = await offlineCounts(page);
   expect(state.events).not.toEqual(expect.arrayContaining([
     expect.objectContaining({ operation: 'visit.prices.saved.v1' }),
@@ -901,9 +926,12 @@ test('keeps competitor price values on screen when the atomic local commit fails
       return key === undefined ? originalAdd.call(this, value) : originalAdd.call(this, value, key);
     };
   });
-  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
-  await expect(page).toHaveURL(/\?step=prices$/);
+  await page.getByRole('button', { name: 'Revisar preços informados' }).click();
+  await page.getByRole('button', { name: 'Confirmar e salvar preços' }).click();
+  await expect(page).toHaveURL(/\?step=prices&priceView=review$/);
   await expect(page.locator('.seller-form-error[role="alert"]')).toContainText('Não foi possível salvar no aparelho');
+  await page.getByRole('button', { name: '‹ Editar preços' }).click();
+  await page.getByRole('button', { name: 'Concorrente Sintético 1 preço' }).click();
   await expect(page.getByLabel('Modelo ou amperagem')).toHaveValue('80 Ah');
   await expect(page.getByLabel('Preço de venda (R$)')).toHaveValue('520.00');
   const state = await offlineCounts(page);

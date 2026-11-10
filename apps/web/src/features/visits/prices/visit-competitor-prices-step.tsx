@@ -18,6 +18,7 @@ interface Props {
   draft: LocalVisitDraft;
   parameters: LocalCompetitorPriceParameterSet | null;
   onSave: (values: CompetitorPricesInput) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 type Availability = CompetitorPricesInput['availability'];
@@ -26,7 +27,7 @@ type RowSource = 'saved' | 'stock' | 'catalog' | 'manual';
 type Row = { rowId: string; modelOrAmperage: string; technologyId: string; priceBrl: string;
   conditionId: string; observation: string; source: RowSource; productCode?: string };
 type Group = { id: string; competitorId: string; rows: Row[] };
-type Screen = 'own-overview' | 'own-detail' | 'competitors';
+type Screen = 'own-overview' | 'own-detail' | 'competitors' | 'review';
 
 const moneyPattern = /^\d+(?:\.\d+)?$/;
 const ownBrands = new Set<string>(OWN_STOCK_BRANDS);
@@ -43,6 +44,16 @@ export function findCatalogPriceRow<T extends { productCode?: string; modelOrAmp
   return rows?.find((row) => row.productCode === productCode)
     ?? rows?.find((row) => !row.productCode
       && row.modelOrAmperage.toLocaleLowerCase('pt-BR') === model.toLocaleLowerCase('pt-BR'));
+}
+
+export function suggestedTechnologyId(
+  model: string,
+  technologies: Array<{ id: string; code: string; label: string }>,
+): string {
+  const normalized = model.toLocaleLowerCase('pt-BR');
+  const expected = normalized.includes('agm') ? 'agm' : normalized.includes('efb') ? 'efb' : 'sli';
+  return technologies.find(({ code, label }) =>
+    `${code} ${label}`.toLocaleLowerCase('pt-BR').includes(expected))?.id ?? '';
 }
 
 function initialGroups(draft: LocalVisitDraft): Group[] {
@@ -63,7 +74,7 @@ function initialGroups(draft: LocalVisitDraft): Group[] {
   return [...groups.values()];
 }
 
-export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) {
+export function VisitCompetitorPricesStep({ draft, parameters, onSave, onDirtyChange }: Props) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const refs = useRef<Record<string, HTMLElement | null>>({});
   const pendingFocus = useRef<string | null>(null);
@@ -102,16 +113,47 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
   const register = (controlKey: string) => (element: HTMLElement | null) => { refs.current[controlKey] = element; };
   const fieldId = (rowId: string, field: Field) => `price-${rowId}-${field}`;
   const fieldError = (rowId: string, field: Field) => errors[key(rowId, field)];
-  const defaultConditionId = parameters?.values.conditions[0]?.id ?? '';
   const technologyIdFor = (model: string) => {
-    const normalized = model.toLocaleLowerCase('pt-BR');
-    const expected = normalized.includes('agm') ? 'agm' : normalized.includes('efb') ? 'efb' : 'sli';
-    return parameters?.values.technologies.find(({ code, label }) =>
-      `${code} ${label}`.toLocaleLowerCase('pt-BR').includes(expected))?.id
-      ?? parameters?.values.technologies[0]?.id ?? '';
+    return suggestedTechnologyId(model, parameters?.values.technologies ?? []);
+  };
+
+  const markDirty = () => onDirtyChange?.(true);
+  const navigatePriceScreen = (next: Screen, brand: OwnStockBrand | null = null) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('priceView', next);
+    if (brand) url.searchParams.set('priceBrand', brand);
+    else url.searchParams.delete('priceBrand');
+    window.history.pushState({}, '', url);
+    setScreen(next);
+    setActiveOwnBrand(brand);
   };
 
   useEffect(() => { titleRef.current?.focus(); }, [screen, activeOwnBrand]);
+  useEffect(() => {
+    const readPriceScreen = () => {
+      const query = new URLSearchParams(window.location.search);
+      const requested = query.get('priceView');
+      const brand = query.get('priceBrand');
+      if (requested === 'own-detail' && brand && ownBrands.has(brand)) {
+        const typedBrand = brand as OwnStockBrand;
+        const parameter = ownParameter(typedBrand);
+        const group = parameter ? groups.find(({ competitorId }) => competitorId === parameter.id) : undefined;
+        if (group) {
+          setActiveId(group.id);
+          setActiveOwnBrand(typedBrand);
+          setScreen('own-detail');
+          return;
+        }
+      }
+      if (requested === 'competitors' || requested === 'review' || requested === 'own-overview') {
+        setScreen(requested);
+        setActiveOwnBrand(null);
+        if (requested !== 'competitors') setActiveId(null);
+      }
+    };
+    window.addEventListener('popstate', readPriceScreen);
+    return () => window.removeEventListener('popstate', readPriceScreen);
+  }, [groups]);
   useEffect(() => { if (firstError) refs.current[firstError]?.focus(); }, [firstError, focusAttempt, activeId]);
   useEffect(() => {
     if (!pendingFocus.current) return;
@@ -120,6 +162,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
   }, [groups, activeId]);
 
   const updateRow = (groupId: string, rowId: string, field: Field, value: string) => {
+    markDirty();
     setGroups((current) => current.map((group) => group.id === groupId
       ? { ...group, rows: group.rows.map((row) => row.rowId === rowId ? { ...row, [field]: value } : row) }
       : group));
@@ -139,7 +182,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
         .slice(0, availableSlots)
         .map((line) => ({ ...emptyRow(`new-row-${nextRow.current++}`, 'stock'),
           modelOrAmperage: line.model, productCode: line.productCode,
-          technologyId: technologyIdFor(line.model), conditionId: defaultConditionId }));
+          technologyId: technologyIdFor(line.model), conditionId: '' }));
       if (missing.length) setGroups((current) => current.map((group) => group.id === existing.id
         ? { ...group, rows: [...group.rows, ...missing] } : group));
       setActiveId(existing.id);
@@ -148,11 +191,11 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
       const availableSlots = Math.max(0, 25 - totalRows);
       const rows = stockLines.slice(0, availableSlots).map((line) => ({ ...emptyRow(`new-row-${nextRow.current++}`, 'stock'),
         modelOrAmperage: line.model, productCode: line.productCode,
-        technologyId: technologyIdFor(line.model), conditionId: defaultConditionId }));
+        technologyId: technologyIdFor(line.model), conditionId: '' }));
       setGroups((current) => [...current, { id, competitorId: parameter.id, rows }]);
       setActiveId(id);
     }
-    setActiveOwnBrand(brand); setScreen('own-detail'); setSearch(''); clearErrors();
+    navigatePriceScreen('own-detail', brand); setSearch(''); clearErrors();
   };
 
   const ownGroupFor = (brand: OwnStockBrand) => {
@@ -162,6 +205,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
   const rowForProduct = (group: Group | undefined, productCode: string, model: string) =>
     findCatalogPriceRow(group?.rows, productCode, model);
   const setCatalogPrice = (group: Group, productCode: string, model: string, value: string) => {
+    markDirty();
     const existing = rowForProduct(group, productCode, model);
     if (existing) {
       if (!value && existing.source !== 'manual') {
@@ -173,7 +217,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
     if (!value || totalRows >= 25) return;
     const rowId = `new-row-${nextRow.current++}`;
     const row = { ...emptyRow(rowId, 'catalog'), productCode, modelOrAmperage: model, priceBrl: value,
-      technologyId: technologyIdFor(model), conditionId: defaultConditionId };
+      technologyId: technologyIdFor(model), conditionId: '' };
     setGroups((current) => current.map((item) => item.id === group.id
       ? { ...item, rows: [...item.rows, row] } : item));
     clearErrors();
@@ -183,6 +227,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
     const existing = groups.find((group) => group.competitorId === competitorId);
     if (existing) { setActiveId(existing.id); clearErrors(); return; }
     const id = `new-brand-${nextGroup.current++}`;
+    markDirty();
     const rowId = `new-row-${nextRow.current++}`;
     pendingFocus.current = key(rowId, 'modelOrAmperage');
     setGroups((current) => [...current, { id, competitorId, rows: [emptyRow(rowId)] }]);
@@ -192,6 +237,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
 
   const addManualRow = (groupId: string) => {
     if (totalRows >= 25) return;
+    markDirty();
     const rowId = `new-row-${nextRow.current++}`;
     pendingFocus.current = key(rowId, 'modelOrAmperage');
     setGroups((current) => current.map((group) => group.id === groupId
@@ -199,12 +245,14 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
     setAnnouncement('Outra bateria adicionada para esta marca.'); clearErrors();
   };
   const removeRow = (groupId: string, rowId: string) => {
+    markDirty();
     pendingFocus.current = 'add-row';
     setGroups((current) => current.map((group) => group.id === groupId
       ? { ...group, rows: group.rows.filter((row) => row.rowId !== rowId) } : group));
     setAnnouncement('Bateria removida da pesquisa de preços.'); clearErrors();
   };
   const removeGroup = (groupId: string) => {
+    markDirty();
     setGroups((current) => current.filter(({ id }) => id !== groupId)); setActiveId(null);
     setAnnouncement('Marca removida da pesquisa de preços.'); clearErrors();
   };
@@ -247,7 +295,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
   const saveOwnBrand = () => {
     if (!activeOwnBrand || !activeGroup || !validateRows([activeGroup])) return;
     setCompletedOwnBrands((current) => current.includes(activeOwnBrand) ? current : [...current, activeOwnBrand]);
-    setScreen('own-overview'); setActiveOwnBrand(null); setActiveId(null);
+    navigatePriceScreen('own-overview'); setActiveId(null);
     setAnnouncement(`Preços de ${activeOwnBrand} preparados.`);
   };
 
@@ -283,7 +331,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (saving) return;
     const values = validate(); if (!values) return; setSaving(true);
-    try { await onSave(values); }
+    try { await onSave(values); onDirtyChange?.(false); }
     catch {
       setErrors({ form: 'Não foi possível salvar no aparelho. Os valores continuam nesta tela; tente novamente.' });
       setFirstError('form'); setFocusAttempt((value) => value + 1);
@@ -344,7 +392,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
       </button>;
     })}</div>
     <button className="seller-button seller-primary seller-stock-submit" type="button"
-      onClick={() => { setScreen('competitors'); setActiveId(null); clearErrors(); }}>
+      onClick={() => { navigatePriceScreen('competitors'); setActiveId(null); clearErrors(); }}>
       Continuar para preços da concorrência</button>
   </div>;
 
@@ -362,7 +410,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
       && !catalogModels.has(row.modelOrAmperage.toLocaleLowerCase('pt-BR')));
     const priced = activeGroup.rows.filter(({ priceBrl }) => Number(normalizeMoney(priceBrl)) > 0).length;
     ownDetail = <div className="seller-price-own-flow">
-      <button className="seller-stock-back" type="button" onClick={() => { setScreen('own-overview'); setActiveId(null); }}>‹ Todas as marcas</button>
+      <button className="seller-stock-back" type="button" onClick={() => { navigatePriceScreen('own-overview'); setActiveId(null); }}>‹ Todas as marcas</button>
       <div className="seller-stock-detail-heading"><div><p className="seller-kicker">PREÇOS — PRODUTOS PRÓPRIOS</p>
         <h2 id="prices-title" ref={titleRef} tabIndex={-1}>{activeOwnBrand}</h2>
         <p className="seller-muted">Informe o preço de venda. Produtos encontrados no estoque aparecem primeiro.</p></div>
@@ -383,6 +431,22 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
             aria-label={`Preço de venda de ${product.model}`} value={row?.priceBrl ?? ''} aria-invalid={Boolean(error)}
             aria-describedby={error && row ? `${fieldId(row.rowId, 'priceBrl')}-error` : undefined}
             onChange={(event) => setCatalogPrice(activeGroup, product.factoryCode, product.model, event.target.value)} /></div>
+          {row?.priceBrl && <div className="seller-price-confirmation-fields">
+            <label htmlFor={`catalog-technology-${product.factoryCode}`}>Tecnologia confirmada</label>
+            <select id={`catalog-technology-${product.factoryCode}`} value={row.technologyId}
+              aria-invalid={Boolean(fieldError(row.rowId, 'technologyId'))}
+              onChange={(event) => updateRow(activeGroup.id, row.rowId, 'technologyId', event.target.value)}>
+              <option value="">Selecione</option>{parameters?.values.technologies.map((technology) =>
+                <option key={technology.id} value={technology.id}>{technology.label}</option>)}</select>
+            <label htmlFor={`catalog-condition-${product.factoryCode}`}>Condição confirmada</label>
+            <select id={`catalog-condition-${product.factoryCode}`} value={row.conditionId}
+              aria-invalid={Boolean(fieldError(row.rowId, 'conditionId'))}
+              onChange={(event) => updateRow(activeGroup.id, row.rowId, 'conditionId', event.target.value)}>
+              <option value="">Selecione</option>{parameters?.values.conditions.map((condition) =>
+                <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select>
+            {fieldError(row.rowId, 'technologyId') && <p className="seller-field-error">{fieldError(row.rowId, 'technologyId')}</p>}
+            {fieldError(row.rowId, 'conditionId') && <p className="seller-field-error">{fieldError(row.rowId, 'conditionId')}</p>}
+          </div>}
           {error && row && <p className="seller-field-error" id={`${fieldId(row.rowId, 'priceBrl')}-error`}>{error}</p>}
         </div>;
       })}{!products.length && <p className="seller-muted">Nenhum modelo encontrado. Adicione outra bateria se não estiver cadastrada.</p>}</div>
@@ -397,7 +461,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
 
   const competitorGroups = groups.filter(({ competitorId }) => !ownBrands.has(brandLabel(competitorId)));
   const competitorView = <div className="seller-price-collection">
-    <button className="seller-stock-back" type="button" onClick={() => { setScreen('own-overview'); setActiveId(null); }}>‹ Nossos produtos</button>
+    <button className="seller-stock-back" type="button" onClick={() => { navigatePriceScreen('own-overview'); setActiveId(null); }}>‹ Nossos produtos</button>
     <div className="seller-stock-heading"><div><p className="seller-kicker">PREÇOS DA CONCORRÊNCIA</p>
       <h2 id="prices-title" ref={titleRef} tabIndex={-1}>Marcas concorrentes</h2>
       <p className="seller-muted">Selecione a marca e registre as baterias encontradas no PDV.</p></div></div>
@@ -417,8 +481,29 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
       <button className="seller-stock-remove seller-stock-remove-brand" type="button"
         onClick={() => removeGroup(activeGroup.id)}>Remover esta marca</button></fieldset>}
     {errors.form && <p className="seller-form-error" ref={register('form')} role="alert" tabIndex={-1}>{errors.form}</p>}
-    <button className="seller-button seller-primary seller-stock-submit" type="submit" disabled={saving || !configured}>
-      {saving ? 'Salvando no aparelho…' : 'Salvar preços e continuar'}</button>
+    <button className="seller-button seller-primary seller-stock-submit" type="button" disabled={saving || !configured}
+      onClick={() => { if (validate()) navigatePriceScreen('review'); }}>
+      Revisar preços informados</button>
+  </div>;
+
+  const confirmedRows = groups.flatMap((group) => group.rows
+    .filter((row) => row.source !== 'stock' || row.priceBrl.trim())
+    .map((row) => ({ group, row })));
+  const reviewView = <div className="seller-price-review">
+    <button className="seller-stock-back" type="button" onClick={() => navigatePriceScreen('competitors')}>‹ Editar preços</button>
+    <div className="seller-stock-heading"><div><p className="seller-kicker">PESQUISA DE PREÇOS · REVISÃO</p>
+      <h2 id="prices-title" ref={titleRef} tabIndex={-1}>Confira antes de salvar</h2>
+      <p className="seller-muted">Revise marca, produto, tecnologia, condição e preço. Nada será gravado antes da confirmação.</p></div></div>
+    <div className="seller-price-review-list">{confirmedRows.map(({ group, row }) => <article key={row.rowId}
+      className="seller-price-review-item">
+      <h3>{brandLabel(group.competitorId)} · {row.modelOrAmperage}</h3>
+      <p>{parameters?.values.technologies.find(({ id }) => id === row.technologyId)?.label ?? 'Tecnologia não confirmada'} · {
+        parameters?.values.conditions.find(({ id }) => id === row.conditionId)?.label ?? 'Condição não confirmada'}</p>
+      <strong>R$ {row.priceBrl.replace('.', ',')}</strong>
+    </article>)}</div>
+    {errors.form && <p className="seller-form-error" role="alert">{errors.form}</p>}
+    <button className="seller-button seller-primary seller-stock-submit" type="submit" disabled={saving}>
+      {saving ? 'Salvando no aparelho…' : 'Confirmar e salvar preços'}</button>
   </div>;
 
   return <section className="seller-stock-card seller-prices-card seller-stock-collection" aria-labelledby="prices-title">
@@ -427,21 +512,22 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave }: Props) 
     <form className="seller-stock-form seller-prices-form" onSubmit={submit} noValidate>
       {screen !== 'own-detail' && <fieldset className="seller-choice-group"><legend>O preço estava disponível?</legend>
         <label><input ref={register('availability')} type="radio" name="priceAvailability" checked={availability === 'available'}
-          disabled={!configured && draft.prices?.availability !== 'available'} onChange={() => { setAvailability('available'); clearErrors(); }} /> Sim, registrar preços</label>
+          disabled={!configured && draft.prices?.availability !== 'available'} onChange={() => { markDirty(); setAvailability('available'); clearErrors(); }} /> Sim, registrar preços</label>
         <label><input type="radio" name="priceAvailability" checked={availability === 'unavailable'}
           disabled={!unavailableConfigured && draft.prices?.availability !== 'unavailable'}
-          onChange={() => { setAvailability('unavailable'); clearErrors(); }} /> Preço não disponível</label></fieldset>}
+          onChange={() => { markDirty(); setAvailability('unavailable'); clearErrors(); }} /> Preço não disponível</label></fieldset>}
       {availability === 'unavailable' ? <div className="seller-price-unavailable">
         <h2 id="prices-title" ref={titleRef} tabIndex={-1}>Preço não disponível</h2>
         <label htmlFor="price-unavailable-reason">Motivo da indisponibilidade</label>
         <select id="price-unavailable-reason" ref={register('unavailableReasonId')} value={unavailableReasonId}
-          aria-invalid={Boolean(errors.unavailableReasonId)} onChange={(event) => setUnavailableReasonId(event.target.value)}>
+          aria-invalid={Boolean(errors.unavailableReasonId)} onChange={(event) => { markDirty(); setUnavailableReasonId(event.target.value); }}>
           <option value="">Selecione</option>{parameters?.values.unavailableReasons.map((reason) =>
             <option key={reason.id} value={reason.id}>{reason.label}</option>)}</select>
         {errors.unavailableReasonId && <p className="seller-field-error">{errors.unavailableReasonId}</p>}
         <button className="seller-button seller-primary seller-stock-submit" type="submit" disabled={saving || !unavailableConfigured}>
           {saving ? 'Salvando no aparelho…' : 'Salvar preços e continuar'}</button></div>
-        : screen === 'own-overview' ? ownOverview : screen === 'own-detail' ? ownDetail : competitorView}
+        : screen === 'own-overview' ? ownOverview : screen === 'own-detail' ? ownDetail
+          : screen === 'review' ? reviewView : competitorView}
       <p className="seller-sr-only" role="status">{announcement}</p>
     </form>
   </section>;
