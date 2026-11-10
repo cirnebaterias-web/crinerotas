@@ -1,91 +1,59 @@
 schema: 1
 story: '4.33'
 story_title: 'Cobertura recorrente da carteira e planejador semanal inteligente'
-gate: FAIL
-status_reason: 'A regeneração pela API/CLI falha antes do banco, e o reenvio não mantém um comando idempotente estável. Inclusão manual produz metadados de cobertura incompatíveis com o validador; requisitos de seleção, estratégia e verificação interativa também permanecem incompletos.'
+gate: PASS
+status_reason: 'Os sete achados anteriores foram resolvidos, incluindo regeneração pública, replay antes das fontes com preferência de estratégia estável, inclusão com cobertura real e revisão dos pendentes. Testes independentes de serviço/domínio/UI e banco passaram; a publicação vigente permanece protegida até nova aprovação.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: '6822facec0d102419573cae5aa42bf6a617957c8'
-updated: '2026-11-09T22:05:05-03:00'
-top_issues:
-  - id: REL-433-001
-    severity: high
-    finding: 'Regenerar sempre lança ZodError: mutateWeeklyProposal passa o comando completo ao contrato estrito de generateWeeklyProposal. Reprodução direta confirmou unrecognized_keys para idempotencyKey, operation, proposalId e expectedVersion antes de qualquer RPC.'
-    suggested_action: 'Projetar explicitamente schemaVersion, sellerId e weekStart para a geração; testar regenerate de rascunho e publicada pelo serviço e endpoint reais.'
-    suggested_owner: dev
-    refs: ['apps/web/src/server/route-proposals/service.ts:274', 'packages/contracts/src/weekly-route-proposals.ts:57']
-  - id: REL-433-002
-    severity: high
-    finding: 'Após corrigir REL-433-001, a mesma intenção de regeneração ainda é recalculada com generatedAt e fontes novos em cada chamada; o SQL compara replay.command integralmente e retorna IDEMPOTENCY_KEY_REUSED. O replay pgTAP reutiliza o JSON interno pronto e não cobre o comando público reenviado em outro instante.'
-    suggested_action: 'Vincular replay ao comando público estável antes de recalcular fontes/relógio, preservando resposta original e revalidando autorização; testar resposta perdida com a mesma chave e relógios/fontes diferentes.'
-    suggested_owner: dev
-    refs: ['apps/web/src/server/route-proposals/service.ts:134', 'apps/web/src/server/route-proposals/service.ts:274', 'supabase/migrations/20261116140000_story433_route_routine.sql:236']
-  - id: REL-433-003
-    severity: high
-    finding: 'Adicionar cliente pela busca fabrica coverageState unavailable e lastCompletedVisitAt null. Em proposta com sources.visits available, a validação SQL exige never_visited ou a última conclusão real; a inclusão manual de cliente elegível, inclusive removido e readicionado, não pode ser salva.'
-    suggested_action: 'Reutilizar ou obter os sinais canônicos do cliente incluído, mantendo o snapshot e recalculando contagens; testar remover/readicionar e adicionar cliente com e sem visita concluída.'
-    suggested_owner: dev
-    refs: ['apps/web/src/features/management/weekly-route-proposal-dashboard.tsx:196', 'apps/web/src/features/management/weekly-route-proposal-dashboard.tsx:206', 'supabase/migrations/20261116140000_story433_route_routine.sql:183']
-  - id: REQ-433-001
-    severity: medium
-    finding: 'A lista permite selecionar clientes sem coordenadas, mas addMapSelection os elimina por candidate.location !== null, sem explicar o descarte. Endereço navegável permanece elegível no domínio; a alternativa textual não oferece o mesmo caminho de inclusão.'
-    suggested_action: 'Permitir inclusão com localização pendente e validar trechos conhecidos no servidor; informar os motivos individuais quando um selecionado não puder entrar.'
-    suggested_owner: dev
-    refs: ['apps/web/src/features/management/weekly-route-proposal-dashboard.tsx:222', 'apps/web/src/features/management/weekly-route-planning-map.tsx:377']
-  - id: REQ-433-002
-    severity: medium
-    finding: 'AC 5/7 não estão completos: o mapa não oferece filtro de débito oficial de sucata; contrato/CLI/UI não recebem estratégia/região revisada pelo gestor, e a viagem tem region null. O dashboard apresenta totais agregados, sem relação dos clientes pendentes com motivo por incompatibilidade.'
-    suggested_action: 'Completar filtro de sucata, revisão explícita da estratégia/agrupamento e apresentação dos clientes pendentes com razões e fontes; usar o motor canônico para regenerar a preferência revisada.'
-    suggested_owner: dev
-    refs: ['apps/web/src/features/management/weekly-route-planning-map.tsx:324', 'packages/contracts/src/weekly-route-proposals.ts:195', 'packages/domain/src/weekly-route-proposals.ts:228', 'apps/web/src/features/management/weekly-route-proposal-dashboard.tsx:313']
-  - id: REL-433-004
-    severity: medium
-    finding: 'A classificação semanal compara a distância arredondada a uma casa decimal com 80 km. Reprodução com distância real de 79,99 km resultou em strategy.kind trip e distanceFromBaseKm 80, enquanto classifyDailyRoute retornou local para a mesma parada.'
-    suggested_action: 'Usar distância sem arredondamento nas decisões e arredondar somente para apresentação; testar 79,99/80/80,01 km em ambos os classificadores.'
-    suggested_owner: dev
-    refs: ['packages/domain/src/weekly-route-proposals.ts:105', 'packages/domain/src/weekly-route-proposals.ts:184', 'packages/domain/src/weekly-route-proposals.ts:188']
-  - id: TEST-433-001
-    severity: medium
-    finding: 'Os 34 testes direcionados passam, mas o serviço não testa regenerate e o dashboard só é renderizado estaticamente. O único E2E usa nomes curtos, círculo numérico e fecha o popup antes de 390 px; não demonstra drag/toque, preservação da instância/centro/zoom, dirty/save/conflito/descartar, nem versão/composição efetivamente publicada.'
-    suggested_action: 'Adicionar testes comportamentais de serviço e UI para os defeitos e para os cenários obrigatórios dos AC 9-15, incluindo falha de salvar e reenvio público idempotente.'
-    suggested_owner: dev
-    refs: ['apps/web/src/server/route-proposals/service.test.ts', 'apps/web/src/features/management/weekly-route-proposal-dashboard.test.tsx', 'tests/e2e/weekly-route-intelligence.spec.ts']
+reviewed_revision: '810fc45f93b1894611e0516e5d0325a5d4cb5db6'
+updated: '2026-11-09T22:38:13-03:00'
+top_issues: []
 waiver:
   active: false
+quality_score: 100
+expires: '2026-11-23T22:38:13-03:00'
+resolved_issues:
+  - 'REL-433-001: geração recebe projeção estrita; regeneração pública exercitada pelo serviço.'
+  - 'REL-433-002: replay consultado antes das fontes; SQL tolera snapshot novo, compara intenção e estratégia, preserva resposta e escopo atual.'
+  - 'REL-433-003: inclusão manual reutiliza conclusão, estado de cobertura e próxima data reais; persistência recalcula contagens.'
+  - 'REQ-433-001: selecionados sem coordenadas entram com localização pendente; mensagens explicitam capacidade, distância e duplicidade.'
+  - 'REQ-433-002: filtro sucata, preferência auto/local/trip, região/distância e clientes pendentes com motivos disponíveis.'
+  - 'REL-433-004: decisões usam distância bruta e testes cobrem 79,99/80/80,01 km.'
+  - 'TEST-433-001: serviço e dashboard têm testes comportamentais; três E2E cobrem popup longo/390 px, mouse/toque e preservação do mapa.'
 evidence:
-  tests_reviewed: 34
-  risks_identified: 7
+  tests_reviewed: 122
+  risks_identified: 0
   independently_executed:
-    - 'Vitest direcionado: 5 arquivos, 34 testes aprovados.'
-    - 'tsx: regeneração no serviço reproduziu ZodError unrecognized_keys antes do RPC.'
-    - 'tsx: distância real 79,99 km produziu semana trip e dia local.'
-    - 'git diff --check: aprovado.'
+    - 'HEAD 810fc45: Vitest direcionado, 6 arquivos/45 testes aprovados.'
+    - 'HEAD 810fc45: pgTAP Story 4.33, 1 arquivo/74 testes aprovados.'
+    - 'Revisão 42df2e8: E2E weekly-route-intelligence, 3/3 aprovados; os cenários de mapa não foram alterados em 810fc45.'
+    - 'git diff --check: aprovado; inspeção do diff incremental e do fluxo SQL/contratos/UI concluída.'
   developer_reported:
-    - 'Lint, typecheck e build production aprovados; suíte completa 151 arquivos, 859 aprovados e 1 ignorado.'
-    - 'E2E weekly-route-intelligence: 1 aprovado; banco limpo/pgTAP: 34 arquivos, 1535 aprovados, 41 da story; duas sessões concorrentes aprovadas.'
-  coderabbit: 'Tentativa de desenvolvimento registrada: binário não instalado. Nenhum resultado automatizado atribuído ao CodeRabbit.'
+    - 'HEAD 810fc45: lint, typecheck e build production aprovados.'
+    - 'Suíte completa: 152 arquivos/870 aprovados e 1 ignorado; E2E final 3/3 aprovados.'
+    - 'Banco limpo: reset aprovado e pgTAP completo 34 arquivos/1568 aprovados.'
+    - 'Concorrência real com a mesma chave: um proposal, um command e um audit; versões obsoletas conflitam sem duplicar.'
+  coderabbit: 'Indisponível: binário local não instalado, tentativa registrada. Nenhum resultado de aprovação automatizada atribuído à ferramenta.'
   trace:
-    ac_covered: [1, 2, 3, 4, 6, 8]
-    ac_gaps: [5, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-    note: 'Covered indica evidência parcial substancial, não aceite integral; gaps incluem comportamento defeituoso e cenários obrigatórios sem teste. AC 14 tem boa cobertura SQL, mas replay público falha.'
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    ac_gaps: []
+    note: 'Rastreabilidade combina testes e inspeção; não significa ensaio independente de todas as combinações de entrada.'
 nfr_validation:
   security:
     status: PASS
-    notes: 'Inspeção preserva route.plan_scoped, grants restritos, escopo atual no replay e texto DOM seguro; nenhuma vulnerabilidade nova confirmada. SQL revalida composição, elegibilidade e trechos conhecidos.'
+    notes: 'Capacidade e escopo atual verificados inclusive em replay; grants restritos; preferência divergente rejeitada; texto do popup seguro.'
   performance:
     status: PASS
-    notes: 'Leitura de carteira/sinais em lote e índice de última conclusão; camadas do mapa são reconciliadas sem recriar instância por seleção/filtro. Não foi feito ensaio de latência.'
+    notes: 'Leituras em lotes, índice de conclusões e reconciliação de camadas preservados; não houve ensaio de carga/latência nesta revisão.'
   reliability:
-    status: FAIL
-    notes: 'Falhas de regeneração, replay público e inclusão manual bloqueiam os fluxos principais. Locks, índices e preservação da publicação estão coerentes no SQL, mas não compensam a falha na integração.'
+    status: PASS
+    notes: 'Regeneração e reenvio público preservam a resposta original antes de reler fontes. Locks/unicidade evitam duplicidade; nova aprovação mantém atomicidade e história. Falha de salvar preserva edição local.'
   maintainability:
-    status: CONCERNS
-    notes: 'Contratos compartilhados e política versionada são adequados; testes de camada isolada não detectaram a incompatibilidade entre os contratos de geração e mutação.'
+    status: PASS
+    notes: 'Contratos compartilhados, preferência canônica com legacy auto, política versionada e testes nas fronteiras anteriormente descobertas reduzem divergência entre camadas.'
 recommendations:
-  immediate:
-    - action: 'Corrigir os três achados high e repetir geração/regeneração/revisão/publicação pela fronteira pública antes de novo review.'
-      refs: ['apps/web/src/server/route-proposals/service.ts', 'apps/web/src/features/management/weekly-route-proposal-dashboard.tsx']
-    - action: 'Completar os requisitos e testes medium indicados, ou obter uma decisão explícita de escopo nos artefatos antes de declarar todos os AC atendidos.'
-      refs: ['Docs/stories/4.33.story.md']
+  immediate: []
   future:
-    - action: 'Avaliar snapshot de visitas com instante completo: SQL recorta por dia, podendo incorporar conclusão posterior à geração no mesmo dia e invalidar a revisão do snapshot anterior.'
-      refs: ['supabase/migrations/20261116140000_story433_route_routine.sql:176', 'apps/web/src/server/route-proposals/service.ts:94']
+    - action: 'Evoluir a referência diária de visitas para instante completo e testar conclusão posterior à geração no mesmo dia; hoje uma alteração de fatos pode exigir regeneração antes de salvar, com edição local preservada.'
+      refs: ['supabase/migrations/20261116140000_story433_route_routine.sql', 'apps/web/src/server/route-proposals/service.ts']
+    - action: 'Executar inspeção em Android físico quando o piloto ampliar o uso; toque atual foi exercitado por Chromium/CDP.'
+      refs: ['tests/e2e/weekly-route-intelligence.spec.ts']
