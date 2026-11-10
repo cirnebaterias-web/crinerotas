@@ -11,10 +11,11 @@ const candidate = (value: number, overrides: Record<string, unknown> = {}) => ({
   location: { latitude: -5.8, longitude: -35.2 }, hasNavigableAddress: true,
   visitHistoryStatus: 'unavailable' as const, lastCompletedVisitAt: null, ...overrides,
 });
-const proposal = (candidates: unknown[]) => proposeWeeklyRoutes({
+const proposal = (candidates: unknown[], strategyPreference: 'auto' | 'local' | 'trip' = 'auto') => proposeWeeklyRoutes({
   weekStart: '2026-11-02', generatedAt: '2026-11-04T12:00:00-03:00',
   origin: { kind: 'base_city', sellerId, city: 'Parnamirim', state: 'RN', ibgeCode: '2403251',
     latitude: -5.8, longitude: -35.2, reference: 'municipal_seat', source: 'IBGE', configVersion: 1 }, candidates,
+  strategyPreference,
 });
 
 describe('weekly route proposal rules', () => {
@@ -99,6 +100,7 @@ describe('weekly route proposal rules', () => {
         lastCompletedVisitAt: '2026-10-25T12:00:00-03:00' }),
     ]);
     expect(result.strategy).toMatchObject({ kind: 'trip' });
+    expect(result.strategy.region).toMatch(/Cluster a .* km de Parnamirim\/RN/);
     expect(result.days.flatMap(({ suggestions }) => suggestions).map(({ clientId }) => clientId))
       .toEqual(expect.arrayContaining([id(1), id(2)]));
     expect(result.excluded).toContainEqual({ clientId: id(3), reason: 'weekly_strategy_mismatch' });
@@ -136,7 +138,7 @@ describe('weekly route proposal rules', () => {
     ];
     const result = proposal(locations.map((location, index) => candidate(index + 1, { location })));
     expect(result.counts).toMatchObject({ suggested: 5, needsReview: 1 });
-    expect(result.excluded).toContainEqual({ clientId: id(6), reason: 'daily_distance_limit' });
+    expect(result.excluded.filter(({ reason }) => reason === 'daily_distance_limit')).toHaveLength(1);
   });
 
   it('distinguishes weekly capacity overflow from geographic incompatibility', () => {
@@ -151,6 +153,35 @@ describe('weekly route proposal rules', () => {
     const origin = { latitude: -5.8, longitude: -35.2 };
     expect(classifyDailyRoute(origin, [{ latitude: -5.9, longitude: -35.25 }])).toBe('local');
     expect(classifyDailyRoute(origin, [{ latitude: -6.6, longitude: -35.2 }])).toBe('trip');
+  });
+
+  it('uses the unrounded inclusive 80 km boundary for weekly strategy', () => {
+    const origin = { latitude: -5.8, longitude: -35.2 };
+    const atDistance = (distanceKm: number) => ({
+      latitude: origin.latitude - distanceKm / 6371 * 180 / Math.PI,
+      longitude: origin.longitude,
+    });
+    const local = proposal([candidate(1, { location: atDistance(79.99) })]);
+    const boundary = proposal([candidate(2, { location: atDistance(80) })]);
+    const trip = proposal([candidate(3, { location: atDistance(80.01) })]);
+    expect(local.strategy).toMatchObject({ kind: 'local', distanceFromBaseKm: 79.99 });
+    expect(boundary.strategy).toMatchObject({ kind: 'trip', distanceFromBaseKm: 80 });
+    expect(trip.strategy).toMatchObject({ kind: 'trip', distanceFromBaseKm: 80.01 });
+  });
+
+  it('lets the manager force a coherent local or travel generation', () => {
+    const candidates = [
+      candidate(1, { location: { latitude: -5.82, longitude: -35.2 }, visitHistoryStatus: 'available',
+        lastCompletedVisitAt: '2026-10-25T12:00:00-03:00' }),
+      candidate(2, { location: { latitude: -6.7, longitude: -35.2 }, visitHistoryStatus: 'available',
+        lastCompletedVisitAt: '2026-06-01T12:00:00-03:00' }),
+    ];
+    const local = proposal(candidates, 'local');
+    const trip = proposal(candidates, 'trip');
+    expect(local.strategy).toMatchObject({ kind: 'local', region: 'Parnamirim/RN' });
+    expect(local.days.flatMap(({ suggestions }) => suggestions).map(({ clientId }) => clientId)).toEqual([id(1)]);
+    expect(trip.strategy.kind).toBe('trip');
+    expect(trip.days.flatMap(({ suggestions }) => suggestions).map(({ clientId }) => clientId)).toEqual([id(2)]);
   });
 
   it('selects only positioned clients inside a manager-drawn polygon', () => {

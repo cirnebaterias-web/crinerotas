@@ -28,6 +28,15 @@ const scrapGenerationSchema = z.object({ generationId: z.uuid(),
   publishedAt: z.iso.datetime({ offset: true }) }).strict();
 const coverageRank = { overdue: 0, never_visited: 1, due_this_week: 2,
   covered: 3, unavailable: 4 } as const;
+const mutationReplayIntentSchema = z.object({
+  schemaVersion: z.literal(1),
+  idempotencyKey: z.uuid(),
+  operation: z.enum(['save', 'regenerate']),
+  targetId: z.uuid().nullable(),
+  expectedVersion: z.number().int().positive().nullable(),
+  sellerId: z.uuid(),
+  weekStart: z.iso.date(),
+}).strict();
 
 function dateInSaoPaulo(instant: string) {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric',
@@ -131,7 +140,7 @@ export async function generateWeeklyProposal(client: SupabaseClient, command: We
     readVisitCoverage(client, parsed.sellerId),
   ]);
   return weeklyRouteProposalSchema.parse(proposeWeeklyRoutes({ weekStart: parsed.weekStart,
-    generatedAt: now.toISOString(), origin,
+    generatedAt: now.toISOString(), origin, strategyPreference: parsed.strategyPreference,
     sources: { sales: { status: signals.generationId ? 'available' : 'unavailable',
       generationId: signals.generationId, asOfDate: signals.asOfDate },
       scrap: { status: debts.status, generationId: debts.generationId, publishedAt: debts.publishedAt },
@@ -222,6 +231,7 @@ export async function generateAndSaveWeeklyProposal(client: SupabaseClient,
   command: WeeklyRouteProposalRequest & { idempotencyKey: string }, now = new Date()) {
   const proposal = await generateWeeklyProposal(client, {
     schemaVersion: command.schemaVersion, weekStart: command.weekStart, sellerId: command.sellerId,
+    strategyPreference: command.strategyPreference,
   }, now);
   const persistenceCommand = saveWeeklyRouteProposalRequestSchema.parse({
     schemaVersion: 1, idempotencyKey: command.idempotencyKey, proposal,
@@ -245,9 +255,29 @@ function proposalConflict(error: unknown) {
   return error;
 }
 
+async function readMutationReplay(client: SupabaseClient,
+  command: z.infer<typeof weeklyRouteProposalMutationRequestSchema>) {
+  const intent = mutationReplayIntentSchema.parse({
+    schemaVersion: 1,
+    idempotencyKey: command.idempotencyKey,
+    operation: command.operation === 'regenerate' ? 'regenerate' : 'save',
+    targetId: command.operation === 'regenerate' ? command.proposalId! : null,
+    expectedVersion: command.operation === 'regenerate' ? command.expectedVersion! : null,
+    sellerId: command.sellerId,
+    weekStart: command.weekStart,
+  });
+  const replay = await clientImportRpc(client, 'get_weekly_route_proposal_mutation_replay', {
+    p_command: intent,
+  });
+  return replay === null ? null : persistedWeeklyRouteProposalSchema.parse(replay);
+}
+
 export async function mutateWeeklyProposal(client: SupabaseClient,
   command: WeeklyRouteProposalMutationRequest, now = new Date()) {
   const parsed = weeklyRouteProposalMutationRequestSchema.parse(command);
+  const replay = await readMutationReplay(client, parsed);
+  if (replay) return weeklyRouteProposalMutationResponseSchema.parse({ schemaVersion: 1,
+    outcome: parsed.operation === 'regenerate' ? 'regenerated' : 'created', record: replay });
   if (parsed.operation === 'open_or_generate') {
     try {
       const record = await readActiveWeeklyProposal(client, parsed.sellerId, parsed.weekStart);
@@ -271,7 +301,12 @@ export async function mutateWeeklyProposal(client: SupabaseClient,
     }
   }
 
-  const proposal = await generateWeeklyProposal(client, parsed, now);
+  const proposal = await generateWeeklyProposal(client, {
+    schemaVersion: parsed.schemaVersion,
+    sellerId: parsed.sellerId,
+    weekStart: parsed.weekStart,
+    strategyPreference: parsed.strategyPreference,
+  }, now);
   const persistenceCommand = regenerateWeeklyRouteProposalRequestSchema.parse({
     schemaVersion: 1, idempotencyKey: parsed.idempotencyKey,
     expectedVersion: parsed.expectedVersion, proposal,

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { weeklyRoutePlanningResponseSchema } from '@cirne/contracts';
 import { approximateDistanceKm } from '@cirne/domain';
-import { circleSelectionIds, WeeklyRoutePlanningMap } from './weekly-route-planning-map';
+import { circleSelectionIds, commercialPriorityLabels, WeeklyRoutePlanningMap } from './weekly-route-planning-map';
 
 const sellerId = '11111111-1111-4111-8111-111111111111';
 const planning = () => weeklyRoutePlanningResponseSchema.parse({
@@ -39,10 +39,23 @@ describe('weekly route planning map', () => {
     expect(html).toContain('Longitude do centro');
     expect(html).toContain('Raio (km)');
     expect(html).toContain('Pré-visualizar círculo');
+    expect(html).toContain('Com débito oficial de sucata');
+    expect(html).toContain('Prioridades comerciais');
+    expect(html).toContain('Débito oficial de sucata: 300 kg');
+    expect(html).toContain('mantenha um dedo pressionado enquanto arrasta');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('<img');
     expect(onSelection).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes official debt from creditor, settled and unavailable balances in priority badges', () => {
+    const candidate = planning().candidates[0]!;
+    expect(commercialPriorityLabels(candidate)).toEqual(['Maior potencial', 'Compra em queda',
+      'Fora do ciclo de compra', 'Débito oficial de sucata: 300 kg']);
+    for (const scrapBalanceState of ['creditor', 'settled', 'unavailable'] as const) {
+      expect(commercialPriorityLabels({ ...candidate, scrapBalanceState }).join(' ')).not.toContain('Débito oficial');
+    }
   });
 
   it('keeps selection totals clear for visible and hidden clients', () => {

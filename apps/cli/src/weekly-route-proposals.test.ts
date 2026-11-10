@@ -31,6 +31,12 @@ describe('weekly route proposals CLI use case', () => {
     expect(weeklyRouteProposalSummary(input).days).toHaveLength(5);
   });
 
+  it('accepts an explicit local or travel strategy preference in the CLI use case', () => {
+    const located = { ...input, strategyPreference: 'local' as const,
+      candidates: [{ ...input.candidates[0], location: { latitude: -5.82, longitude: -35.2 } }] };
+    expect(generateWeeklyRouteProposal(located).strategy).toMatchObject({ kind: 'local', region: 'Parnamirim/RN' });
+  });
+
   it('operates persisted proposals through the manager API before publication', async () => {
     const proposal = generateWeeklyRouteProposal(input);
     const persisted = { schemaVersion: 1 as const, proposalId: '33333333-3333-4333-8333-333333333333',

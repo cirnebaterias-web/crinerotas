@@ -18,6 +18,15 @@ type Props = {
 const segmentLabels: Record<Segment, string> = { all: 'Todos os segmentos', first_line: 'Primeira linha',
   second_line: 'Segunda linha', motorcycle: 'Moto', heavy: 'Bateria pesada' };
 
+export function commercialPriorityLabels(candidate: WeeklyRoutePlanningCandidate): string[] {
+  return [candidate.potential === 'high' ? 'Maior potencial' : null,
+    candidate.purchaseTrend === 'falling' ? 'Compra em queda' : null,
+    (candidate.cycleDelayDays ?? 0) > 0 ? 'Fora do ciclo de compra' : null,
+    candidate.scrapBalanceState === 'debtor' && candidate.scrapDebtKg !== null && candidate.scrapDebtKg > 0
+      ? `Débito oficial de sucata: ${candidate.scrapDebtKg.toLocaleString('pt-BR')} kg` : null,
+  ].filter((label): label is string => label !== null);
+}
+
 // Use the same distance reference for the drag preview and the numeric alternative.
 export function circleSelectionIds(candidates: Array<Pick<WeeklyRoutePlanningCandidate, 'clientId' | 'location'>>,
   circle: SelectionCircle): string[] {
@@ -38,6 +47,7 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
   const markersRef = useRef(new Map<string, CircleMarker>());
   const originMarkerRef = useRef<CircleMarker | null>(null);
   const circleRef = useRef<Circle | null>(null);
+  const circleCenterRef = useRef<CircleMarker | null>(null);
   const drawingRef = useRef(false);
   const dragRef = useRef<{ pointerId: number; center: Coordinate } | null>(null);
   const restoreNavigationRef = useRef<(() => void) | null>(null);
@@ -45,6 +55,7 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
   const [fallingOnly, setFallingOnly] = useState(false);
   const [delayedOnly, setDelayedOnly] = useState(false);
   const [highPotentialOnly, setHighPotentialOnly] = useState(false);
+  const [scrapDebtOnly, setScrapDebtOnly] = useState(false);
   const [segment, setSegment] = useState<Segment>('all');
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<SelectionCircle | null>(null);
@@ -59,8 +70,9 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
     && (!fallingOnly || candidate.purchaseTrend === 'falling')
     && (!delayedOnly || (candidate.cycleDelayDays ?? 0) > 0)
     && (!highPotentialOnly || candidate.potential === 'high')
+    && (!scrapDebtOnly || (candidate.scrapBalanceState === 'debtor' && (candidate.scrapDebtKg ?? 0) > 0))
     && (segment === 'all' || candidate.opportunitySegments.includes(segment))),
-  [delayedOnly, fallingOnly, highPotentialOnly, maxDays, planning.candidates, segment]);
+  [delayedOnly, fallingOnly, highPotentialOnly, scrapDebtOnly, maxDays, planning.candidates, segment]);
   const positioned = useMemo(() => filtered.filter((candidate) => candidate.location !== null), [filtered]);
   const latestRef = useRef({ positioned, selectedIds, onSelection, origin: planning.origin });
   useEffect(() => { latestRef.current = { positioned, selectedIds, onSelection, origin: planning.origin }; });
@@ -101,8 +113,16 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         const tiles = L.tileLayer(mapConfig.tileUrl, { attribution: mapConfig.attribution, maxZoom: 19 });
         tiles.on('tileerror', () => { if (active) setTileFailure(true); });
         tiles.addTo(map);
-        const resizePopup = () => container.style.setProperty('--route-popup-max-width', `${Math.max(100, map.getSize().x - 64)}px`);
+        const updateOpenPopup = () => {
+          for (const marker of markersRef.current.values()) if (marker.isPopupOpen()) marker.getPopup()?.update();
+        };
+        const resizePopup = () => {
+          container.style.setProperty('--route-popup-max-width', `${Math.max(100, map.getSize().x - 64)}px`);
+          container.style.setProperty('--route-popup-max-height', `${Math.max(120, map.getSize().y - 100)}px`);
+          updateOpenPopup();
+        };
         map.on('resize', resizePopup);
+        map.on('zoomend', updateOpenPopup);
         resizePopup();
 
         function updateDrag(event: PointerEvent) {
@@ -192,6 +212,7 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
       markersRef.current.clear();
       originMarkerRef.current = null;
       circleRef.current = null;
+      circleCenterRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
       leafletRef.current = null;
@@ -246,7 +267,12 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         popup.setAttribute('aria-label', `Detalhes de ${candidate.name}`);
         popup.tabIndex = -1;
         const title = document.createElement('strong'); title.textContent = candidate.name;
-        const detail = document.createElement('p'); detail.textContent = candidate.reasons.join(' · ');
+        const priority = document.createElement('div'); priority.className = 'route-intelligence-badges';
+        for (const label of commercialPriorityLabels(candidate)) {
+          const badge = document.createElement('span'); badge.textContent = label; priority.append(badge);
+        }
+        const detail = document.createElement('p'); detail.className = 'route-intelligence-popup-reasons';
+        detail.textContent = candidate.reasons.join(' · ');
         const choose = document.createElement('button'); choose.type = 'button';
         const updateChoice = () => {
           const selected = latestRef.current.selectedIds.includes(candidate.clientId);
@@ -264,7 +290,7 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         const closePopup = () => { marker?.closePopup(); element?.focus({ preventScroll: true }); };
         close.onclick = closePopup;
         popup.onkeydown = (event) => { if (event.key === 'Escape') { event.stopPropagation(); closePopup(); } };
-        popup.append(title, detail, choose, close);
+        popup.append(title, priority, detail, choose, close);
         marker.bindPopup(popup, { className: 'route-intelligence-popup', maxWidth: 280, minWidth: 100,
           autoPan: true, autoPanPadding: [16, 16], closeButton: false });
         marker.off('popupopen');
@@ -273,7 +299,7 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         const popup = marker.getPopup()?.getContent() as HTMLElement | undefined;
         const button = popup?.querySelector('button');
         const title = popup?.querySelector('strong');
-        const detail = popup?.querySelector('p');
+        const detail = popup?.querySelector('.route-intelligence-popup-reasons');
         if (title && title.textContent !== candidate.name) title.textContent = candidate.name;
         if (detail && detail.textContent !== candidate.reasons.join(' · ')) detail.textContent = candidate.reasons.join(' · ');
         popup?.setAttribute('aria-label', `Detalhes de ${candidate.name}`);
@@ -295,7 +321,15 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
     const map = mapRef.current;
     const L = leafletRef.current;
     if (!mapReady || !map || !L) return;
-    if (!draft) { circleRef.current?.remove(); circleRef.current = null; return; }
+    if (!draft) {
+      circleRef.current?.remove(); circleRef.current = null;
+      circleCenterRef.current?.remove(); circleCenterRef.current = null;
+      return;
+    }
+    if (!circleCenterRef.current) circleCenterRef.current = L.circleMarker([draft.center.latitude, draft.center.longitude], {
+      radius: 5, color: '#ff7900', fillColor: '#fff', fillOpacity: 1, weight: 3, interactive: false,
+    }).addTo(map);
+    else circleCenterRef.current.setLatLng([draft.center.latitude, draft.center.longitude]);
     if (!circleRef.current) circleRef.current = L.circle([draft.center.latitude, draft.center.longitude], {
       radius: draft.radiusKm * 1000, color: '#ff7900', fillOpacity: .12, interactive: false,
     }).addTo(map);
@@ -314,6 +348,7 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
     restoreNavigationRef.current = () => enabled.forEach((handler) => handler.enable());
     drawingRef.current = true;
     setDrawing(true);
+    containerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     containerRef.current?.focus({ preventScroll: true });
   }
 
@@ -336,16 +371,13 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         onChange={(event) => setFallingOnly(event.target.checked)} />Compra em queda</label>
       <label className="route-intelligence-check"><input type="checkbox" checked={highPotentialOnly}
         onChange={(event) => setHighPotentialOnly(event.target.checked)} />Maior potencial</label>
+      <label className="route-intelligence-check"><input type="checkbox" checked={scrapDebtOnly}
+        onChange={(event) => setScrapDebtOnly(event.target.checked)} />Com débito oficial de sucata</label>
     </div>
     <div className="route-intelligence-summary" aria-live="polite"><strong>{filtered.length} clientes visíveis</strong>
       <span>{positioned.length} no mapa · {selectedIds.length} selecionados ({selectedVisible} visíveis,
         {' '}{selectedIds.length - selectedVisible} fora dos filtros) · {filtered.length - positioned.length} com localização pendente
         {' '}· limite de 30 km entre paradas</span></div>
-    {mapConfig.enabled && !mapFailure
-      ? <div ref={containerRef} className={`route-intelligence-canvas${drawing ? ' is-drawing' : ''}`}
-        tabIndex={0} aria-label="Clientes elegíveis no mapa" />
-      : <p className="route-planner-empty">Mapa indisponível; os filtros e a lista de prioridades continuam utilizáveis.</p>}
-    {tileFailure && <p role="status" className="route-planner-empty">O fundo do mapa está indisponível. Marcadores, seleção e lista continuam utilizáveis.</p>}
     <div className="route-intelligence-selection">
       <button type="button" onClick={frameClients} disabled={!mapReady || mapFailure}>Enquadrar clientes</button>
       <button type="button" onClick={startDrawing} disabled={!mapReady || mapFailure} aria-pressed={drawing}>
@@ -353,6 +385,16 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
       <button type="button" onClick={() => { cancelPreview(); onSelection([]); }}
         disabled={selectedIds.length === 0 && !draft && !drawing}>Limpar seleção</button>
     </div>
+    <p className="route-intelligence-draw-help">Para selecionar uma região, ative o círculo, pressione o centro no mapa,
+      arraste até a borda e solte. No celular, mantenha um dedo pressionado enquanto arrasta. Revise a quantidade e aplique.</p>
+    <div className="route-intelligence-canvas-wrap">
+      {mapConfig.enabled && !mapFailure
+        ? <div ref={containerRef} className={`route-intelligence-canvas${drawing ? ' is-drawing' : ''}`}
+          tabIndex={0} aria-label="Clientes elegíveis no mapa" />
+        : <p className="route-planner-empty">Mapa indisponível; os filtros e a lista de prioridades continuam utilizáveis.</p>}
+      {drawing && <span className="route-intelligence-draw-overlay" aria-hidden="true">◎ Arraste do centro até a borda · solte para revisar</span>}
+    </div>
+    {tileFailure && <p role="status" className="route-planner-empty">O fundo do mapa está indisponível. Marcadores, seleção e lista continuam utilizáveis.</p>}
     {drawing && <p role="status">Modo de seleção: arraste do centro até a borda do círculo, com mouse ou toque.
       Ao soltar, revise a prévia. Escape ou Cancelar restaura a navegação.</p>}
     <fieldset className="route-intelligence-circle-inputs"><legend>Selecionar por centro e raio, sem arrastar</legend>
@@ -367,8 +409,9 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
     </fieldset>
     {(draft || drawing) && <div className="route-intelligence-selection">
       {draft && <span role="status">Prévia: {previewIds.length} clientes filtrados na área (raio {draft.radiusKm.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} km).
-        Aplicar substitui a seleção pelos clientes visíveis nesta área.</span>}
-      <button type="button" disabled={!draft || drawing} onClick={() => { onSelection(previewIds); cancelPreview(); }}>Aplicar seleção</button>
+        Aplicar adiciona estes clientes à seleção atual e preserva os clientes já selecionados pela lista.</span>}
+      <button type="button" disabled={!draft || drawing}
+        onClick={() => { onSelection([...new Set([...selectedIds, ...previewIds])]); cancelPreview(); }}>Aplicar seleção</button>
       <button type="button" onClick={cancelPreview}>Cancelar seleção de área</button>
     </div>}
     <p className="route-planner-help">Todos os {filtered.length} resultados estão na lista abaixo. Use Tab para selecionar por teclado,
@@ -378,6 +421,8 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         onSelection(selectedIds.includes(candidate.clientId) ? selectedIds.filter((id) => id !== candidate.clientId)
           : [...new Set([...selectedIds, candidate.clientId])])} aria-label={`Selecionar ${candidate.name}`} />
       <div><strong>{candidate.name}</strong><span>{candidate.reasons.join(' · ')}</span>
+        <div className="route-intelligence-badges" aria-label="Prioridades comerciais">{commercialPriorityLabels(candidate)
+          .map((label) => <span key={label}>{label}</span>)}</div>
         {!candidate.location && <span>Sem coordenadas · localização pendente</span>}</div>
       <b>{candidate.score.toLocaleString('pt-BR')}</b>
     </li>)}</ol>

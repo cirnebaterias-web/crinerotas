@@ -1,7 +1,7 @@
 import { apiErrorResponseSchema, decideWeeklyRouteProposalRequestSchema, persistedWeeklyRouteProposalSchema,
   reviseWeeklyRouteProposalRequestSchema, weeklyRouteBaseCityOriginSchema, weeklyRouteCandidateSchema,
   weeklyRouteProposalMutationRequestSchema, weeklyRouteProposalMutationResponseSchema,
-  weeklyRouteProposalSchema } from '@cirne/contracts';
+  weeklyRouteProposalSchema, weeklyRouteStrategyPreferenceSchema } from '@cirne/contracts';
 import { proposeWeeklyRoutes } from '@cirne/domain';
 import { z } from 'zod';
 import { safeSyncOrigin } from './client-sheet-sync';
@@ -9,6 +9,7 @@ import { safeSyncOrigin } from './client-sheet-sync';
 const inputSchema = z.object({
   weekStart: z.iso.date(), generatedAt: z.iso.datetime({ offset: true }),
   origin: weeklyRouteBaseCityOriginSchema, candidates: z.array(weeklyRouteCandidateSchema).max(5000),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.optional(),
 }).strict();
 
 export function generateWeeklyRouteProposal(input: unknown) {

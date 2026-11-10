@@ -69,6 +69,8 @@ Estados de cobertura: sem visita concluída registrada, vencida, vencendo na sem
 
 A semana escolhe uma estratégia coerente `local`, `trip` ou `pending`. Distância conhecida de 80 km ou mais da cidade-base caracteriza viagem; 30 km continua sendo o limite entre paradas consecutivas conhecidas, sem limitar o acesso da base ao primeiro cliente. A capacidade máxima é 50 visitas por semana, não uma promessa de cobertura integral; pendências por capacidade, distância, cluster ou localização são contabilizadas e explicadas.
 
+O gestor pode regenerar explicitamente com preferência `auto`, `local` ou `trip`. `auto` mantém a inferência pelo cliente de maior prioridade de cobertura/comercial; `local` considera clientes posicionados abaixo de 80 km da cidade-base e `trip` considera um cluster posicionado a partir de 80 km. A preferência não contorna elegibilidade, limite diário, trechos de 30 km, versão ou aprovação. Quando não há cliente posicionado compatível, o resultado permanece `pending` em vez de fabricar uma região.
+
 Pesos e critérios de desempate devem ser explícitos e versionados. Não apresentar ranking heurístico como previsão estatística calibrada de fechamento. Sem dados suficientes, emitir indicação de baixa confiança/revisão.
 
 O motor distribui clientes em cinco dias, respeita rotas/compromissos existentes e não preenche 10 obrigatoriamente. Dez é teto normal, não meta que justifique viagens inviáveis. Evitar repetição automática do mesmo cliente na semana; retorno motivado pode ser incluído pelo gestor.

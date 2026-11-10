@@ -1,12 +1,17 @@
 import {
   currentWeeklyRoutePolicySchema, weeklyRouteBaseCityOriginSchema, weeklyRouteCandidateSchema,
   weeklyRouteProposalSchema, type WeeklyRouteCandidate, type WeeklyRouteExclusionReason,
-  type WeeklyRouteProposal,
+  type WeeklyRouteProposal, type WeeklyRouteStrategyPreference,
 } from '@cirne/contracts';
 
 export const maxDailyLegDistanceKm = 30 as const;
 export const tripFromBaseDistanceKm = 80 as const;
 export const coverageCadenceDays = 28 as const;
+const distanceBoundaryToleranceKm = 1e-9;
+
+function isTripDistance(distanceKm: number) {
+  return distanceKm + distanceBoundaryToleranceKm >= tripFromBaseDistanceKm;
+}
 
 export const weeklyRoutePolicy = currentWeeklyRoutePolicySchema.parse({
   version: 'weekly-route-rules-v3', inactiveAfterDays: 180, dailyClientLimit: 10,
@@ -103,14 +108,15 @@ export function analyzeWeeklyRouteCandidate(candidate: WeeklyRouteCandidate,
   else reasons.unshift(`rotina de visita coberta até ${coverage.nextVisitDueOn}`);
   return { score: Math.round(([recency, commercialVolume, scrap, proximity].reduce<number>((sum, value) =>
     value === null ? sum : sum + value, 0)) * 100) / 100,
-    distance: distance === null ? null : Math.round(distance * 10) / 10,
+    rawDistance: distance,
+    distance: distance === null ? null : Math.round(distance * 100) / 100,
     cycleDelayDays, cycleDelayPercent, purchaseTrend, potential, ...coverage, reasons: reasons.slice(0, 8) };
 }
 
 export function classifyDailyRoute(origin: { latitude: number; longitude: number },
   locations: Array<{ latitude: number; longitude: number }>) {
   if (locations.length === 0) return 'local' as const;
-  return locations.some((location) => approximateDistanceKm(origin, location) >= tripFromBaseDistanceKm)
+  return locations.some((location) => isTripDistance(approximateDistanceKm(origin, location)))
     ? 'trip' as const : 'local' as const;
 }
 
@@ -153,7 +159,7 @@ function isCoverageDue(state: keyof typeof coverageRank) {
 
 export function proposeWeeklyRoutes(input: {
   weekStart: string; generatedAt: string; origin: unknown; candidates: readonly unknown[];
-  sources?: unknown;
+  sources?: unknown; strategyPreference?: WeeklyRouteStrategyPreference;
 }): WeeklyRouteProposal {
   const weekStart = input.weekStart;
   if (dayNumber(weekStart) % 7 !== 4) throw new RangeError('A semana deve iniciar em uma segunda-feira.');
@@ -180,13 +186,21 @@ export function proposeWeeklyRoutes(input: {
     || (left.distance ?? Number.MAX_SAFE_INTEGER) - (right.distance ?? Number.MAX_SAFE_INTEGER)
     || left.candidate.clientId.localeCompare(right.candidate.clientId));
 
-  const anchor = eligible.find(({ candidate }) => candidate.location !== null);
-  const strategyKind = !anchor ? 'pending' as const
-    : anchor.distance !== null && anchor.distance >= tripFromBaseDistanceKm ? 'trip' as const : 'local' as const;
+  const inferredAnchor = eligible.find(({ candidate }) => candidate.location !== null);
+  const inferredKind = !inferredAnchor ? 'pending' as const
+    : inferredAnchor.rawDistance !== null && isTripDistance(inferredAnchor.rawDistance)
+      ? 'trip' as const : 'local' as const;
+  const requestedKind = input.strategyPreference ?? 'auto';
+  const desiredKind = requestedKind === 'auto' ? inferredKind : requestedKind;
+  const anchor = desiredKind === 'pending' ? undefined : eligible.find(({ candidate, rawDistance }) =>
+    candidate.location !== null && rawDistance !== null
+      && (desiredKind === 'trip' ? isTripDistance(rawDistance) : !isTripDistance(rawDistance)));
+  const strategyKind = desiredKind === 'pending' || !anchor ? 'pending' as const : desiredKind;
   const strategyEligible = eligible.filter((entry) => {
-    if (strategyKind === 'pending' || entry.candidate.location === null) return true;
-    if (strategyKind === 'local') return entry.distance !== null && entry.distance < tripFromBaseDistanceKm;
-    return entry.distance !== null && entry.distance >= tripFromBaseDistanceKm
+    if (strategyKind === 'pending') return entry.candidate.location === null;
+    if (entry.candidate.location === null) return true;
+    if (strategyKind === 'local') return entry.rawDistance !== null && !isTripDistance(entry.rawDistance);
+    return entry.rawDistance !== null && isTripDistance(entry.rawDistance)
       && anchor?.candidate.location !== null
       && approximateDistanceKm(anchor!.candidate.location!, entry.candidate.location) <= maxDailyLegDistanceKm;
   });
@@ -225,7 +239,10 @@ export function proposeWeeklyRoutes(input: {
     sources: input.sources ?? { sales: { status: 'unavailable', generationId: null, asOfDate: null },
       scrap: { status: 'unavailable', generationId: null, publishedAt: null },
       visits: { status: 'unavailable', asOfDate: null } },
-    strategy: { kind: strategyKind, region: strategyKind === 'local' ? `${origin.city}/${origin.state}` : null,
+    strategy: { kind: strategyKind,
+      region: strategyKind === 'local' ? `${origin.city}/${origin.state}`
+        : strategyKind === 'trip' && anchor?.distance !== null
+          ? `Cluster a ${Math.round(anchor!.distance!)} km de ${origin.city}/${origin.state}` : null,
       distanceFromBaseKm: anchor?.distance ?? null },
     days, excluded, counts: { evaluated: candidates.length, suggested: suggested.length,
       inactiveLost: excluded.filter(({ reason }) => reason === 'inactive_lost').length,

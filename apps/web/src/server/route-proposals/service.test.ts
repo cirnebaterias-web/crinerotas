@@ -145,14 +145,73 @@ describe('weekly proposal service', () => {
       createdAt: '2026-11-04T15:00:00Z', updatedAt: '2026-11-04T15:10:00Z',
       publishedBy: null, publishedAt: null, routeIds: [], predecessorId: null,
       predecessorVersion: null };
-    vi.mocked(clientImportRpc).mockResolvedValue(persisted);
+    vi.mocked(clientImportRpc).mockImplementation(async (_client, rpc) =>
+      rpc === 'get_weekly_route_proposal_mutation_replay' ? null : persisted);
 
     await expect(mutateWeeklyProposal({} as never, { ...command,
       operation: 'open_or_generate', idempotencyKey: clientId(72) }, new Date('2026-11-04T16:00:00Z')))
       .resolves.toMatchObject({ outcome: 'existing', record: { proposalId: clientId(70), version: 2 } });
-    expect(clientImportRpc).toHaveBeenCalledTimes(1);
+    expect(clientImportRpc).toHaveBeenCalledTimes(2);
     expect(clientImportRpc).toHaveBeenCalledWith(expect.anything(), 'get_active_weekly_route_proposal',
       { p_seller_id: sellerId, p_week_start: command.weekStart });
     expect(listManagedClientSellers).not.toHaveBeenCalled();
+  });
+
+  it('regenerates through the public mutation contract without leaking mutation-only fields', async () => {
+    vi.mocked(clientImportRpc).mockImplementation(async (_client, rpc, parameters) => {
+      if (rpc === 'get_seller_route_profile') return routeProfile;
+      if (rpc === 'get_weekly_route_proposal_mutation_replay') return null;
+      if (rpc === 'list_seller_client_visit_coverage') return {
+        schemaVersion: 1, sellerId, source: 'api.visits', observedAt: '2026-11-04T01:00:00Z',
+        clients: [{ clientId: clientId(1), lastCompletedVisitAt: null, visitId: null }],
+      };
+      if (rpc === 'get_scrap_ledger_generation_metadata') return {
+        generationId: clientId(91), publishedAt: '2026-11-04T11:00:00Z',
+      };
+      if (rpc === 'list_management_clients') return page([customer(1)]);
+      if (rpc === 'regenerate_weekly_route_proposal') {
+        const persistence = (parameters as { p_command: { proposal: typeof emptyProposal } }).p_command;
+        return { schemaVersion: 1, proposalId: clientId(70), version: 3, status: 'draft',
+          proposal: persistence.proposal, createdBy: clientId(71), createdAt: '2026-11-04T15:00:00Z',
+          updatedAt: '2026-11-04T16:00:00Z', publishedBy: null, publishedAt: null, routeIds: [],
+          predecessorId: clientId(70), predecessorVersion: 2 };
+      }
+      throw new Error(`Unexpected RPC: ${rpc}`);
+    });
+    vi.mocked(getSalesSignals).mockResolvedValue({ generationId: clientId(90), asOfDate: '2026-11-04',
+      signals: [{ client: { id: clientId(1), name: 'Cliente 1' }, metrics: metrics(20) }] } as never);
+    vi.mocked(getScrapLedgerAnalytics).mockResolvedValue({ generationId: clientId(91), view: 'balances',
+      page: 1, pageSize: 50, totalCount: 0, trendMethod: 'method', rows: [] });
+
+    const result = await mutateWeeklyProposal({} as never, { ...command,
+      operation: 'regenerate', strategyPreference: 'local', idempotencyKey: clientId(72),
+      proposalId: clientId(70), expectedVersion: 2 }, new Date('2026-11-04T16:00:00Z'));
+
+    expect(result).toMatchObject({ outcome: 'regenerated', record: { version: 3,
+      proposal: { strategy: { kind: 'local' } } } });
+    expect(clientImportRpc).toHaveBeenCalledWith(expect.anything(), 'regenerate_weekly_route_proposal',
+      expect.objectContaining({ p_id: clientId(70), p_command: expect.objectContaining({ expectedVersion: 2 }) }));
+  });
+
+  it('replays a lost regenerate response before reading mutable source data', async () => {
+    const persisted = { schemaVersion: 1 as const, proposalId: clientId(70), version: 3,
+      status: 'draft' as const, proposal: emptyProposal, createdBy: clientId(71),
+      createdAt: '2026-11-04T15:00:00Z', updatedAt: '2026-11-04T16:00:00Z',
+      publishedBy: null, publishedAt: null, routeIds: [], predecessorId: clientId(70),
+      predecessorVersion: 2 };
+    vi.mocked(clientImportRpc).mockResolvedValue(persisted);
+
+    await expect(mutateWeeklyProposal({} as never, { ...command,
+      operation: 'regenerate', strategyPreference: 'trip', idempotencyKey: clientId(72),
+      proposalId: clientId(70), expectedVersion: 2 }, new Date('2026-11-05T16:00:00Z')))
+      .resolves.toMatchObject({ outcome: 'regenerated', record: { proposalId: clientId(70), version: 3 } });
+    expect(clientImportRpc).toHaveBeenCalledOnce();
+    expect(clientImportRpc).toHaveBeenCalledWith(expect.anything(),
+      'get_weekly_route_proposal_mutation_replay', { p_command: {
+        schemaVersion: 1, idempotencyKey: clientId(72), operation: 'regenerate',
+        targetId: clientId(70), expectedVersion: 2, sellerId, weekStart: command.weekStart,
+      } });
+    expect(listManagedClientSellers).not.toHaveBeenCalled();
+    expect(getSalesSignals).not.toHaveBeenCalled();
   });
 });

@@ -54,8 +54,12 @@ export const routeProposalOriginSchema = z.discriminatedUnion('kind', [
 ]);
 export type RouteProposalOrigin = z.infer<typeof routeProposalOriginSchema>;
 
+export const weeklyRouteStrategyPreferenceSchema = z.enum(['auto', 'local', 'trip']);
+export type WeeklyRouteStrategyPreference = z.infer<typeof weeklyRouteStrategyPreferenceSchema>;
+
 export const weeklyRouteProposalRequestSchema = z.object({
   schemaVersion: z.literal(1), weekStart: z.iso.date(), sellerId: z.uuid(),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.optional(),
 }).strict();
 export type WeeklyRouteProposalRequest = z.infer<typeof weeklyRouteProposalRequestSchema>;
 
@@ -198,6 +202,7 @@ export const weeklyRouteProposalMutationRequestSchema = z.object({
   sellerId: z.uuid(),
   idempotencyKey: z.uuid(),
   operation: z.enum(['open_or_generate', 'regenerate']).default('open_or_generate'),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.optional(),
   proposalId: z.uuid().optional(),
   expectedVersion: z.number().int().positive().optional(),
 }).strict().superRefine((value, context) => {

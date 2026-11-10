@@ -5,7 +5,7 @@ import { clientListResponseSchema, clientSellerListResponseSchema, clientSellers
   persistedWeeklyRouteProposalSchema, weeklyRoutePlanningResponseSchema,
   weeklyRouteProposalMutationResponseSchema,
   type ImportedClient, type PersistedWeeklyRouteProposal,
-  type WeeklyRoutePlanningResponse } from '@cirne/contracts';
+  type WeeklyRoutePlanningCandidate, type WeeklyRoutePlanningResponse } from '@cirne/contracts';
 import type { ManagementMapPublicConfig } from '@cirne/config/server';
 import { approximateDistanceKm, classifyDailyRoute } from '@cirne/domain';
 import { WeeklyRoutePlanningMap } from './weekly-route-planning-map';
@@ -35,6 +35,7 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
   const [sellers, setSellers] = useState<{ id: string; displayName: string }[]>([]);
   const [sellerId, setSellerId] = useState('');
   const [weekStart, setWeekStart] = useState(nextMonday);
+  const [strategyPreference, setStrategyPreference] = useState<'auto' | 'local' | 'trip'>('auto');
   const [record, setRecord] = useState<PersistedWeeklyRouteProposal | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -53,13 +54,16 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     if (!record || !planning || planning.sellerId !== record.proposal.sellerId
         || planning.weekStart !== record.proposal.weekStart) return false;
     const locations = new Map(planning.candidates.map(({ clientId, location }) => [clientId, location]));
-    return record.proposal.days.some(({ suggestions }) => suggestions.some((item, index) => {
-      if (index === 0) return false;
-      const previous = locations.get(suggestions[index - 1]!.clientId);
-      const current = locations.get(item.clientId);
-      return previous && current
-        ? approximateDistanceKm(previous, current) > planning.maxLegDistanceKm : false;
-    }));
+    return record.proposal.days.some(({ suggestions }) => {
+      let previous: { latitude: number; longitude: number } | null = null;
+      return suggestions.some((item) => {
+        const current = locations.get(item.clientId);
+        if (!current) return false;
+        const conflict = previous !== null && approximateDistanceKm(previous, current) > planning.maxLegDistanceKm;
+        previous = current;
+        return conflict;
+      });
+    });
   }, [planning, record]);
   const dayKinds = useMemo(() => {
     if (!record || !planning || planning.sellerId !== record.proposal.sellerId
@@ -104,7 +108,7 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     setBusy(true); setMessage('');
     try {
       const result = await scrapRequest(endpoint, { method: 'POST', headers,
-        body: JSON.stringify({ schemaVersion: 1, sellerId, weekStart, operation,
+        body: JSON.stringify({ schemaVersion: 1, sellerId, weekStart, operation, strategyPreference,
           idempotencyKey: crypto.randomUUID(),
           ...(operation === 'regenerate' && record
             ? { proposalId: record.proposalId, expectedVersion: record.version } : {}) }) });
@@ -193,19 +197,45 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     finally { setBusy(false); }
   }
 
-  function addClient(client: ImportedClient) {
+  function suggestionFor(candidate: WeeklyRoutePlanningCandidate, plannedOrder: number, manual = false) {
+    return { clientId: candidate.clientId, name: candidate.name, dayIndex: targetDay, plannedOrder,
+      score: candidate.score, approximateDistanceKm: candidate.distanceFromBaseKm,
+      reasons: manual ? ['incluído manualmente pelo gestor', ...candidate.reasons].slice(0, 8) : candidate.reasons,
+      locationPending: candidate.location === null, scrapBalanceState: candidate.scrapBalanceState,
+      lastCompletedVisitAt: candidate.lastCompletedVisitAt, coverageState: candidate.coverageState,
+      coverageOverdueDays: candidate.coverageOverdueDays, nextVisitDueOn: candidate.nextVisitDueOn };
+  }
+
+  async function addClient(client: ImportedClient) {
     if (!record || record.proposal.days[targetDay]!.suggestions.length >= 10 ||
         record.proposal.days.some((day) => day.suggestions.some((item) => item.clientId === client.id))) return;
-    setRecord({ ...record, proposal: { ...record.proposal,
-      counts: { ...record.proposal.counts, suggested: record.proposal.counts.suggested + 1 },
-      days: record.proposal.days.map((day, index) =>
-      index === targetDay ? { ...day, suggestions: [...day.suggestions, { clientId: client.id, name: client.name,
-        dayIndex: targetDay, plannedOrder: day.suggestions.length + 1, score: 0,
-        approximateDistanceKm: null, reasons: ['incluído manualmente pelo gestor'],
-        locationPending: client.latitude === null || client.longitude === null, scrapBalanceState: 'unavailable',
-        lastCompletedVisitAt: null, coverageState: 'unavailable', coverageOverdueDays: null,
-        nextVisitDueOn: null }] } : day) } });
-    setAvailableClients((current) => current.filter((item) => item.id !== client.id));
+    setBusy(true); setMessage('');
+    try {
+      let snapshot = planning;
+      if (!snapshot || snapshot.sellerId !== record.proposal.sellerId || snapshot.weekStart !== record.proposal.weekStart) {
+        const parameters = new URLSearchParams({ sellerId: record.proposal.sellerId, weekStart: record.proposal.weekStart });
+        snapshot = weeklyRoutePlanningResponseSchema.parse(await scrapRequest(`${endpoint}?${parameters}`));
+        setPlanning(snapshot);
+      }
+      const candidate = snapshot.candidates.find(({ clientId }) => clientId === client.id);
+      if (!candidate) {
+        setMessage('Este cliente não consta no planejamento atual. Atualize a carteira antes de incluí-lo; a cobertura não foi alterada.');
+        return;
+      }
+      const coverageAdded = coverageDueStates.has(candidate.coverageState) ? 1 : 0;
+      setRecord({ ...record, proposal: { ...record.proposal,
+        counts: { ...record.proposal.counts, suggested: record.proposal.counts.suggested + 1,
+          coveragePlanned: record.proposal.counts.coveragePlanned + coverageAdded,
+          coveragePending: Math.max(0, record.proposal.counts.coveragePending - coverageAdded) },
+        days: record.proposal.days.map((day, index) => index === targetDay
+          ? { ...day, suggestions: [...day.suggestions, suggestionFor(candidate, day.suggestions.length + 1, true)] } : day) } });
+      setAvailableClients((current) => current.filter((item) => item.id !== client.id));
+      setMessage(candidate.location === null
+        ? 'Cliente incluído com cobertura preservada e localização pendente. A distância será revalidada ao salvar.'
+        : 'Cliente incluído com os dados de cobertura do planejamento. Salve a revisão antes de publicar.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível consultar a cobertura deste cliente. Tente novamente.');
+    } finally { setBusy(false); }
   }
 
   function addMapSelection() {
@@ -217,24 +247,19 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     const alreadyPlanned = new Set(record.proposal.days.flatMap(({ suggestions }) =>
       suggestions.map(({ clientId }) => clientId)));
     const byId = new Map(planning.candidates.map((candidate) => [candidate.clientId, candidate]));
-    const additions = selectedClientIds.flatMap((id) => {
+    const additions = [...new Set(selectedClientIds)].flatMap((id) => {
       const candidate = byId.get(id);
-      return candidate && candidate.location !== null && !alreadyPlanned.has(candidate.clientId)
+      return candidate && !alreadyPlanned.has(candidate.clientId)
         ? [candidate] : [];
-    })
-      .sort((left, right) => right.score - left.score).slice(0, Math.max(0, 10 - day.suggestions.length));
+    }).sort((left, right) => right.score - left.score);
     const ordered = [...day.suggestions];
+    let capacityPending = 0; let distancePending = 0;
     for (const candidate of additions) {
-      const previous = ordered.at(-1);
-      const previousLocation = previous ? byId.get(previous.clientId)?.location : null;
+      if (ordered.length >= 10) { capacityPending += 1; continue; }
+      const previousLocation = ordered.map(({ clientId }) => byId.get(clientId)?.location).reverse().find((location) => location != null);
       if (previousLocation && candidate.location
-          && approximateDistanceKm(previousLocation, candidate.location) > planning.maxLegDistanceKm) continue;
-      ordered.push({ clientId: candidate.clientId, name: candidate.name, dayIndex: targetDay,
-        plannedOrder: ordered.length + 1, score: candidate.score,
-        approximateDistanceKm: candidate.distanceFromBaseKm, reasons: candidate.reasons,
-        locationPending: false, scrapBalanceState: candidate.scrapBalanceState,
-        lastCompletedVisitAt: candidate.lastCompletedVisitAt, coverageState: candidate.coverageState,
-        coverageOverdueDays: candidate.coverageOverdueDays, nextVisitDueOn: candidate.nextVisitDueOn });
+          && approximateDistanceKm(previousLocation, candidate.location) > planning.maxLegDistanceKm) { distancePending += 1; continue; }
+      ordered.push(suggestionFor(candidate, ordered.length + 1));
     }
     const added = ordered.length - day.suggestions.length;
     const addedCoverage = ordered.slice(day.suggestions.length)
@@ -245,8 +270,12 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
         coveragePending: Math.max(0, record.proposal.counts.coveragePending - addedCoverage) },
       days: record.proposal.days.map((item, index) => index === targetDay
         ? { ...item, suggestions: ordered } : item) } });
-    setMessage(added === additions.length ? `${added} cliente(s) adicionados ao dia ${targetDay + 1}.`
-      : `${added} cliente(s) adicionados; os demais excederiam 10 visitas ou 30 km entre paradas.`);
+    const unpositionedAdded = ordered.slice(day.suggestions.length).filter(({ locationPending }) => locationPending).length;
+    const existing = selectedClientIds.filter((id) => alreadyPlanned.has(id)).length;
+    const unavailable = selectedClientIds.filter((id) => !byId.has(id)).length;
+    setMessage(`${added} cliente(s) adicionados ao dia ${targetDay + 1}; ${unpositionedAdded} com localização pendente. `
+      + `${capacityPending} pendentes por capacidade; ${distancePending} por distância; ${existing} já planejados; ${unavailable} fora do planejamento atual. `
+      + 'Clientes sem coordenadas permanecem no rascunho e a validação final é feita ao salvar.');
   }
 
   async function revise() {
@@ -290,9 +319,15 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
       <label>Segunda-feira da semana<input type="date" value={weekStart} onChange={(event) => changeWeek(event.target.value)} disabled={busy} /></label>
       <label>Vendedor<select value={sellerId} onChange={(event) => changeSeller(event.target.value)} disabled={busy}>
         {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.displayName}</option>)}</select></label>
+      <label>Preferência de estratégia<select value={strategyPreference} disabled={busy}
+        onChange={(event) => setStrategyPreference(event.target.value as 'auto' | 'local' | 'trip')}>
+        <option value="auto">Automática</option><option value="local">Semana local</option><option value="trip">Semana de viagem</option>
+      </select></label>
       <button className="route-planner-publish" type="button" onClick={() => void generate()} disabled={busy || !sellerId}>{busy ? 'Processando…' : 'Abrir ou criar sugestão'}</button>
       <button type="button" onClick={() => void loadPlanningMap()} disabled={busy || !sellerId}>Abrir mapa inteligente</button>
       {record && <button type="button" onClick={() => void generate('regenerate')} disabled={busy || !sellerId}>Regenerar com dados atuais</button>}
+      <p className="route-planner-strategy-help">A preferência de estratégia é aplicada ao criar ou regenerar.
+        Abrir uma sugestão existente preserva a estratégia já salva.</p>
     </section>
     {message && <p className="route-planner-message" role="status">{message}</p>}
     {dirty && <div className="route-planner-message is-conflict" role="alert">Há alterações locais não salvas. Salve a revisão antes de publicar, trocar o contexto ou regenerar.
@@ -317,7 +352,8 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
           {day.suggestions.length === 0 && <p className="route-planner-empty">Nenhum cliente elegível para este dia.</p>}
           <ol className="route-planner-stop-list">{day.suggestions.map((item, index) => <li key={item.clientId}>
             <span className="route-planner-order">{index + 1}</span><div className="route-planner-stop-info"><strong>{item.name}</strong>
-              <small>{coverageLabel(item.coverageState)}</small><span>{item.reasons.join(' · ')}</span>{item.locationPending && <small>Distância pendente; endereço navegável preservado.</small>}</div>
+              <small>{coverageLabel(item.coverageState)}</small><span>{item.reasons.join(' · ')}</span>
+              {item.locationPending && <small className="route-planner-location-pending">Sem coordenadas · localização e distância pendentes.</small>}</div>
             <div className="route-planner-stop-actions"><button type="button" disabled={index === 0 || busy} onClick={() => move(dayIndex,index,-1)}>↑</button>
               <button type="button" disabled={index === day.suggestions.length - 1 || busy} onClick={() => move(dayIndex,index,1)}>↓</button>
               <button type="button" disabled={dayIndex === 0 || busy || record.proposal.days[dayIndex - 1]!.suggestions.length >= 10} onClick={() => changeDay(dayIndex,index,-1)}>Dia anterior</button>
@@ -331,7 +367,8 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
         <button type="button" disabled={busy || !clientQuery.trim()} onClick={() => void searchClients()}>Pesquisar carteira</button>
         {availableClients.length > 0 && <ul className="route-planner-client-list">{availableClients.map((client) => <li key={client.id}>
           <div><strong>{client.name}</strong><small>{client.externalReference} · {client.address}</small></div>
-          <button type="button" disabled={record.proposal.days[targetDay]!.suggestions.length >= 10} onClick={() => addClient(client)}>Adicionar</button></li>)}</ul>}
+          <button type="button" disabled={busy || record.proposal.days[targetDay]!.suggestions.length >= 10}
+            onClick={() => void addClient(client)}>Adicionar</button></li>)}</ul>}
         <button type="button" className="route-planner-save" disabled={busy || routeConflict || !planning || !dirty} onClick={() => void revise()}>Salvar ordem revisada</button>
         <button type="button" className="route-planner-publish" disabled={busy || total === 0 || routeConflict || !planning || dirty} onClick={() => void decide('publish')}>Publicar semana</button>
         <label>Motivo para descartar<textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} maxLength={500} rows={3} /></label>

@@ -77,6 +77,50 @@ begin
   return result;
 end $function$;
 
+-- Read the result of an already committed intent before recomputing sources.
+-- A missing command returns null, while an existing key never changes identity.
+create function api.get_weekly_route_proposal_mutation_replay(p_command jsonb)
+returns jsonb language plpgsql stable security definer set search_path=''
+as $function$
+declare identity_document jsonb := private.route_identity('route.plan_scoped');
+  actor uuid := (identity_document ->> 'id')::uuid; key uuid; target uuid; seller uuid;
+  expected integer; week date; operation text; replay private.weekly_route_proposal_commands%rowtype;
+begin
+  begin
+    key := (p_command ->> 'idempotencyKey')::uuid;
+    target := (p_command ->> 'targetId')::uuid;
+    expected := (p_command ->> 'expectedVersion')::integer;
+    seller := (p_command ->> 'sellerId')::uuid;
+    week := (p_command ->> 'weekStart')::date;
+    operation := p_command ->> 'operation';
+  exception when others then raise exception using errcode='P0001',message='VALIDATION_FAILED'; end;
+  if jsonb_typeof(p_command) is distinct from 'object'
+    or (select count(*) from jsonb_object_keys(p_command)) <> 7
+    or not p_command ?& array['schemaVersion','idempotencyKey','operation','targetId','expectedVersion','sellerId','weekStart']
+    or p_command -> 'schemaVersion' is distinct from '1'::jsonb
+    or key is null or seller is null or week is null or extract(isodow from week) <> 1
+    or coalesce(operation,'') not in ('save','regenerate','revise','publish','reject')
+    or (operation='save' and (target is not null or expected is not null))
+    or (operation<>'save' and (target is null or expected is null or expected < 1)) then
+    raise exception using errcode='P0001',message='VALIDATION_FAILED';
+  end if;
+  select * into replay from private.weekly_route_proposal_commands where actor_id=actor and idempotency_key=key;
+  if found then
+    if replay.operation is distinct from operation
+      or (operation<>'save' and replay.target_id is distinct from target)
+      or replay.command -> 'schemaVersion' is distinct from p_command -> 'schemaVersion'
+      or replay.command #> '{expectedVersion}' is distinct from nullif(p_command -> 'expectedVersion','null'::jsonb)
+      or replay.response #>> '{proposal,sellerId}' is distinct from seller::text
+      or replay.response #>> '{proposal,weekStart}' is distinct from to_char(week,'YYYY-MM-DD') then
+      raise exception using errcode='P0001',message='IDEMPOTENCY_KEY_REUSED';
+    end if;
+  end if;
+  if not exists(select 1 from jsonb_array_elements_text(identity_document -> 'scopeIds') scope where scope::uuid=seller) then
+    raise exception using errcode='P0001',message='NOT_FOUND';
+  end if;
+  return replay.response;
+end $function$;
+
 -- Keep the strict legacy validator for old persisted documents. V3 is validated
 -- explicitly, then normalized into that same canonical composition validator.
 alter function private.validate_weekly_route_proposal(uuid,date,jsonb) rename to validate_weekly_route_proposal_v2;
@@ -233,7 +277,14 @@ begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('weekly-command:'||actor::text||':'||key::text,0));
   select * into replay from private.weekly_route_proposal_commands where actor_id=actor and idempotency_key=key;
   if found then
-    if replay.operation <> 'regenerate' or replay.target_id <> p_id or replay.command <> p_command then
+    -- The command identifies the requested transition. The generated proposal is
+    -- a server snapshot and may change between retries after a lost response.
+    if replay.operation <> 'regenerate' or replay.target_id is distinct from p_id
+      or replay.command -> 'schemaVersion' is distinct from p_command -> 'schemaVersion'
+      or replay.command -> 'expectedVersion' is distinct from p_command -> 'expectedVersion'
+      or replay.command #> '{proposal,schemaVersion}' is distinct from p_command #> '{proposal,schemaVersion}'
+      or replay.command #> '{proposal,sellerId}' is distinct from p_command #> '{proposal,sellerId}'
+      or replay.command #> '{proposal,weekStart}' is distinct from p_command #> '{proposal,weekStart}' then
       raise exception using errcode='P0001',message='IDEMPOTENCY_KEY_REUSED';
     end if;
     if not exists(select 1 from jsonb_array_elements_text(identity_document -> 'scopeIds') scope
@@ -291,6 +342,8 @@ begin
       E'  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(''weekly-command:''||actor::text||'':''||key::text,0));\n  select * into replay from private.weekly_route_proposal_commands');
     if definition=original then raise exception 'Missing replay anchor in %',name; end if;
     if name='save_weekly_route_proposal(jsonb)' then
+      definition := replace(definition,'if replay.operation <> ''save'' or replay.command <> p_command then',
+        E'if replay.operation <> ''save''\n      or replay.command -> ''schemaVersion'' is distinct from p_command -> ''schemaVersion''\n      or replay.command #> ''{proposal,schemaVersion}'' is distinct from p_command #> ''{proposal,schemaVersion}''\n      or replay.command #> ''{proposal,sellerId}'' is distinct from p_command #> ''{proposal,sellerId}''\n      or replay.command #> ''{proposal,weekStart}'' is distinct from p_command #> ''{proposal,weekStart}'' then');
       definition := replace(definition,'  perform private.validate_weekly_route_proposal(seller,week,proposal);',
         E'  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(''weekly-proposal:''||seller::text||'':''||week::text,0));\n  perform private.validate_weekly_route_proposal(seller,week,proposal);');
     else
@@ -329,9 +382,9 @@ revoke all on function private.validate_weekly_route_proposal(uuid,date,jsonb),
   private.validate_weekly_route_proposal_v2(uuid,date,jsonb),private.regenerate_weekly_route_proposal(uuid,jsonb)
   from public,anon,authenticated,service_role;
 revoke all on function api.list_seller_client_visit_coverage(uuid),api.get_active_weekly_route_proposal(uuid,date),
-  api.regenerate_weekly_route_proposal(uuid,jsonb) from public,anon,service_role;
+  api.regenerate_weekly_route_proposal(uuid,jsonb),api.get_weekly_route_proposal_mutation_replay(jsonb) from public,anon,service_role;
 grant execute on function api.list_seller_client_visit_coverage(uuid),api.get_active_weekly_route_proposal(uuid,date),
-  api.regenerate_weekly_route_proposal(uuid,jsonb) to authenticated;
+  api.regenerate_weekly_route_proposal(uuid,jsonb),api.get_weekly_route_proposal_mutation_replay(jsonb) to authenticated;
 
 reset role;
 revoke create on schema api,private from cirne_route_executor;
