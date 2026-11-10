@@ -1,0 +1,28 @@
+schema: 1
+story: '4.35'
+title: 'Selecao geografica controlada e coerencia diaria das rotas'
+gate: PASS
+status_reason: >-
+  Pendencias compactas, nomes seguros, lasso livre com borracha e reparo de rascunhos
+  inconsistentes foram cobertos por testes unitarios e E2E, sem regressao nos gates constitucionais.
+reviewer: 'Quinn (QA)'
+updated: '2026-11-10T16:45:00-03:00'
+quality_score: 96
+waiver: { active: false }
+top_issues: []
+evidence:
+  tests_reviewed: 875
+  risks_identified: 3
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    ac_gaps: []
+nfr_validation:
+  security: { status: PASS, notes: 'Secret scan aprovado e nomes renderizados como texto React.' }
+  performance: { status: PASS, notes: 'Geometria local; pontos sao reduzidos por distancia minima de 4 px.' }
+  reliability: { status: PASS, notes: 'Publicacao segue bloqueada quando existe trecho conhecido acima de 30 km.' }
+  maintainability: { status: PASS, notes: 'Selecao geometrica isolada e testavel; contrato retrocompativel com nome opcional.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Validar a ergonomia da caneta em um aparelho Android fisico durante o piloto.'
+      refs: ['tests/e2e/weekly-route-intelligence.spec.ts']

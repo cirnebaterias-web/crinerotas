@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { weeklyRoutePlanningResponseSchema } from '@cirne/contracts';
 import { approximateDistanceKm } from '@cirne/domain';
-import { circleSelectionIds, commercialPriorityLabels, WeeklyRoutePlanningMap } from './weekly-route-planning-map';
+import { circleSelectionIds, commercialPriorityLabels, freehandSelectionIds,
+  WeeklyRoutePlanningMap } from './weekly-route-planning-map';
 
 const sellerId = '11111111-1111-4111-8111-111111111111';
 const planning = () => weeklyRoutePlanningResponseSchema.parse({
@@ -42,7 +43,8 @@ describe('weekly route planning map', () => {
     expect(html).toContain('Com débito oficial de sucata');
     expect(html).toContain('Prioridades comerciais');
     expect(html).toContain('Débito oficial de sucata: 300 kg');
-    expect(html).toContain('mantenha um dedo pressionado enquanto arrasta');
+    expect(html).toContain('contorne livremente a região no mapa');
+    expect(html).toContain('Borracha: apagar desenho');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('<img');
@@ -89,5 +91,20 @@ describe('circle preview and numeric selection', () => {
   it('allows a zero radius to select only a client at the center', () => {
     expect(circleSelectionIds([{ clientId: 'center', location: center }, { clientId: 'edge', location: edge }],
       { center, radiusKm: 0 })).toEqual(['center']);
+  });
+});
+
+describe('freehand area selection', () => {
+  const polygon = [
+    { latitude: -6, longitude: -36 }, { latitude: -6, longitude: -35 },
+    { latitude: -5, longitude: -35 }, { latitude: -5, longitude: -36 },
+  ];
+
+  it('selects only positioned clients inside the manager drawn contour', () => {
+    expect(freehandSelectionIds([
+      { clientId: 'inside', location: { latitude: -5.5, longitude: -35.5 } },
+      { clientId: 'outside', location: { latitude: -4.9, longitude: -35.5 } },
+      { clientId: 'unknown', location: null },
+    ], polygon)).toEqual(['inside']);
   });
 });

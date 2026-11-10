@@ -169,15 +169,15 @@ export function proposeWeeklyRoutes(input: {
   const candidates = input.candidates.map((candidate) => weeklyRouteCandidateSchema.parse(candidate));
   if (new Set(candidates.map(({ clientId }) => clientId)).size !== candidates.length) throw new RangeError('Cliente repetido.');
 
-  const excluded: Array<{ clientId: string; reason: WeeklyRouteExclusionReason }> = [];
+  const excluded: Array<{ clientId: string; name: string; reason: WeeklyRouteExclusionReason }> = [];
   const eligible = candidates.flatMap((candidate) => {
-    if (candidate.status !== 'active') { excluded.push({ clientId: candidate.clientId, reason: 'client_not_active' }); return []; }
-    if (candidate.daysSinceLastPurchase === null) { excluded.push({ clientId: candidate.clientId, reason: 'no_purchase_history' }); return []; }
+    if (candidate.status !== 'active') { excluded.push({ clientId: candidate.clientId, name: candidate.name, reason: 'client_not_active' }); return []; }
+    if (candidate.daysSinceLastPurchase === null) { excluded.push({ clientId: candidate.clientId, name: candidate.name, reason: 'no_purchase_history' }); return []; }
     if (candidate.daysSinceLastPurchase > weeklyRoutePolicy.inactiveAfterDays) {
-      excluded.push({ clientId: candidate.clientId, reason: 'inactive_lost' }); return [];
+      excluded.push({ clientId: candidate.clientId, name: candidate.name, reason: 'inactive_lost' }); return [];
     }
     if (!candidate.location && !candidate.hasNavigableAddress) {
-      excluded.push({ clientId: candidate.clientId, reason: 'no_navigable_location' }); return [];
+      excluded.push({ clientId: candidate.clientId, name: candidate.name, reason: 'no_navigable_location' }); return [];
     }
     return [{ candidate, ...analyzeWeeklyRouteCandidate(candidate, origin, weekStart) }];
   }).sort((left, right) => coverageRank[left.coverageState] - coverageRank[right.coverageState]
@@ -206,7 +206,7 @@ export function proposeWeeklyRoutes(input: {
   });
   const strategyEligibleIds = new Set(strategyEligible.map(({ candidate }) => candidate.clientId));
   eligible.forEach(({ candidate }) => {
-    if (!strategyEligibleIds.has(candidate.clientId)) excluded.push({ clientId: candidate.clientId,
+    if (!strategyEligibleIds.has(candidate.clientId)) excluded.push({ clientId: candidate.clientId, name: candidate.name,
       reason: 'weekly_strategy_mismatch' });
   });
 
@@ -220,7 +220,7 @@ export function proposeWeeklyRoutes(input: {
       .sort((left, right) => (left.suggestions.length === 0 ? 1 : 0) - (right.suggestions.length === 0 ? 1 : 0)
         || left.distance - right.distance || left.dayIndex - right.dayIndex)[0];
     if (compatible) compatible.suggestions.push(entry);
-    else excluded.push({ clientId: entry.candidate.clientId,
+    else excluded.push({ clientId: entry.candidate.clientId, name: entry.candidate.name,
       reason: workingDays.every((suggestions) => suggestions.length >= weeklyRoutePolicy.dailyClientLimit)
         ? 'daily_capacity_reached' : 'daily_distance_limit' });
   });

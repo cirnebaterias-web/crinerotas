@@ -341,7 +341,12 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     {message && <p className="route-planner-message" role="status">{message}</p>}
     {dirty && <div className="route-planner-message is-conflict" role="alert">Há alterações locais não salvas. Salve a revisão antes de publicar, trocar o contexto ou regenerar.
       <button type="button" onClick={() => { if (savedRecord) setRecord(savedRecord); }}>Descartar alterações locais</button></div>}
-    {routeConflict && <p className="route-planner-message is-conflict" role="alert">Há trecho acima de 30 km entre paradas consecutivas.</p>}
+    {routeConflict && <div className="route-planner-message is-conflict" role="alert">
+      <span>Esta versão possui trecho acima de 30 km entre paradas e não pode ser publicada.</span>
+      <button type="button" disabled={busy || record?.status !== 'draft'} onClick={() => void generate('regenerate')}>
+        Corrigir rota com os dados atuais
+      </button>
+    </div>}
     {planning && <><WeeklyRoutePlanningMap planning={planning} mapConfig={mapConfig}
       selectedIds={selectedClientIds} onSelection={setSelectedClientIds} />
       <section className="route-intelligence-apply"><label>Adicionar seleção no dia<select value={targetDay}
@@ -357,12 +362,13 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
           {record.proposal.strategy.distanceFromBaseKm !== null ? ` · ${record.proposal.strategy.distanceFromBaseKm.toLocaleString('pt-BR')} km da origem` : ''}</dd></div>
         <div><dt>Rotina de visitas</dt><dd>{record.proposal.counts.coveragePlanned}/{record.proposal.counts.coverageDue} prioridades cobertas</dd></div></dl>
       <p>{record.proposal.counts.inactiveLost} clientes com mais de 180 dias, {record.proposal.counts.noPurchaseHistory} sem histórico e {record.proposal.counts.needsReview} com cadastro ou agrupamento geográfico pendente ficaram fora da sugestão.</p></section>
-      {record.proposal.excluded.length > 0 && <section className="route-planner-actions" aria-label="Clientes pendentes da sugestão">
-        <h2>Clientes pendentes e motivo</h2><p>Continuam visíveis para revisão; não foram descartados da carteira.</p>
+      {record.proposal.excluded.length > 0 && <details className="route-planner-pending" aria-label="Clientes pendentes da sugestão">
+        <summary><span><strong>{record.proposal.excluded.length} clientes pendentes</strong>
+          <small>Fora desta sugestão; continuam disponíveis para revisão.</small></span><span>Ver detalhes</span></summary>
         <ul className="route-planner-client-list">{record.proposal.excluded.map((item) => <li key={`${item.clientId}-${item.reason}`}>
-          <div><strong>{planningNames.get(item.clientId) ?? `Cliente ${item.clientId}`}</strong>
+          <div><strong>{item.name ?? planningNames.get(item.clientId) ?? 'Nome do cliente indisponível'}</strong>
             <small>{exclusionLabels[item.reason] ?? item.reason}</small></div></li>)}</ul>
-      </section>}
+      </details>}
       <div className="route-planner-workspace">
         {record.proposal.days.map((day, dayIndex) => <section className="route-planner-composition" key={day.serviceDate}>
           <div className="route-planner-section-title"><div><p>DIA {dayIndex + 1}</p><h2>{new Intl.DateTimeFormat('pt-BR',{timeZone:'UTC'}).format(new Date(`${day.serviceDate}T12:00:00Z`))}</h2></div><span>{day.suggestions.length}/10{dayKinds.has(dayIndex) ? ` · ${dayKinds.get(dayIndex) === 'trip' ? 'viagem' : 'local'}` : ''}</span></div>
