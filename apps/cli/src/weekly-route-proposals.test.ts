@@ -22,7 +22,8 @@ describe('weekly route proposals CLI use case', () => {
     const result = generateWeeklyRouteProposal(input);
     expect(result.mode).toBe('rules');
     expect(result.days[0]?.suggestions).toHaveLength(1);
-    expect(result.excluded).toEqual([{ clientId: input.candidates[1]!.clientId, reason: 'inactive_lost' }]);
+    expect(result.excluded).toEqual([{ clientId: input.candidates[1]!.clientId,
+      name: input.candidates[1]!.name, reason: 'inactive_lost' }]);
   });
   it('reports policy and five daily counts', () => {
     expect(weeklyRouteProposalSummary(input)).toMatchObject({ status: 'ok',

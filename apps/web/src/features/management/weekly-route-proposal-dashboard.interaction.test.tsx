@@ -195,7 +195,7 @@ describe('weekly route dashboard interactions', () => {
     app.change('Buscar por nome', 'Cliente'); await app.click('Pesquisar carteira');
     await app.click('>Adicionar</button>');
     await app.click('>Adicionar</button>');
-    expect(app.text()).toContain('Há trecho acima de 30 km');
+    expect(app.text()).toContain('possui trecho acima de 30 km');
     expect(app.button('Salvar ordem revisada').props.disabled).toBe(true);
     expect(app.button('Publicar semana').props.disabled).toBe(true);
   });

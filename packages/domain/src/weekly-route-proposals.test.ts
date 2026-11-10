@@ -25,7 +25,7 @@ describe('weekly route proposal rules', () => {
       candidate(2, { daysSinceLastPurchase: 181 }),
     ]);
     expect(result.days.flatMap(({ suggestions }) => suggestions).map(({ clientId }) => clientId)).toEqual([id(1)]);
-    expect(result.excluded).toContainEqual({ clientId: id(2), reason: 'inactive_lost' });
+    expect(result.excluded).toContainEqual({ clientId: id(2), name: 'Cliente 2', reason: 'inactive_lost' });
     expect(result.counts).toMatchObject({ evaluated: 2, suggested: 1, inactiveLost: 1 });
     expect(result.policy).toEqual(weeklyRoutePolicy);
     expect(result.policy.version).toBe('weekly-route-rules-v3');
@@ -34,7 +34,7 @@ describe('weekly route proposal rules', () => {
   it('keeps missing history distinct and does not invent recency', () => {
     const result = proposal([candidate(1, { daysSinceLastPurchase: null, periodicityDays: null })]);
     expect(result.counts).toMatchObject({ suggested: 0, inactiveLost: 0, noPurchaseHistory: 1 });
-    expect(result.excluded).toEqual([{ clientId: id(1), reason: 'no_purchase_history' }]);
+    expect(result.excluded).toEqual([{ clientId: id(1), name: 'Cliente 1', reason: 'no_purchase_history' }]);
   });
 
   it('retains address-only clients and flags missing distance', () => {
@@ -103,7 +103,7 @@ describe('weekly route proposal rules', () => {
     expect(result.strategy.region).toMatch(/Cluster a .* km de Parnamirim\/RN/);
     expect(result.days.flatMap(({ suggestions }) => suggestions).map(({ clientId }) => clientId))
       .toEqual(expect.arrayContaining([id(1), id(2)]));
-    expect(result.excluded).toContainEqual({ clientId: id(3), reason: 'weekly_strategy_mismatch' });
+    expect(result.excluded).toContainEqual({ clientId: id(3), name: 'Cliente 3', reason: 'weekly_strategy_mismatch' });
   });
 
   it('never puts two positioned consecutive stops more than 30 km apart on the same day', () => {
@@ -146,7 +146,7 @@ describe('weekly route proposal rules', () => {
       location: { latitude: -5.8, longitude: -35.2 },
     })));
     expect(result.counts).toMatchObject({ suggested: 50, needsReview: 1 });
-    expect(result.excluded).toContainEqual({ clientId: id(51), reason: 'daily_capacity_reached' });
+    expect(result.excluded).toContainEqual({ clientId: id(51), name: 'Cliente 51', reason: 'daily_capacity_reached' });
   });
 
   it('classifies weekly days as local or trip from the seller base city', () => {
@@ -197,8 +197,8 @@ describe('weekly route proposal rules', () => {
       candidate(2, { location: null, hasNavigableAddress: false }),
     ]);
     expect(result.excluded).toEqual([
-      { clientId: id(1), reason: 'client_not_active' },
-      { clientId: id(2), reason: 'no_navigable_location' },
+      { clientId: id(1), name: 'Cliente 1', reason: 'client_not_active' },
+      { clientId: id(2), name: 'Cliente 2', reason: 'no_navigable_location' },
     ]);
     expect(result.counts.needsReview).toBe(2);
   });

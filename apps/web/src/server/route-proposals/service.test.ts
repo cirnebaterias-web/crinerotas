@@ -56,7 +56,7 @@ describe('weekly proposal service', () => {
     expect(result.days[0]?.suggestions[0]).toMatchObject({ clientId: clientId(1) });
     expect(result.origin).toMatchObject({ city: 'Parnamirim', ibgeCode: '2403251', reference: 'municipal_seat' });
     expect(result.days[0]?.suggestions[0]?.reasons).toContain('500 kg de débito de sucata');
-    expect(result.excluded).toContainEqual({ clientId: clientId(2), reason: 'inactive_lost' });
+    expect(result.excluded).toContainEqual({ clientId: clientId(2), name: 'Cliente 2', reason: 'inactive_lost' });
     expect(result.sources).toEqual({ sales: { status: 'available', generationId: clientId(90), asOfDate: '2026-11-04' },
       scrap: { status: 'available', generationId: clientId(91), publishedAt: '2026-11-04T11:00:00Z' },
       visits: { status: 'unavailable', asOfDate: null } });

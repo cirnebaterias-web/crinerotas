@@ -85,13 +85,17 @@ async function centerOnPriorityClient(page: Page) {
   });
 }
 
-async function circlePoints(page: Page) {
+async function freehandPoints(page: Page) {
   const canvas = page.getByLabel('Clientes elegíveis no mapa');
   await expect(canvas).toHaveClass(/is-drawing/);
   await canvas.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
   const box = (await canvas.boundingBox())!;
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  return { start: center, end: { x: Math.min(box.x + box.width - 20, center.x + 50), y: center.y } };
+  return [
+    { x: center.x - 55, y: center.y - 55 }, { x: center.x + 55, y: center.y - 55 },
+    { x: center.x + 55, y: center.y + 55 }, { x: center.x - 55, y: center.y + 55 },
+    { x: center.x - 55, y: center.y - 55 },
+  ];
 }
 
 test.describe('weekly commercial route intelligence', () => {
@@ -118,7 +122,7 @@ test.describe('weekly commercial route intelligence', () => {
     await expect(dialog).toHaveCount(0); await expect(marker).toBeFocused();
   });
 
-  test('draws a real circle, cancels without selecting, and preserves center/zoom through filtering and selection', async ({ page }) => {
+  test('draws a freehand area, erases without selecting, and preserves center/zoom through filtering and selection', async ({ page }) => {
     await openMap(page);
     await zoomIn(page);
     await centerOnPriorityClient(page);
@@ -129,27 +133,30 @@ test.describe('weekly commercial route intelligence', () => {
     expect(await view(page)).toEqual(initial);
     await page.getByRole('checkbox', { name: `Selecionar ${longName}`, exact: true }).check();
     expect(await view(page)).toEqual(initial);
-    await page.getByRole('button', { name: 'Limpar seleção' }).click();
-    await page.getByRole('button', { name: 'Desenhar círculo no mapa' }).click();
-    let points = await circlePoints(page);
-    await page.mouse.move(points.start.x, points.start.y); await page.mouse.down();
-    await page.mouse.move(points.end.x, points.end.y, { steps: 8 }); await page.mouse.up();
-    await expect(page.getByText(/Prévia: 1 clientes filtrados na área/)).toBeVisible();
+    await page.getByRole('button', { name: 'Limpar clientes selecionados' }).click();
+    await page.getByRole('button', { name: /Caneta: desenhar área/ }).click();
+    let points = await freehandPoints(page);
+    await page.mouse.move(points[0]!.x, points[0]!.y); await page.mouse.down();
+    for (const point of points.slice(1)) await page.mouse.move(point.x, point.y, { steps: 4 });
+    await page.mouse.up();
+    await expect(page.getByText(/Área desenhada: 1 clientes filtrados/)).toBeVisible();
     await expect(page.getByText(/0 selecionados/)).toBeVisible();
-    await page.getByRole('button', { name: 'Cancelar seleção de área' }).click();
+    await page.getByRole('button', { name: /Borracha: apagar desenho/ }).click();
     await expect(page.getByText(/0 selecionados/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Aplicar seleção' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Desenhar círculo no mapa' }).click();
-    points = await circlePoints(page);
-    await page.mouse.move(points.start.x, points.start.y); await page.mouse.down();
-    await page.mouse.move(points.end.x, points.end.y, { steps: 8 }); await page.mouse.up();
-    await page.getByRole('button', { name: 'Aplicar seleção' }).click();
+    await expect(page.getByRole('button', { name: 'Aplicar área desenhada' })).toHaveCount(0);
+    await page.getByRole('button', { name: /Caneta: desenhar área/ }).click();
+    points = await freehandPoints(page);
+    await page.mouse.move(points[0]!.x, points[0]!.y); await page.mouse.down();
+    for (const point of points.slice(1)) await page.mouse.move(point.x, point.y, { steps: 4 });
+    await page.mouse.up();
+    await page.getByRole('button', { name: 'Aplicar área desenhada' }).click();
     await expect(page.getByText(/1 selecionados/)).toBeVisible();
     expect(await view(page)).toEqual(initial);
     expect(await page.evaluate(() => (window as ObservedWindow).__routeMap === (window as ObservedWindow).__originalRouteMap)).toBe(true);
     await page.getByLabel('Com débito oficial de sucata', { exact: true }).uncheck();
     expect(await view(page)).toEqual(initial);
     await page.getByRole('checkbox', { name: 'Selecionar Cliente estável', exact: true }).check();
+    await page.getByText('Alternativa: selecionar por centro e raio').click();
     await page.getByLabel('Latitude do centro').fill('-5.9');
     await page.getByLabel('Longitude do centro').fill('-35.25');
     await page.getByLabel('Raio (km)').fill('1');
@@ -162,22 +169,24 @@ test.describe('weekly commercial route intelligence', () => {
     await expect(page.getByText(/2 selecionados/)).toBeVisible();
   });
 
-  test('draws and applies a touch circle and restores navigation after preview', async ({ page }) => {
+  test('draws and applies a touch area and restores navigation after preview', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openMap(page);
     await page.getByLabel('Com débito oficial de sucata', { exact: true }).check();
     await centerOnPriorityClient(page);
-    await page.getByRole('button', { name: 'Desenhar círculo no mapa' }).click();
-    const points = await circlePoints(page);
+    await page.getByRole('button', { name: /Caneta: desenhar área/ }).click();
+    const points = await freehandPoints(page);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...points.start, id: 1 }] });
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...points.end, id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...points[0]!, id: 1 }] });
+    for (const point of points.slice(1)) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...point, id: 1 }] });
+    }
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await expect(page.getByText(/Prévia: 1 clientes filtrados na área/)).toBeVisible();
+    await expect(page.getByText(/Área desenhada: 1 clientes filtrados/)).toBeVisible();
     expect(await page.evaluate(() => (window as ObservedWindow).__routeMap!.dragging.enabled())).toBe(true);
     expect(await page.evaluate(() => (window as ObservedWindow).__routeMap!.touchZoom.enabled())).toBe(true);
-    await page.getByRole('button', { name: 'Aplicar seleção' }).click();
+    await page.getByRole('button', { name: 'Aplicar área desenhada' }).click();
     await expect(page.getByText(/1 selecionados/)).toBeVisible();
     await cdp.detach();
   });
