@@ -26,7 +26,7 @@ describe('weekly route proposals CLI use case', () => {
   });
   it('reports policy and five daily counts', () => {
     expect(weeklyRouteProposalSummary(input)).toMatchObject({ status: 'ok',
-      policyVersion: 'weekly-route-rules-v2', inactiveAfterDays: 180,
+      policyVersion: 'weekly-route-rules-v3', inactiveAfterDays: 180, strategy: { kind: 'pending' },
       counts: { evaluated: 2, suggested: 1, inactiveLost: 1 } });
     expect(weeklyRouteProposalSummary(input).days).toHaveLength(5);
   });
@@ -37,9 +37,12 @@ describe('weekly route proposals CLI use case', () => {
       version: 1, status: 'draft' as const, proposal, createdBy: '44444444-4444-4444-8444-444444444444',
       createdAt: '2026-11-05T12:00:00Z', updatedAt: '2026-11-05T12:00:00Z', publishedBy: null,
       publishedAt: null, routeIds: [] };
-    const transport = vi.fn<typeof fetch>().mockResolvedValue(Response.json(persisted));
-    await expect(saveWeeklyRouteProposal('http://localhost:3000', 'token', { schemaVersion: 1 }, transport))
-      .resolves.toMatchObject({ status: 'draft' });
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ schemaVersion: 1,
+      outcome: 'created', record: persisted }));
+    await expect(saveWeeklyRouteProposal('http://localhost:3000', 'token', { schemaVersion: 1,
+      weekStart: input.weekStart, sellerId: input.origin.sellerId,
+      idempotencyKey: '55555555-5555-4555-8555-555555555555', operation: 'open_or_generate' }, transport))
+      .resolves.toMatchObject({ outcome: 'created', record: { status: 'draft' } });
     expect(transport).toHaveBeenCalledOnce();
     const remote = vi.fn<typeof fetch>().mockImplementation(async () => Response.json(persisted));
     await inspectPersistedWeeklyRouteProposal('http://localhost:3000', 'token', persisted.proposalId, remote);

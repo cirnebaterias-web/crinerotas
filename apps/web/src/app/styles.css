@@ -797,14 +797,25 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .route-intelligence-summary { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0 9px; color: #587066; font-size: 12px; }
 .route-intelligence-summary strong { color: #173f2c; }
 .route-intelligence-canvas { width: 100%; height: min(58vh, 560px); min-height: 390px; border: 1px solid #cbd8d0; border-radius: 12px; }
-.route-intelligence-selection, .route-intelligence-apply { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-.route-intelligence-selection button, .route-intelligence-apply button { min-height: 42px; padding: 8px 12px; border: 1px solid #2d7950; border-radius: 8px; background: #fff; color: #145c39; font-weight: 800; }
+.route-intelligence-canvas.is-drawing, .route-intelligence-canvas.is-drawing .leaflet-interactive { cursor: crosshair; touch-action: none; }
+.route-intelligence-tooltip { max-width: min(220px, var(--route-popup-max-width, 220px)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-intelligence-popup .leaflet-popup-content { width: min(280px, var(--route-popup-max-width, 280px), calc(100vw - 112px)) !important; max-height: min(320px, 42vh); margin: 12px; overflow: auto; overflow-wrap: anywhere; white-space: normal; }
+.route-intelligence-popup p { margin: 8px 0; font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.route-intelligence-popup button { display: block; width: 100%; min-height: 44px; margin-top: 8px; padding: 8px; border: 1px solid #2d7950; border-radius: 8px; background: #fff; color: #145c39; white-space: normal; }
+.route-intelligence-map :focus-visible { outline: 3px solid #ff7900; outline-offset: 3px; }
+.route-intelligence-selection, .route-intelligence-apply { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+.route-intelligence-selection button, .route-intelligence-apply button, .route-intelligence-circle-inputs button { min-height: 44px; padding: 8px 12px; border: 1px solid #2d7950; border-radius: 8px; background: #fff; color: #145c39; font-weight: 800; }
+.route-intelligence-circle-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; min-width: 0; margin: 12px 0 0; padding: 12px; border: 1px solid #cbd8d0; border-radius: 8px; }
+.route-intelligence-circle-inputs legend { max-width: 100%; color: #425a4d; font-size: 12px; font-weight: 800; }
+.route-intelligence-circle-inputs label { display: grid; gap: 5px; min-width: 0; color: #425a4d; font-size: 11px; font-weight: 800; }
+.route-intelligence-circle-inputs input { width: 100%; min-width: 0; min-height: 44px; padding: 8px; border: 1px solid #8fa399; border-radius: 8px; background: #fff; }
 .route-intelligence-selection span { color: #754500; font-size: 12px; }
 .route-intelligence-priorities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 280px; margin: 12px 0 0; padding: 0; overflow-y: auto; list-style: none; }
 .route-intelligence-priorities li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 9px; border: 1px solid #e0e8e3; border-radius: 8px; }
 .route-intelligence-priorities li div { display: grid; gap: 2px; min-width: 0; }
-.route-intelligence-priorities strong { color: #203b2d; font-size: 12px; }
-.route-intelligence-priorities span { overflow: hidden; color: #607269; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.route-intelligence-priorities input { width: 22px; height: 22px; }
+.route-intelligence-priorities strong { color: #203b2d; font-size: 12px; overflow-wrap: anywhere; }
+.route-intelligence-priorities span { color: #607269; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .route-intelligence-priorities b { color: #0a5b36; font-size: 12px; }
 .route-intelligence-apply { justify-content: flex-end; margin: -8px 0 18px; }
 .route-intelligence-apply label { min-width: 190px; }
@@ -826,7 +837,7 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 }
 @media (max-width: 900px) {
   .route-planner-page { padding: 24px 16px 42px; }
-  .route-intelligence-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .route-intelligence-toolbar, .route-intelligence-circle-inputs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .route-planner-heading, .route-planner-filters { grid-template-columns: 1fr; align-items: stretch; flex-direction: column; }
   .route-planner-workspace { grid-template-columns: 1fr; }
   .route-planner-actions { grid-column: auto; }
@@ -835,7 +846,7 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
   .route-planner-shortcuts a { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 6px; border-radius: 7px; color: var(--cirne-forest); font-size: 11px; font-weight: 800; text-align: center; text-decoration: none; }
 }
 @media (max-width: 620px) {
-  .route-intelligence-toolbar, .route-intelligence-priorities { grid-template-columns: 1fr; }
+  .route-intelligence-toolbar, .route-intelligence-priorities, .route-intelligence-circle-inputs { grid-template-columns: 1fr; }
   .route-intelligence-summary, .route-intelligence-selection, .route-intelligence-apply { align-items: stretch; flex-direction: column; }
   .route-intelligence-canvas { min-height: 360px; }
   .route-planner-stop-list li { grid-template-columns: 38px minmax(0, 1fr) 70px; }

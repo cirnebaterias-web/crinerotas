@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clientListResponseSchema, clientSellerListResponseSchema, clientSellersPath, clientsPath,
   persistedWeeklyRouteProposalSchema, weeklyRoutePlanningResponseSchema,
+  weeklyRouteProposalMutationResponseSchema,
   type ImportedClient, type PersistedWeeklyRouteProposal,
   type WeeklyRoutePlanningResponse } from '@cirne/contracts';
 import type { ManagementMapPublicConfig } from '@cirne/config/server';
@@ -12,6 +13,14 @@ import { ScrapRequestError, scrapRequest } from '../scrap/scrap-ui';
 
 const endpoint = '/api/v1/management/weekly-route-proposals';
 const headers = { 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
+const coverageDueStates = new Set(['never_visited', 'overdue', 'due_this_week']);
+
+function coverageLabel(state: string) {
+  const labels: Record<string, string> = { never_visited: 'Sem histórico de visita · visita inicial pendente',
+    overdue: 'Rotina de visita atrasada', due_this_week: 'Visita vence nesta semana',
+    covered: 'Rotina coberta', unavailable: 'Histórico de visita indisponível' };
+  return labels[state] ?? state;
+}
 
 function nextMonday() {
   const date = new Date();
@@ -35,7 +44,11 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
   const [targetDay, setTargetDay] = useState(0);
   const [planning, setPlanning] = useState<WeeklyRoutePlanningResponse | null>(null);
   const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
+  const [savedDaysSignature, setSavedDaysSignature] = useState<string | null>(null);
+  const [savedRecord, setSavedRecord] = useState<PersistedWeeklyRouteProposal | null>(null);
   const total = useMemo(() => record?.proposal.days.reduce((sum, day) => sum + day.suggestions.length, 0) ?? 0, [record]);
+  const dirty = Boolean(record && savedDaysSignature !== null
+    && JSON.stringify(record.proposal.days) !== savedDaysSignature);
   const routeConflict = useMemo(() => {
     if (!record || !planning || planning.sellerId !== record.proposal.sellerId
         || planning.weekStart !== record.proposal.weekStart) return false;
@@ -62,20 +75,54 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     .then((data) => { setSellers(data.sellers); setSellerId(data.sellers[0]?.id ?? ''); })
     .catch(() => setMessage('Não foi possível carregar os vendedores.')); }, []);
 
-  async function generate() {
+  function acceptServerRecord(value: PersistedWeeklyRouteProposal) {
+    setRecord(value);
+    setSavedRecord(value);
+    setSavedDaysSignature(JSON.stringify(value.proposal.days));
+  }
+
+  function resetContext() {
+    setRecord(null); setSavedRecord(null); setPlanning(null); setSelectedClientIds([]); setSavedDaysSignature(null);
+    setAvailableClients([]); setMessage('');
+  }
+
+  function changeSeller(nextSellerId: string) {
+    if (dirty && !window.confirm('Descartar as alterações locais ainda não salvas?')) return;
+    setSellerId(nextSellerId); resetContext();
+  }
+
+  function changeWeek(nextWeekStart: string) {
+    if (dirty && !window.confirm('Descartar as alterações locais ainda não salvas?')) return;
+    setWeekStart(nextWeekStart); resetContext();
+  }
+
+  async function generate(operation: 'open_or_generate' | 'regenerate' = 'open_or_generate') {
     if (!sellerId) return;
-    setBusy(true); setMessage(''); setRecord(null); setPlanning(null); setSelectedClientIds([]);
+    if (operation === 'regenerate' && (!record || !window.confirm(
+      'Regenerar a sugestão com os dados atuais? A versão publicada, quando existir, será preservada até uma nova aprovação.'))) return;
+    if (dirty && !window.confirm('Descartar as alterações locais e abrir os dados atuais do servidor?')) return;
+    setBusy(true); setMessage('');
     try {
       const result = await scrapRequest(endpoint, { method: 'POST', headers,
-        body: JSON.stringify({ schemaVersion: 1, sellerId, weekStart, idempotencyKey: crypto.randomUUID() }) });
-      setRecord(persistedWeeklyRouteProposalSchema.parse(result));
-      const parameters = new URLSearchParams({ sellerId, weekStart });
+        body: JSON.stringify({ schemaVersion: 1, sellerId, weekStart, operation,
+          idempotencyKey: crypto.randomUUID(),
+          ...(operation === 'regenerate' && record
+            ? { proposalId: record.proposalId, expectedVersion: record.version } : {}) }) });
+      const mutation = weeklyRouteProposalMutationResponseSchema.parse(result);
+      acceptServerRecord(mutation.record);
+      setSelectedClientIds([]);
+      const parameters = new URLSearchParams({ sellerId: mutation.record.proposal.sellerId,
+        weekStart: mutation.record.proposal.weekStart });
       setPlanning(weeklyRoutePlanningResponseSchema.parse(await scrapRequest(`${endpoint}?${parameters}`)));
-      setMessage('Sugestão criada como rascunho. Revise antes de publicar.');
+      setMessage(mutation.outcome === 'existing'
+        ? 'A sugestão existente foi aberta sem criar duplicidade.'
+        : mutation.outcome === 'regenerated'
+          ? 'Sugestão regenerada com os dados atuais. Revise antes de publicar.'
+          : 'Sugestão por regras criada como rascunho. Revise antes de publicar.');
     } catch (error) {
-      setMessage(error instanceof ScrapRequestError && error.status === 422 && error.serverMessage
+      setMessage(error instanceof ScrapRequestError && error.serverMessage
         ? error.serverMessage
-        : error instanceof Error ? error.message : 'Não foi possível gerar a sugestão.');
+        : error instanceof Error ? error.message : 'Não foi possível abrir a sugestão.');
     }
     finally { setBusy(false); }
   }
@@ -84,7 +131,7 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     const planningSellerId = record?.proposal.sellerId ?? sellerId;
     const planningWeekStart = record?.proposal.weekStart ?? weekStart;
     if (!planningSellerId) return;
-    setBusy(true); setMessage(''); setPlanning(null); setSelectedClientIds([]);
+    setBusy(true); setMessage(''); setSelectedClientIds([]);
     try {
       const parameters = new URLSearchParams({ sellerId: planningSellerId, weekStart: planningWeekStart });
       const result = weeklyRoutePlanningResponseSchema.parse(await scrapRequest(`${endpoint}?${parameters}`));
@@ -108,8 +155,13 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
 
   function remove(dayIndex: number, clientId: string) {
     if (!record) return;
+    const removed = record.proposal.days[dayIndex]?.suggestions.find((item) => item.clientId === clientId);
     setRecord({ ...record, proposal: { ...record.proposal,
-      counts: { ...record.proposal.counts, suggested: Math.max(0, record.proposal.counts.suggested - 1) },
+      counts: { ...record.proposal.counts, suggested: Math.max(0, record.proposal.counts.suggested - 1),
+        coveragePlanned: Math.max(0, record.proposal.counts.coveragePlanned
+          - (removed && coverageDueStates.has(removed.coverageState) ? 1 : 0)),
+        coveragePending: record.proposal.counts.coveragePending
+          + (removed && coverageDueStates.has(removed.coverageState) ? 1 : 0) },
       days: record.proposal.days.map((day, position) =>
       position === dayIndex ? { ...day, suggestions: day.suggestions.filter((item) => item.clientId !== clientId)
         .map((item, index) => ({ ...item, plannedOrder: index + 1 })) } : day) } });
@@ -150,7 +202,9 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
       index === targetDay ? { ...day, suggestions: [...day.suggestions, { clientId: client.id, name: client.name,
         dayIndex: targetDay, plannedOrder: day.suggestions.length + 1, score: 0,
         approximateDistanceKm: null, reasons: ['incluído manualmente pelo gestor'],
-        locationPending: client.latitude === null || client.longitude === null, scrapBalanceState: 'unavailable' }] } : day) } });
+        locationPending: client.latitude === null || client.longitude === null, scrapBalanceState: 'unavailable',
+        lastCompletedVisitAt: null, coverageState: 'unavailable', coverageOverdueDays: null,
+        nextVisitDueOn: null }] } : day) } });
     setAvailableClients((current) => current.filter((item) => item.id !== client.id));
   }
 
@@ -178,11 +232,17 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
       ordered.push({ clientId: candidate.clientId, name: candidate.name, dayIndex: targetDay,
         plannedOrder: ordered.length + 1, score: candidate.score,
         approximateDistanceKm: candidate.distanceFromBaseKm, reasons: candidate.reasons,
-        locationPending: false, scrapBalanceState: candidate.scrapBalanceState });
+        locationPending: false, scrapBalanceState: candidate.scrapBalanceState,
+        lastCompletedVisitAt: candidate.lastCompletedVisitAt, coverageState: candidate.coverageState,
+        coverageOverdueDays: candidate.coverageOverdueDays, nextVisitDueOn: candidate.nextVisitDueOn });
     }
     const added = ordered.length - day.suggestions.length;
+    const addedCoverage = ordered.slice(day.suggestions.length)
+      .filter(({ coverageState }) => coverageDueStates.has(coverageState)).length;
     setRecord({ ...record, proposal: { ...record.proposal,
-      counts: { ...record.proposal.counts, suggested: record.proposal.counts.suggested + added },
+      counts: { ...record.proposal.counts, suggested: record.proposal.counts.suggested + added,
+        coveragePlanned: record.proposal.counts.coveragePlanned + addedCoverage,
+        coveragePending: Math.max(0, record.proposal.counts.coveragePending - addedCoverage) },
       days: record.proposal.days.map((item, index) => index === targetDay
         ? { ...item, suggestions: ordered } : item) } });
     setMessage(added === additions.length ? `${added} cliente(s) adicionados ao dia ${targetDay + 1}.`
@@ -197,8 +257,9 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
       const result = await scrapRequest(`${endpoint}/${record.proposalId}`, { method: 'PATCH', headers,
         body: JSON.stringify({ schemaVersion: 1, idempotencyKey: crypto.randomUUID(),
           expectedVersion: record.version, days: record.proposal.days }) });
-      setRecord(persistedWeeklyRouteProposalSchema.parse(result)); setMessage('Ordem revisada e salva.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível salvar a revisão.'); }
+      acceptServerRecord(persistedWeeklyRouteProposalSchema.parse(result)); setMessage('Ordem revisada e salva.');
+    } catch (error) { setMessage(error instanceof ScrapRequestError && error.serverMessage
+      ? error.serverMessage : error instanceof Error ? error.message : 'Não foi possível salvar a revisão.'); }
     finally { setBusy(false); }
   }
 
@@ -207,28 +268,35 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     if (decision === 'publish' && routeConflict) {
       setMessage('A proposta não pode ser publicada com trechos acima de 30 km.'); return;
     }
+    if (decision === 'publish' && dirty) {
+      setMessage('Salve a ordem revisada antes de publicar. Nenhuma alteração local será ignorada.'); return;
+    }
     setBusy(true); setMessage('');
     try {
       const result = await scrapRequest(`${endpoint}/${record.proposalId}`, { method: 'PATCH', headers,
         body: JSON.stringify({ schemaVersion: 1, idempotencyKey: crypto.randomUUID(),
           expectedVersion: record.version, decision, reason: decision === 'reject' ? rejectReason.trim() : null }) });
-      setRecord(persistedWeeklyRouteProposalSchema.parse(result));
+      acceptServerRecord(persistedWeeklyRouteProposalSchema.parse(result));
       setMessage(decision === 'publish' ? 'Semana publicada para o vendedor.' : 'Sugestão descartada com auditoria.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível concluir a decisão.'); }
+    } catch (error) { setMessage(error instanceof ScrapRequestError && error.serverMessage
+      ? error.serverMessage : error instanceof Error ? error.message : 'Não foi possível concluir a decisão.'); }
     finally { setBusy(false); }
   }
 
   return <main className="route-planner-page">
     <header className="route-planner-heading"><div><p className="manager-eyebrow">INTELIGÊNCIA DE ROTAS</p>
-      <h1>Sugestão semanal</h1><p>Regras transparentes combinam oportunidade, proximidade e débito de sucata. O vendedor só recebe após sua aprovação.</p></div></header>
+      <h1>Planejamento semanal de visitas</h1><p>A sugestão por regras protege a rotina da carteira e destaca oportunidades comerciais, proximidade e débito de sucata. O vendedor só recebe após sua aprovação.</p></div></header>
     <section className="route-planner-filters" aria-label="Parâmetros da sugestão">
-      <label>Segunda-feira da semana<input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} disabled={busy} /></label>
-      <label>Vendedor<select value={sellerId} onChange={(event) => setSellerId(event.target.value)} disabled={busy}>
+      <label>Segunda-feira da semana<input type="date" value={weekStart} onChange={(event) => changeWeek(event.target.value)} disabled={busy} /></label>
+      <label>Vendedor<select value={sellerId} onChange={(event) => changeSeller(event.target.value)} disabled={busy}>
         {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.displayName}</option>)}</select></label>
-      <button className="route-planner-publish" type="button" onClick={() => void generate()} disabled={busy || !sellerId}>{busy ? 'Processando…' : 'Gerar sugestão'}</button>
+      <button className="route-planner-publish" type="button" onClick={() => void generate()} disabled={busy || !sellerId}>{busy ? 'Processando…' : 'Abrir ou criar sugestão'}</button>
       <button type="button" onClick={() => void loadPlanningMap()} disabled={busy || !sellerId}>Abrir mapa inteligente</button>
+      {record && <button type="button" onClick={() => void generate('regenerate')} disabled={busy || !sellerId}>Regenerar com dados atuais</button>}
     </section>
     {message && <p className="route-planner-message" role="status">{message}</p>}
+    {dirty && <div className="route-planner-message is-conflict" role="alert">Há alterações locais não salvas. Salve a revisão antes de publicar, trocar o contexto ou regenerar.
+      <button type="button" onClick={() => { if (savedRecord) setRecord(savedRecord); }}>Descartar alterações locais</button></div>}
     {routeConflict && <p className="route-planner-message is-conflict" role="alert">Há trecho acima de 30 km entre paradas consecutivas.</p>}
     {planning && <><WeeklyRoutePlanningMap planning={planning} mapConfig={mapConfig}
       selectedIds={selectedClientIds} onSelection={setSelectedClientIds} />
@@ -237,9 +305,11 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
         {Array.from({ length: 5 }, (_, index) => <option key={index} value={index}>Dia {index + 1}</option>)}</select></label>
         <button type="button" disabled={busy || selectedClientIds.length === 0 || !record}
           onClick={addMapSelection}>Adicionar seleção ao rascunho</button></section></>}
-    {record && <><section className="route-planner-actions"><p>RASCUNHO VERSIONADO</p><h2>{total} clientes na semana</h2>
-      <dl><div><dt>Política</dt><dd>{record.proposal.policy.version}</dd></div><div><dt>Limite</dt><dd>10 por dia</dd></div>
-        <div><dt>Origem</dt><dd>{record.proposal.origin.city}/{record.proposal.origin.state}</dd></div><div><dt>Versão</dt><dd>{record.version}</dd></div></dl>
+    {record && <><section className="route-planner-actions"><p>{record.status === 'draft' ? 'RASCUNHO VERSIONADO' : record.status.toUpperCase()}</p><h2>{total} clientes na semana</h2>
+      <dl><div><dt>Inteligência</dt><dd>Sugestão por regras auditáveis</dd></div><div><dt>Limite</dt><dd>10 por dia</dd></div>
+        <div><dt>Origem</dt><dd>{record.proposal.origin.city}/{record.proposal.origin.state}</dd></div><div><dt>Versão</dt><dd>{record.version}</dd></div>
+        <div><dt>Estratégia</dt><dd>{record.proposal.strategy.kind === 'trip' ? 'Semana de viagem' : record.proposal.strategy.kind === 'local' ? 'Semana local' : 'Distâncias pendentes'}</dd></div>
+        <div><dt>Rotina de visitas</dt><dd>{record.proposal.counts.coveragePlanned}/{record.proposal.counts.coverageDue} prioridades cobertas</dd></div></dl>
       <p>{record.proposal.counts.inactiveLost} clientes com mais de 180 dias, {record.proposal.counts.noPurchaseHistory} sem histórico e {record.proposal.counts.needsReview} com cadastro ou agrupamento geográfico pendente ficaram fora da sugestão.</p></section>
       <div className="route-planner-workspace">
         {record.proposal.days.map((day, dayIndex) => <section className="route-planner-composition" key={day.serviceDate}>
@@ -247,7 +317,7 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
           {day.suggestions.length === 0 && <p className="route-planner-empty">Nenhum cliente elegível para este dia.</p>}
           <ol className="route-planner-stop-list">{day.suggestions.map((item, index) => <li key={item.clientId}>
             <span className="route-planner-order">{index + 1}</span><div className="route-planner-stop-info"><strong>{item.name}</strong>
-              <span>{item.reasons.join(' · ')}</span>{item.locationPending && <small>Distância pendente; endereço navegável preservado.</small>}</div>
+              <small>{coverageLabel(item.coverageState)}</small><span>{item.reasons.join(' · ')}</span>{item.locationPending && <small>Distância pendente; endereço navegável preservado.</small>}</div>
             <div className="route-planner-stop-actions"><button type="button" disabled={index === 0 || busy} onClick={() => move(dayIndex,index,-1)}>↑</button>
               <button type="button" disabled={index === day.suggestions.length - 1 || busy} onClick={() => move(dayIndex,index,1)}>↓</button>
               <button type="button" disabled={dayIndex === 0 || busy || record.proposal.days[dayIndex - 1]!.suggestions.length >= 10} onClick={() => changeDay(dayIndex,index,-1)}>Dia anterior</button>
@@ -262,8 +332,8 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
         {availableClients.length > 0 && <ul className="route-planner-client-list">{availableClients.map((client) => <li key={client.id}>
           <div><strong>{client.name}</strong><small>{client.externalReference} · {client.address}</small></div>
           <button type="button" disabled={record.proposal.days[targetDay]!.suggestions.length >= 10} onClick={() => addClient(client)}>Adicionar</button></li>)}</ul>}
-        <button type="button" className="route-planner-save" disabled={busy || routeConflict || !planning} onClick={() => void revise()}>Salvar ordem revisada</button>
-        <button type="button" className="route-planner-publish" disabled={busy || total === 0 || routeConflict || !planning} onClick={() => void decide('publish')}>Publicar semana</button>
+        <button type="button" className="route-planner-save" disabled={busy || routeConflict || !planning || !dirty} onClick={() => void revise()}>Salvar ordem revisada</button>
+        <button type="button" className="route-planner-publish" disabled={busy || total === 0 || routeConflict || !planning || dirty} onClick={() => void decide('publish')}>Publicar semana</button>
         <label>Motivo para descartar<textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} maxLength={500} rows={3} /></label>
         <button type="button" disabled={busy || !rejectReason.trim()} onClick={() => void decide('reject')}>Descartar proposta</button></aside>}
     </>}

@@ -8,6 +8,8 @@ const candidate = (suffix: string, name: string, latitude: number, overrides: Re
   scrapDebtKg: 300, scrapBalanceState: 'debtor', location: { latitude, longitude: -35.25 },
   hasNavigableAddress: true, score: 82, distanceFromBaseKm: 12, cycleDelayDays: 45,
   cycleDelayPercent: 150, purchaseTrend: 'falling', potential: 'high',
+  visitHistoryStatus: 'available', lastCompletedVisitAt: '2026-09-01T12:00:00-03:00',
+  coverageState: 'overdue', coverageOverdueDays: 39, nextVisitDueOn: '2026-09-29',
   reasons: ['75 dias desde a última compra', '45 dias além do ciclo (150% de atraso)',
     'volume recente caiu 50%', '300 kg de débito de sucata', '12 km aproximados da origem'], ...overrides,
 });
@@ -15,7 +17,7 @@ const candidate = (suffix: string, name: string, latitude: number, overrides: Re
 test.describe('weekly commercial route intelligence', () => {
   test.use({ serviceWorkers: 'block' });
 
-  test('filters priorities, supports polygon selection and remains usable at 390px', async ({ page }) => {
+  test('keeps popup responsive, supports circle selection and remains usable at 390px', async ({ page }) => {
     await page.route('**/api/v1/me', (route) => route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify({ id: '50000000-0000-4000-8000-000000000001', displayName: 'Gestor Sintético',
         roles: ['manager'], capabilities: ['identity.read_self', 'route.plan_scoped'], scopeIds: [sellerId], status: 'active' }) }));
@@ -41,14 +43,21 @@ test.describe('weekly commercial route intelligence', () => {
     await expect(page.getByText('Cliente prioritário')).toBeVisible();
     await expect(page.getByText('Cliente estável')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Desenhar seleção no mapa' }).click();
-    const map = page.getByLabel('Clientes elegíveis no mapa');
-    const box = await map.boundingBox();
-    expect(box).not.toBeNull();
-    for (const [x, y] of [[.05, .05], [.95, .05], [.95, .95], [.05, .95]] as const) {
-      await map.click({ position: { x: box!.width * x, y: box!.height * y } });
-    }
-    await page.getByRole('button', { name: 'Concluir seleção' }).click();
+    await page.getByRole('button', { name: 'Detalhes de Cliente prioritário' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Detalhes de Cliente prioritário' });
+    await expect(dialog).toContainText('volume recente caiu 50%');
+    await page.getByTitle('Zoom in').click();
+    const popupBox = await dialog.boundingBox();
+    const mapBox = await page.getByLabel('Clientes elegíveis no mapa').boundingBox();
+    expect(popupBox).not.toBeNull(); expect(mapBox).not.toBeNull();
+    expect(popupBox!.width).toBeLessThan(mapBox!.width);
+    await page.getByRole('button', { name: 'Fechar detalhes' }).click();
+
+    await page.getByLabel('Latitude do centro').fill('-5.90');
+    await page.getByLabel('Longitude do centro').fill('-35.25');
+    await page.getByLabel('Raio (km)').fill('10');
+    await page.getByRole('button', { name: 'Pré-visualizar círculo' }).click();
+    await page.getByRole('button', { name: 'Aplicar seleção' }).click();
     await expect(page.getByText(/1 selecionados/)).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });

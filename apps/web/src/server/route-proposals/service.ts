@@ -1,10 +1,12 @@
 import { clientListResponseSchema, dailySellerLocationSchema, decideWeeklyRouteProposalRequestSchema,
   persistedWeeklyRouteProposalSchema, reviseWeeklyRouteProposalRequestSchema,
-  saveWeeklyRouteProposalRequestSchema, sellerRouteProfileSchema, weeklyRouteProposalRequestSchema,
-  weeklyRoutePlanningResponseSchema, weeklyRouteProposalSchema,
+  regenerateWeeklyRouteProposalRequestSchema, saveWeeklyRouteProposalRequestSchema,
+  sellerRouteProfileSchema, weeklyRouteProposalMutationRequestSchema,
+  weeklyRouteProposalMutationResponseSchema, weeklyRouteProposalRequestSchema,
+  weeklyRoutePlanningResponseSchema, weeklyRouteProposalSchema, weeklyRouteVisitCoverageResponseSchema,
   type DecideWeeklyRouteProposalRequest, type ImportedClient,
   type ReviseWeeklyRouteProposalRequest,
-  type WeeklyRouteProposalRequest } from '@cirne/contracts';
+  type WeeklyRouteProposalMutationRequest, type WeeklyRouteProposalRequest } from '@cirne/contracts';
 import { analyzeWeeklyRouteCandidate, maxDailyLegDistanceKm, proposeWeeklyRoutes, SellerBaseCityNotConfiguredError,
   weeklyProposalReadiness } from '@cirne/domain';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -24,6 +26,15 @@ const scrapPageSchema = z.object({
 }).strip();
 const scrapGenerationSchema = z.object({ generationId: z.uuid(),
   publishedAt: z.iso.datetime({ offset: true }) }).strict();
+const coverageRank = { overdue: 0, never_visited: 1, due_this_week: 2,
+  covered: 3, unavailable: 4 } as const;
+
+function dateInSaoPaulo(instant: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric',
+    month: '2-digit', day: '2-digit' }).formatToParts(new Date(instant));
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
 async function listPortfolio(client: SupabaseClient, sellerId: string) {
   const clients: ImportedClient[] = [];
@@ -77,6 +88,18 @@ async function readScrapDebts(client: SupabaseClient) {
   }
 }
 
+async function readVisitCoverage(client: SupabaseClient, sellerId: string) {
+  try {
+    const result = weeklyRouteVisitCoverageResponseSchema.parse(await clientImportRpc(client,
+      'list_seller_client_visit_coverage', { p_seller_id: sellerId }));
+    return { status: 'available' as const, asOfDate: dateInSaoPaulo(result.observedAt),
+      byId: new Map(result.clients.map((item) => [item.clientId, item.lastCompletedVisitAt])) };
+  } catch {
+    return { status: 'unavailable' as const, asOfDate: null,
+      byId: new Map<string, string | null>() };
+  }
+}
+
 export async function generateWeeklyProposal(client: SupabaseClient, command: WeeklyRouteProposalRequest, now = new Date()) {
   const parsed = weeklyRouteProposalRequestSchema.parse(command);
   const seller = (await listManagedClientSellers(client)).sellers.find(({ id }) => id === parsed.sellerId);
@@ -103,14 +126,16 @@ export async function generateWeeklyProposal(client: SupabaseClient, command: We
     throw error;
   }
   const portfolio = await listPortfolio(client, parsed.sellerId);
-  const [signals, debts] = await Promise.all([
+  const [signals, debts, visits] = await Promise.all([
     readSignals(client, parsed.sellerId, parsed.weekStart, portfolio, now), readScrapDebts(client),
+    readVisitCoverage(client, parsed.sellerId),
   ]);
   return weeklyRouteProposalSchema.parse(proposeWeeklyRoutes({ weekStart: parsed.weekStart,
     generatedAt: now.toISOString(), origin,
     sources: { sales: { status: signals.generationId ? 'available' : 'unavailable',
       generationId: signals.generationId, asOfDate: signals.asOfDate },
-      scrap: { status: debts.status, generationId: debts.generationId, publishedAt: debts.publishedAt } },
+      scrap: { status: debts.status, generationId: debts.generationId, publishedAt: debts.publishedAt },
+      visits: { status: visits.status, asOfDate: visits.asOfDate } },
     candidates: portfolio.map((customer) => {
       const metrics = signals.byId.get(customer.id);
       return { clientId: customer.id, name: customer.name,
@@ -126,6 +151,8 @@ export async function generateWeeklyProposal(client: SupabaseClient, command: We
         location: customer.latitude !== null && customer.longitude !== null
           ? { latitude: customer.latitude, longitude: customer.longitude } : null,
         hasNavigableAddress: Boolean(customer.googleLocation?.placeId || customer.googleLocation?.address || customer.address.trim()),
+        visitHistoryStatus: visits.status,
+        lastCompletedVisitAt: visits.byId.get(customer.id) ?? null,
       };
     }) }));
 }
@@ -147,8 +174,9 @@ export async function getWeeklyRoutePlanningCandidates(client: SupabaseClient,
   }
   const origin = readiness.origin;
   const portfolio = await listPortfolio(client, parsed.sellerId);
-  const [signals, debts] = await Promise.all([
+  const [signals, debts, visits] = await Promise.all([
     readSignals(client, parsed.sellerId, parsed.weekStart, portfolio, now), readScrapDebts(client),
+    readVisitCoverage(client, parsed.sellerId),
   ]);
   const all = portfolio.map((customer) => {
     const metrics = signals.byId.get(customer.id);
@@ -165,17 +193,23 @@ export async function getWeeklyRoutePlanningCandidates(client: SupabaseClient,
       location: customer.latitude !== null && customer.longitude !== null
         ? { latitude: customer.latitude, longitude: customer.longitude } : null,
       hasNavigableAddress: Boolean(customer.googleLocation?.placeId
-        || customer.googleLocation?.address || customer.address.trim()) };
+        || customer.googleLocation?.address || customer.address.trim()),
+      visitHistoryStatus: visits.status,
+      lastCompletedVisitAt: visits.byId.get(customer.id) ?? null };
   });
   const eligible = all.filter((candidate) => candidate.status === 'active'
     && candidate.daysSinceLastPurchase !== null && candidate.daysSinceLastPurchase <= 180
     && (candidate.location !== null || candidate.hasNavigableAddress));
   const candidates = eligible.map((candidate) => {
-    const analysis = analyzeWeeklyRouteCandidate(candidate, origin);
+    const analysis = analyzeWeeklyRouteCandidate(candidate, origin, parsed.weekStart);
     return { ...candidate, score: analysis.score, distanceFromBaseKm: analysis.distance,
       cycleDelayDays: analysis.cycleDelayDays, cycleDelayPercent: analysis.cycleDelayPercent,
-      purchaseTrend: analysis.purchaseTrend, potential: analysis.potential, reasons: analysis.reasons };
-  }).sort((left, right) => right.score - left.score || left.name.localeCompare(right.name, 'pt-BR'));
+      purchaseTrend: analysis.purchaseTrend, potential: analysis.potential,
+      coverageState: analysis.coverageState, coverageOverdueDays: analysis.coverageOverdueDays,
+      nextVisitDueOn: analysis.nextVisitDueOn, reasons: analysis.reasons };
+  }).sort((left, right) => coverageRank[left.coverageState] - coverageRank[right.coverageState]
+    || (right.coverageOverdueDays ?? 0) - (left.coverageOverdueDays ?? 0)
+    || right.score - left.score || left.name.localeCompare(right.name, 'pt-BR'));
   return weeklyRoutePlanningResponseSchema.parse({ schemaVersion: 1, weekStart: parsed.weekStart,
     sellerId: parsed.sellerId, origin, generatedAt: now.toISOString(), maxLegDistanceKm: maxDailyLegDistanceKm,
     candidates, counts: { total: all.length, eligible: candidates.length,
@@ -195,6 +229,61 @@ export async function generateAndSaveWeeklyProposal(client: SupabaseClient,
   return persistedWeeklyRouteProposalSchema.parse(await clientImportRpc(client, 'save_weekly_route_proposal', {
     p_command: persistenceCommand,
   }));
+}
+
+async function readActiveWeeklyProposal(client: SupabaseClient, sellerId: string, weekStart: string) {
+  return persistedWeeklyRouteProposalSchema.parse(await clientImportRpc(client,
+    'get_active_weekly_route_proposal', { p_seller_id: sellerId, p_week_start: weekStart }));
+}
+
+function proposalConflict(error: unknown) {
+  if (error instanceof RouteRequestError && error.status === 409 && error.code === 'VERSION_CONFLICT') {
+    return new RouteRequestError(409, 'VERSION_CONFLICT',
+      'A sugestão desta semana foi alterada. Reabra a versão atual antes de continuar.', false,
+      error.details);
+  }
+  return error;
+}
+
+export async function mutateWeeklyProposal(client: SupabaseClient,
+  command: WeeklyRouteProposalMutationRequest, now = new Date()) {
+  const parsed = weeklyRouteProposalMutationRequestSchema.parse(command);
+  if (parsed.operation === 'open_or_generate') {
+    try {
+      const record = await readActiveWeeklyProposal(client, parsed.sellerId, parsed.weekStart);
+      return weeklyRouteProposalMutationResponseSchema.parse({ schemaVersion: 1,
+        outcome: 'existing', record });
+    } catch (error) {
+      if (!(error instanceof RouteRequestError && error.status === 404)) throw proposalConflict(error);
+    }
+    try {
+      const record = await generateAndSaveWeeklyProposal(client, parsed, now);
+      return weeklyRouteProposalMutationResponseSchema.parse({ schemaVersion: 1,
+        outcome: 'created', record });
+    } catch (error) {
+      if (error instanceof RouteRequestError && error.status === 409
+          && error.code === 'VERSION_CONFLICT') {
+        const record = await readActiveWeeklyProposal(client, parsed.sellerId, parsed.weekStart);
+        return weeklyRouteProposalMutationResponseSchema.parse({ schemaVersion: 1,
+          outcome: 'existing', record });
+      }
+      throw proposalConflict(error);
+    }
+  }
+
+  const proposal = await generateWeeklyProposal(client, parsed, now);
+  const persistenceCommand = regenerateWeeklyRouteProposalRequestSchema.parse({
+    schemaVersion: 1, idempotencyKey: parsed.idempotencyKey,
+    expectedVersion: parsed.expectedVersion, proposal,
+  });
+  try {
+    const record = persistedWeeklyRouteProposalSchema.parse(await clientImportRpc(client,
+      'regenerate_weekly_route_proposal', { p_id: parsed.proposalId, p_command: persistenceCommand }));
+    return weeklyRouteProposalMutationResponseSchema.parse({ schemaVersion: 1,
+      outcome: 'regenerated', record });
+  } catch (error) {
+    throw proposalConflict(error);
+  }
 }
 
 export async function inspectWeeklyProposal(client: SupabaseClient, proposalId: string) {
