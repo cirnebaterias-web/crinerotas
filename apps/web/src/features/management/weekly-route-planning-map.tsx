@@ -348,7 +348,9 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
     restoreNavigationRef.current = () => enabled.forEach((handler) => handler.enable());
     drawingRef.current = true;
     setDrawing(true);
-    containerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Keep the canvas stationary before the first pointer event. A smooth scroll can
+    // still be moving when an eager user starts the circle, shifting its center.
+    containerRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
     containerRef.current?.focus({ preventScroll: true });
   }
 

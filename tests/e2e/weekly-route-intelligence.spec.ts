@@ -66,16 +66,32 @@ async function settled(page: Page) {
   });
 }
 
+async function zoomIn(page: Page) {
+  const previousZoom = await page.evaluate(() => (window as ObservedWindow).__routeMap!.getZoom());
+  await page.getByTitle('Zoom in').click();
+  await page.waitForFunction((zoom) => (window as ObservedWindow).__routeMap!.getZoom() > zoom, previousZoom);
+  await settled(page);
+}
+
+async function centerOnPriorityClient(page: Page) {
+  await page.evaluate(() => {
+    const map = (window as ObservedWindow).__routeMap!;
+    map.setView([-5.9, -35.25], map.getZoom(), { animate: false });
+  });
+  await page.waitForFunction(() => {
+    const center = (window as ObservedWindow).__routeMap!.getCenter();
+    // Leaflet snaps the requested center to the current pixel grid.
+    return Math.abs(center.lat + 5.9) < 1e-3 && Math.abs(center.lng + 35.25) < 1e-3;
+  });
+}
+
 async function circlePoints(page: Page) {
   const canvas = page.getByLabel('Clientes elegíveis no mapa');
+  await expect(canvas).toHaveClass(/is-drawing/);
   await canvas.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
   const box = (await canvas.boundingBox())!;
-  const point = await page.evaluate(() => {
-    const projected = (window as ObservedWindow).__routeMap!.latLngToContainerPoint([-5.9, -35.25]);
-    return { x: projected.x, y: projected.y };
-  });
-  return { start: { x: box.x + point.x, y: box.y + point.y },
-    end: { x: box.x + Math.min(box.width - 20, point.x + 50), y: box.y + point.y } };
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  return { start: center, end: { x: Math.min(box.x + box.width - 20, center.x + 50), y: center.y } };
 }
 
 test.describe('weekly commercial route intelligence', () => {
@@ -89,7 +105,7 @@ test.describe('weekly commercial route intelligence', () => {
     const dialog = page.getByRole('dialog', { name: `Detalhes de ${longName}`, exact: true });
     await expect(dialog).toBeVisible(); await expect(dialog).toContainText('volume recente caiu 50%');
     await expect(dialog.locator('script, img')).toHaveCount(0);
-    await page.getByTitle('Zoom in').click(); await settled(page);
+    await zoomIn(page);
     const popup = page.locator('.route-intelligence-popup');
     const popupBox = (await popup.boundingBox())!;
     const mapBox = (await page.getByLabel('Clientes elegíveis no mapa').boundingBox())!;
@@ -104,8 +120,8 @@ test.describe('weekly commercial route intelligence', () => {
 
   test('draws a real circle, cancels without selecting, and preserves center/zoom through filtering and selection', async ({ page }) => {
     await openMap(page);
-    await page.getByTitle('Zoom in').click(); await settled(page);
-    await page.evaluate(() => { (window as ObservedWindow).__routeMap!.panTo([-5.9, -35.25], { animate: false }); });
+    await zoomIn(page);
+    await centerOnPriorityClient(page);
     await page.evaluate(() => { (window as ObservedWindow).__originalRouteMap = (window as ObservedWindow).__routeMap; });
     const initial = await view(page);
     await page.getByLabel('Com débito oficial de sucata', { exact: true }).check();
@@ -150,6 +166,7 @@ test.describe('weekly commercial route intelligence', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openMap(page);
     await page.getByLabel('Com débito oficial de sucata', { exact: true }).check();
+    await centerOnPriorityClient(page);
     await page.getByRole('button', { name: 'Desenhar círculo no mapa' }).click();
     const points = await circlePoints(page);
     const cdp = await page.context().newCDPSession(page);
