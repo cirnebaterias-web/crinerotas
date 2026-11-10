@@ -184,6 +184,7 @@ export type PersistedWeeklyRouteProposal = z.infer<typeof persistedWeeklyRoutePr
 export const saveWeeklyRouteProposalRequestSchema = z.object({
   schemaVersion: z.literal(1),
   idempotencyKey: z.uuid(),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.default('auto'),
   proposal: weeklyRouteProposalSchema,
 }).strict();
 export type SaveWeeklyRouteProposalRequest = z.infer<typeof saveWeeklyRouteProposalRequestSchema>;
@@ -192,6 +193,7 @@ export const regenerateWeeklyRouteProposalRequestSchema = z.object({
   schemaVersion: z.literal(1),
   idempotencyKey: z.uuid(),
   expectedVersion: z.number().int().positive(),
+  strategyPreference: weeklyRouteStrategyPreferenceSchema.default('auto'),
   proposal: weeklyRouteProposalSchema,
 }).strict();
 export type RegenerateWeeklyRouteProposalRequest = z.infer<typeof regenerateWeeklyRouteProposalRequestSchema>;

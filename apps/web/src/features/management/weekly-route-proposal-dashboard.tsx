@@ -14,6 +14,13 @@ import { ScrapRequestError, scrapRequest } from '../scrap/scrap-ui';
 const endpoint = '/api/v1/management/weekly-route-proposals';
 const headers = { 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' };
 const coverageDueStates = new Set(['never_visited', 'overdue', 'due_this_week']);
+const exclusionLabels: Record<string, string> = {
+  inactive_lost: 'mais de 180 dias sem compra', no_purchase_history: 'sem compra positiva',
+  client_not_active: 'cadastro inativo', no_navigable_location: 'sem localização navegável',
+  daily_distance_limit: 'distância acima de 30 km entre paradas',
+  daily_capacity_reached: 'capacidade semanal ou diária atingida',
+  weekly_strategy_mismatch: 'fora da estratégia local/viagem escolhida',
+};
 
 function coverageLabel(state: string) {
   const labels: Record<string, string> = { never_visited: 'Sem histórico de visita · visita inicial pendente',
@@ -74,6 +81,8 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
         const location = locations.get(clientId); return location ? [location] : [];
       }))]));
   }, [planning, record]);
+  const planningNames = useMemo(() => new Map(planning?.candidates.map(({ clientId, name }) => [clientId, name]) ?? []),
+    [planning]);
 
   useEffect(() => { void scrapRequest(clientSellersPath).then(clientSellerListResponseSchema.parse)
     .then((data) => { setSellers(data.sellers); setSellerId(data.sellers[0]?.id ?? ''); })
@@ -343,9 +352,17 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     {record && <><section className="route-planner-actions"><p>{record.status === 'draft' ? 'RASCUNHO VERSIONADO' : record.status.toUpperCase()}</p><h2>{total} clientes na semana</h2>
       <dl><div><dt>Inteligência</dt><dd>Sugestão por regras auditáveis</dd></div><div><dt>Limite</dt><dd>10 por dia</dd></div>
         <div><dt>Origem</dt><dd>{record.proposal.origin.city}/{record.proposal.origin.state}</dd></div><div><dt>Versão</dt><dd>{record.version}</dd></div>
-        <div><dt>Estratégia</dt><dd>{record.proposal.strategy.kind === 'trip' ? 'Semana de viagem' : record.proposal.strategy.kind === 'local' ? 'Semana local' : 'Distâncias pendentes'}</dd></div>
+        <div><dt>Estratégia</dt><dd>{record.proposal.strategy.kind === 'trip' ? 'Semana de viagem' : record.proposal.strategy.kind === 'local' ? 'Semana local' : 'Distâncias pendentes'}
+          {record.proposal.strategy.region ? ` · ${record.proposal.strategy.region}` : ''}
+          {record.proposal.strategy.distanceFromBaseKm !== null ? ` · ${record.proposal.strategy.distanceFromBaseKm.toLocaleString('pt-BR')} km da origem` : ''}</dd></div>
         <div><dt>Rotina de visitas</dt><dd>{record.proposal.counts.coveragePlanned}/{record.proposal.counts.coverageDue} prioridades cobertas</dd></div></dl>
       <p>{record.proposal.counts.inactiveLost} clientes com mais de 180 dias, {record.proposal.counts.noPurchaseHistory} sem histórico e {record.proposal.counts.needsReview} com cadastro ou agrupamento geográfico pendente ficaram fora da sugestão.</p></section>
+      {record.proposal.excluded.length > 0 && <section className="route-planner-actions" aria-label="Clientes pendentes da sugestão">
+        <h2>Clientes pendentes e motivo</h2><p>Continuam visíveis para revisão; não foram descartados da carteira.</p>
+        <ul className="route-planner-client-list">{record.proposal.excluded.map((item) => <li key={`${item.clientId}-${item.reason}`}>
+          <div><strong>{planningNames.get(item.clientId) ?? `Cliente ${item.clientId}`}</strong>
+            <small>{exclusionLabels[item.reason] ?? item.reason}</small></div></li>)}</ul>
+      </section>}
       <div className="route-planner-workspace">
         {record.proposal.days.map((day, dayIndex) => <section className="route-planner-composition" key={day.serviceDate}>
           <div className="route-planner-section-title"><div><p>DIA {dayIndex + 1}</p><h2>{new Intl.DateTimeFormat('pt-BR',{timeZone:'UTC'}).format(new Date(`${day.serviceDate}T12:00:00Z`))}</h2></div><span>{day.suggestions.length}/10{dayKinds.has(dayIndex) ? ` · ${dayKinds.get(dayIndex) === 'trip' ? 'viagem' : 'local'}` : ''}</span></div>

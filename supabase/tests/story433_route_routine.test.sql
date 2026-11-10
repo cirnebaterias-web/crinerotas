@@ -65,10 +65,16 @@ select api.save_weekly_route_proposal(jsonb_build_object('schemaVersion',1,
 select is(api.get_active_weekly_route_proposal(:'seller_id','2099-11-02'),:'initial'::jsonb,'opening existing returns exact persisted state');
 select is(api.get_active_weekly_route_proposal(:'seller_id','2099-11-02') ->> 'version','1','opening does not advance version');
 select is(api.save_weekly_route_proposal(jsonb_build_object('schemaVersion',1,
-  'idempotencyKey','43300000-0000-4000-8000-000000000010',
+  'idempotencyKey','43300000-0000-4000-8000-000000000010','strategyPreference','auto',
   'proposal',jsonb_set(jsonb_set(:'proposal'::jsonb,'{generatedAt}','"2099-10-01T15:00:00Z"'::jsonb),
     '{sources,visits}',jsonb_build_object('status','unavailable','asOfDate',null)))),:'initial'::jsonb,
   'save retry ignores the freshly generated timestamp and sources and returns the first committed response');
+select throws_ok(format('select api.save_weekly_route_proposal(%L)',jsonb_build_object('schemaVersion',1,
+  'idempotencyKey','43300000-0000-4000-8000-000000000010','strategyPreference','trip','proposal',:'proposal'::jsonb)),
+  'P0001','IDEMPOTENCY_KEY_REUSED','save key cannot change the legacy automatic strategy preference');
+select throws_ok(format('select api.save_weekly_route_proposal(%L)',jsonb_build_object('schemaVersion',1,
+  'idempotencyKey','43300000-0000-4000-8000-000000000010','strategyPreference','invalid','proposal',:'proposal'::jsonb)),
+  'P0001','VALIDATION_FAILED','save rejects an unsupported strategy preference');
 select throws_ok(format('select api.save_weekly_route_proposal(%L)',jsonb_build_object('schemaVersion',1,
   'idempotencyKey','43300000-0000-4000-8000-000000000010',
   'proposal',jsonb_set(:'proposal'::jsonb,'{sellerId}',to_jsonb(:'other_seller_id'::text)))),
@@ -78,10 +84,11 @@ select throws_ok(format('select api.save_weekly_route_proposal(%L)',jsonb_build_
   'proposal',jsonb_set(:'proposal'::jsonb,'{weekStart}','"2099-11-09"'::jsonb))),
   'P0001','IDEMPOTENCY_KEY_REUSED','save key cannot be reused for another week');
 select jsonb_build_object('schemaVersion',1,'idempotencyKey','43300000-0000-4000-8000-000000000011',
-  'expectedVersion',1,'proposal',jsonb_set(:'proposal'::jsonb,'{generatedAt}','"2099-10-01T13:00:00Z"'::jsonb)) as regeneration \gset
+  'expectedVersion',1,'strategyPreference','local',
+  'proposal',jsonb_set(:'proposal'::jsonb,'{generatedAt}','"2099-10-01T13:00:00Z"'::jsonb)) as regeneration \gset
 select jsonb_build_object('schemaVersion',1,'idempotencyKey','43300000-0000-4000-8000-000000000011',
   'operation','regenerate','targetId',:'initial'::jsonb ->> 'proposalId','expectedVersion',1,
-  'sellerId',:'seller_id','weekStart','2099-11-02') as regeneration_intent \gset
+  'sellerId',:'seller_id','weekStart','2099-11-02','strategyPreference','local') as regeneration_intent \gset
 select ok(api.get_weekly_route_proposal_mutation_replay(:'regeneration_intent'::jsonb) is null,
   'replay lookup returns null before the intent is committed');
 select api.regenerate_weekly_route_proposal((:'initial'::jsonb ->> 'proposalId')::uuid,:'regeneration') as regenerated \gset
@@ -94,8 +101,19 @@ select is(api.get_weekly_route_proposal_mutation_replay(:'regeneration_intent'::
   'stable intent reads the original response before recalculating any source');
 select is(api.get_weekly_route_proposal_mutation_replay(jsonb_build_object('schemaVersion',1,
   'idempotencyKey','43300000-0000-4000-8000-000000000010','operation','save','targetId',null,
-  'expectedVersion',null,'sellerId',:'seller_id','weekStart','2099-11-02')),:'initial'::jsonb,
+  'expectedVersion',null,'sellerId',:'seller_id','weekStart','2099-11-02','strategyPreference','auto')),:'initial'::jsonb,
   'save intent reads its original response even after a later version exists');
+select throws_ok(format('select api.get_weekly_route_proposal_mutation_replay(%L)',
+  jsonb_build_object('schemaVersion',1,'idempotencyKey','43300000-0000-4000-8000-000000000010',
+    'operation','save','targetId',null,'expectedVersion',null,'sellerId',:'seller_id',
+    'weekStart','2099-11-02','strategyPreference','trip')),
+  'P0001','IDEMPOTENCY_KEY_REUSED','save replay reader rejects a changed automatic preference');
+select throws_ok(format('select api.get_weekly_route_proposal_mutation_replay(%L)',
+  :'regeneration_intent'::jsonb - 'strategyPreference'),
+  'P0001','VALIDATION_FAILED','replay intent requires the strategy preference explicitly');
+select throws_ok(format('select api.get_weekly_route_proposal_mutation_replay(%L)',
+  jsonb_set(:'regeneration_intent'::jsonb,'{strategyPreference}','"trip"'::jsonb)),
+  'P0001','IDEMPOTENCY_KEY_REUSED','regeneration replay reader rejects a changed explicit preference');
 select throws_ok(format('select api.get_weekly_route_proposal_mutation_replay(%L)',
   jsonb_set(:'regeneration_intent'::jsonb,'{expectedVersion}','2'::jsonb)),
   'P0001','IDEMPOTENCY_KEY_REUSED','replay lookup rejects an expected-version mismatch');
@@ -119,6 +137,12 @@ select is(api.regenerate_weekly_route_proposal((:'initial'::jsonb ->> 'proposalI
   :'regenerated'::jsonb,'retry with freshly generated timestamp and sources replays the original snapshot');
 select is(api.get_weekly_route_proposal((:'initial'::jsonb ->> 'proposalId')::uuid),:'regenerated'::jsonb,
   'retry does not replace persisted content with its newly generated snapshot');
+select throws_ok(format('select api.regenerate_weekly_route_proposal(%L,%L)',:'initial'::jsonb ->> 'proposalId',
+  jsonb_set(:'regeneration'::jsonb,'{strategyPreference}','"trip"'::jsonb)),
+  'P0001','IDEMPOTENCY_KEY_REUSED','regeneration key cannot change its explicit strategy preference');
+select throws_ok(format('select api.regenerate_weekly_route_proposal(%L,%L)',:'initial'::jsonb ->> 'proposalId',
+  :'regeneration'::jsonb - 'strategyPreference'),
+  'P0001','IDEMPOTENCY_KEY_REUSED','omitting a previously explicit preference changes it to automatic');
 select throws_ok(format('select api.regenerate_weekly_route_proposal(%L,%L)',:'initial'::jsonb ->> 'proposalId',
   jsonb_set(:'regeneration'::jsonb,'{expectedVersion}','2'::jsonb)),
   'P0001','IDEMPOTENCY_KEY_REUSED','another expected version cannot reuse the transition key');
@@ -172,6 +196,14 @@ select is(jsonb_array_length(:'publication'::jsonb -> 'routeIds'),1,'approval pu
 select jsonb_build_object('schemaVersion',1,'idempotencyKey','43300000-0000-4000-8000-000000000015',
   'expectedVersion',3,'proposal',:'populated'::jsonb) as successor_command \gset
 select api.regenerate_weekly_route_proposal((:'publication'::jsonb ->> 'proposalId')::uuid,:'successor_command') as successor \gset
+select is(api.regenerate_weekly_route_proposal((:'publication'::jsonb ->> 'proposalId')::uuid,
+  jsonb_set(:'successor_command'::jsonb,'{strategyPreference}','"auto"'::jsonb)),:'successor'::jsonb,
+  'legacy regeneration without preference replays as explicit automatic preference');
+select is(api.get_weekly_route_proposal_mutation_replay(jsonb_build_object('schemaVersion',1,
+  'idempotencyKey','43300000-0000-4000-8000-000000000015','operation','regenerate',
+  'targetId',:'publication'::jsonb ->> 'proposalId','expectedVersion',3,
+  'sellerId',:'seller_id','weekStart','2099-11-02','strategyPreference','auto')),:'successor'::jsonb,
+  'replay reader treats legacy regeneration preference as automatic');
 select isnt(:'successor'::jsonb ->> 'proposalId',:'publication'::jsonb ->> 'proposalId','published regeneration creates successor');
 select is(:'successor'::jsonb ->> 'version','4','successor version continues lineage');
 select is(:'successor'::jsonb ->> 'status','draft','successor requires a fresh approval');

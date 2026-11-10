@@ -95,9 +95,10 @@ begin
     operation := p_command ->> 'operation';
   exception when others then raise exception using errcode='P0001',message='VALIDATION_FAILED'; end;
   if jsonb_typeof(p_command) is distinct from 'object'
-    or (select count(*) from jsonb_object_keys(p_command)) <> 7
-    or not p_command ?& array['schemaVersion','idempotencyKey','operation','targetId','expectedVersion','sellerId','weekStart']
+    or (select count(*) from jsonb_object_keys(p_command)) <> 8
+    or not p_command ?& array['schemaVersion','idempotencyKey','operation','targetId','expectedVersion','sellerId','weekStart','strategyPreference']
     or p_command -> 'schemaVersion' is distinct from '1'::jsonb
+    or coalesce(p_command ->> 'strategyPreference','') not in ('auto','local','trip')
     or key is null or seller is null or week is null or extract(isodow from week) <> 1
     or coalesce(operation,'') not in ('save','regenerate','revise','publish','reject')
     or (operation='save' and (target is not null or expected is not null))
@@ -109,6 +110,7 @@ begin
     if replay.operation is distinct from operation
       or (operation<>'save' and replay.target_id is distinct from target)
       or replay.command -> 'schemaVersion' is distinct from p_command -> 'schemaVersion'
+      or coalesce(replay.command ->> 'strategyPreference','auto') is distinct from p_command ->> 'strategyPreference'
       or replay.command #> '{expectedVersion}' is distinct from nullif(p_command -> 'expectedVersion','null'::jsonb)
       or replay.response #>> '{proposal,sellerId}' is distinct from seller::text
       or replay.response #>> '{proposal,weekStart}' is distinct from to_char(week,'YYYY-MM-DD') then
@@ -270,7 +272,8 @@ begin
     expected := (p_command ->> 'expectedVersion')::integer;
   exception when others then raise exception using errcode='P0001',message='VALIDATION_FAILED'; end;
   if key is null or expected is null or expected < 1 or p_command ->> 'schemaVersion' is distinct from '1'
-    or (select count(*) from jsonb_object_keys(p_command)) <> 4
+    or (select count(*) from jsonb_object_keys(p_command)) <> (case when p_command ? 'strategyPreference' then 5 else 4 end)
+    or (p_command ? 'strategyPreference' and coalesce(p_command ->> 'strategyPreference','') not in ('auto','local','trip'))
     or not p_command ?& array['schemaVersion','idempotencyKey','expectedVersion','proposal'] then
     raise exception using errcode='P0001',message='VALIDATION_FAILED';
   end if;
@@ -282,6 +285,7 @@ begin
     if replay.operation <> 'regenerate' or replay.target_id is distinct from p_id
       or replay.command -> 'schemaVersion' is distinct from p_command -> 'schemaVersion'
       or replay.command -> 'expectedVersion' is distinct from p_command -> 'expectedVersion'
+      or coalesce(replay.command ->> 'strategyPreference','auto') is distinct from coalesce(p_command ->> 'strategyPreference','auto')
       or replay.command #> '{proposal,schemaVersion}' is distinct from p_command #> '{proposal,schemaVersion}'
       or replay.command #> '{proposal,sellerId}' is distinct from p_command #> '{proposal,sellerId}'
       or replay.command #> '{proposal,weekStart}' is distinct from p_command #> '{proposal,weekStart}' then
@@ -342,8 +346,10 @@ begin
       E'  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(''weekly-command:''||actor::text||'':''||key::text,0));\n  select * into replay from private.weekly_route_proposal_commands');
     if definition=original then raise exception 'Missing replay anchor in %',name; end if;
     if name='save_weekly_route_proposal(jsonb)' then
+      definition := replace(definition,'or p_command ->> ''schemaVersion'' <> ''1'' then',
+        E'or p_command ->> ''schemaVersion'' <> ''1''\n     or (p_command ? ''strategyPreference'' and coalesce(p_command ->> ''strategyPreference'','''') not in (''auto'',''local'',''trip'')) then');
       definition := replace(definition,'if replay.operation <> ''save'' or replay.command <> p_command then',
-        E'if replay.operation <> ''save''\n      or replay.command -> ''schemaVersion'' is distinct from p_command -> ''schemaVersion''\n      or replay.command #> ''{proposal,schemaVersion}'' is distinct from p_command #> ''{proposal,schemaVersion}''\n      or replay.command #> ''{proposal,sellerId}'' is distinct from p_command #> ''{proposal,sellerId}''\n      or replay.command #> ''{proposal,weekStart}'' is distinct from p_command #> ''{proposal,weekStart}'' then');
+        E'if replay.operation <> ''save''\n      or replay.command -> ''schemaVersion'' is distinct from p_command -> ''schemaVersion''\n      or coalesce(replay.command ->> ''strategyPreference'',''auto'') is distinct from coalesce(p_command ->> ''strategyPreference'',''auto'')\n      or replay.command #> ''{proposal,schemaVersion}'' is distinct from p_command #> ''{proposal,schemaVersion}''\n      or replay.command #> ''{proposal,sellerId}'' is distinct from p_command #> ''{proposal,sellerId}''\n      or replay.command #> ''{proposal,weekStart}'' is distinct from p_command #> ''{proposal,weekStart}'' then');
       definition := replace(definition,'  perform private.validate_weekly_route_proposal(seller,week,proposal);',
         E'  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(''weekly-proposal:''||seller::text||'':''||week::text,0));\n  perform private.validate_weekly_route_proposal(seller,week,proposal);');
     else

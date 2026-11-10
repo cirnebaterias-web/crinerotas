@@ -199,4 +199,17 @@ describe('weekly route dashboard interactions', () => {
     expect(app.button('Salvar ordem revisada').props.disabled).toBe(true);
     expect(app.button('Publicar semana').props.disabled).toBe(true);
   });
+
+  it('shows the selected region and identifies every pending client with its reason', async () => {
+    const base = initialRecord();
+    persisted = { ...base, proposal: { ...base.proposal,
+      strategy: { kind: 'trip', region: 'Cluster a 110 km de Parnamirim/RN', distanceFromBaseKm: 110 },
+      excluded: [{ clientId: clientId(3), reason: 'weekly_strategy_mismatch' }],
+      counts: { ...base.proposal.counts, needsReview: 1 } } };
+    const app = await open();
+    expect(app.text()).toContain('Semana de viagem');
+    expect(app.text()).toContain('Cluster a 110 km de Parnamirim/RN');
+    expect(app.text()).toContain('Cliente 3');
+    expect(app.text()).toContain('local/viagem escolhida');
+  });
 });

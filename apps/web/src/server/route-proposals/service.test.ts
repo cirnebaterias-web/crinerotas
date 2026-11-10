@@ -190,7 +190,9 @@ describe('weekly proposal service', () => {
     expect(result).toMatchObject({ outcome: 'regenerated', record: { version: 3,
       proposal: { strategy: { kind: 'local' } } } });
     expect(clientImportRpc).toHaveBeenCalledWith(expect.anything(), 'regenerate_weekly_route_proposal',
-      expect.objectContaining({ p_id: clientId(70), p_command: expect.objectContaining({ expectedVersion: 2 }) }));
+      expect.objectContaining({ p_id: clientId(70), p_command: expect.objectContaining({
+        expectedVersion: 2, strategyPreference: 'local',
+      }) }));
   });
 
   it('replays a lost regenerate response before reading mutable source data', async () => {
@@ -209,7 +211,8 @@ describe('weekly proposal service', () => {
     expect(clientImportRpc).toHaveBeenCalledWith(expect.anything(),
       'get_weekly_route_proposal_mutation_replay', { p_command: {
         schemaVersion: 1, idempotencyKey: clientId(72), operation: 'regenerate',
-        targetId: clientId(70), expectedVersion: 2, sellerId, weekStart: command.weekStart,
+        targetId: clientId(70), expectedVersion: 2, strategyPreference: 'trip',
+        sellerId, weekStart: command.weekStart,
       } });
     expect(listManagedClientSellers).not.toHaveBeenCalled();
     expect(getSalesSignals).not.toHaveBeenCalled();
