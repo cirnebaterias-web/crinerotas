@@ -60,6 +60,18 @@ test.describe('seller home session exit', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/home');
     await expect(page.getByText(firstUser.displayName, { exact: true })).toBeVisible();
+    const logoutButton = page.getByRole('button', { name: 'Sair', exact: true });
+    await expect(logoutButton).toHaveClass(/cr-button--secondary/);
+    for (let step = 0; step < 20 && !await logoutButton.evaluate((button) => button === document.activeElement); step += 1) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(logoutButton).toBeFocused();
+    const controlState = await logoutButton.evaluate((button) => {
+      const style = getComputedStyle(button);
+      return { height: button.getBoundingClientRect().height, outline: style.outlineStyle };
+    });
+    expect(controlState.height).toBeGreaterThanOrEqual(44);
+    expect(controlState.outline).not.toBe('none');
     await expect(page.getByRole('link', { name: /^Registrar coleta de sucata/ })).toHaveAttribute('href', '/route');
     await expect.poll(() => page.evaluate(() => localStorage.getItem('cirne-rotas.last-user-id'))).toBe(firstUser.id);
     await page.evaluate(async (user) => {

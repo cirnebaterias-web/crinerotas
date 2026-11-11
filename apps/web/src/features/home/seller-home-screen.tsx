@@ -9,6 +9,8 @@ import type { LocalStandaloneScrapSchedule } from '@/lib/offline/database';
 import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { OfflineFoundationService } from '@/lib/offline/service';
 import { managerHomeOperations } from './manager-home-operations';
+import { Button } from '@/components/ui';
+import { StatusBanner } from '@/components/feedback';
 
 export function SellerHomeScreen() {
   const [identity, setIdentity] = useState<MeResponse | null>(null);
@@ -78,7 +80,7 @@ export function SellerHomeScreen() {
   }
 
   return <ScrapShell><p className="seller-kicker">CIRNE ROTAS</p><h1>Seu dia de trabalho.</h1>{identity && <p className="seller-muted">{identity.displayName}</p>}
-    {error && <p className="seller-notice" role="alert">{error} <a href="/login">Entrar</a></p>}
+    {error && <StatusBanner tone="error" title="Acesso indisponível" className="seller-notice">{error} <a href="/login">Entrar</a></StatusBanner>}
     {!identity && !error && <p role="status">{loggingOut ? 'Encerrando sua sessão…' : 'Validando seu acesso…'}</p>}
     {identity && <section className="seller-task-list" aria-label="Operações disponíveis">
       {identity.capabilities.includes('route.read_self') && <a className="seller-task-card" href="/route"><span><strong>Rota</strong><small>Paradas e tarefas das visitas</small></span><span aria-hidden="true">→</span></a>}
@@ -91,6 +93,6 @@ export function SellerHomeScreen() {
       {identity.capabilities.includes('identity.manage') && <a className="seller-task-card" href="/management/administration"><span><strong>Administração</strong><small>Usuários, acessos e parâmetros publicados</small></span><span aria-hidden="true">→</span></a>}
     </section>}
     {schedules.some((record) => record.status !== 'synced') && <section className="seller-progress" aria-label="Agendamentos de sucata pendentes"><h2>Agendamentos salvos no aparelho</h2><p role="status">{schedules.filter((record) => record.status === 'pending').length} aguardando envio · {schedules.filter((record) => record.status === 'action_required').length} requerem conferência.</p><p>O envio é retomado ao abrir o início ou quando a conexão voltar.</p><a className="seller-button seller-secondary" href="/scrap/schedule">Ver agendamentos e pendências</a></section>}
-    <button type="button" className="seller-button seller-secondary" disabled={loggingOut} onClick={() => void logout()}>{loggingOut ? 'Saindo…' : 'Sair'}</button>
+    <Button variant="secondary" className="seller-button seller-secondary" disabled={loggingOut} loading={loggingOut} loadingLabel="Saindo" onClick={() => void logout()}>{loggingOut ? 'Saindo…' : 'Sair'}</Button>
   </ScrapShell>;
 }

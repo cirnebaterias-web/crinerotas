@@ -1,0 +1,31 @@
+schema: 1
+story: '4.36'
+title: 'Fundacao do Design System Cirne Momentum'
+gate: PASS
+status_reason: >-
+  Tokens, primitivas, migracao representativa e documentacao atendem os dez criterios,
+  com contraste AA, regressao completa e navegacao por teclado verificadas.
+reviewer: 'Quinn (QA)'
+reviewed_revision: 'sha256:c39d0d88270aa18498dcdb111227d7a373e6652da1426dba1b298b8d4f63fccb'
+updated: '2026-11-11T09:40:00-03:00'
+quality_score: 97
+waiver: { active: false }
+top_issues: []
+evidence:
+  tests_reviewed: 889
+  risks_identified: 3
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    ac_gaps: []
+nfr_validation:
+  security: { status: PASS, notes: 'Secretlint direcionado aprovado; componentes renderizam conteudo React sem HTML injetado.' }
+  performance: { status: PASS, notes: 'Nenhuma dependencia ou fonte remota; tokens e CSS estatico acrescentam custo minimo.' }
+  reliability: { status: PASS, notes: 'Build, 887 casos unitarios e dois E2E passaram; aliases preservam consumidores legados.' }
+  maintainability: { status: PASS, notes: 'Primitivas sem regra de negocio, papeis semanticos documentados e migracao incremental explicita.' }
+recommendations:
+  immediate: []
+  future:
+    - action: 'Migrar formularios, TaskCard, StopCard e estados de sincronizacao em stories separadas.'
+      refs: ['Docs/front-end-spec.md']
+    - action: 'Validar forced-colors, leitor de tela e ergonomia em aparelho Android fisico durante o piloto.'
+      refs: ['Docs/front-end-spec.md', 'tests/e2e/home-logout.spec.ts']

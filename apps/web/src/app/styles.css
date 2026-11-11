@@ -1,3 +1,6 @@
+@import "../styles/tokens.css";
+@import "../styles/components.css";
+
 /* Story 4.14: online client sales reads, independent from route composition. */
 .client-sales-trigger { min-height: 44px; min-width: 44px; padding: 5px 0; border: 0; background: transparent; color: var(--cirne-forest); font: inherit; font-weight: 750; text-align: left; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; overflow-wrap: anywhere; }
 .client-sales-dialog.seller-app { width: min(900px, calc(100% - 32px)); max-width: none; min-height: 0; max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid var(--cirne-border); border-radius: 16px; background: var(--cirne-surface); color: var(--cirne-ink); overflow-y: auto; }
@@ -100,16 +103,6 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .muted { color: #617068; }
 
 /* Seller MVP: visual-reference palette, scoped so the offline laboratory stays intact. */
-:root {
-  --cirne-green: #00a651;
-  --cirne-green-text: #00783b;
-  --cirne-forest: #06331f;
-  --cirne-orange: #ff7900;
-  --cirne-ink: #121512;
-  --cirne-muted: #5c6a61;
-  --cirne-surface: #f3f6f4;
-  --cirne-border: #dce5df;
-}
 .seller-app { min-height: 100vh; background: var(--cirne-surface); color: var(--cirne-ink); font-size: 15px; line-height: 1.5; }
 .seller-app :focus-visible { outline: 3px solid #b45000; outline-offset: 4px; }
 .seller-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
