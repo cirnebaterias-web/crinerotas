@@ -1,0 +1,45 @@
+schema: 1
+story: '4.39'
+story_title: 'Atalhos externos de Catálogo e Orbis na tela inicial do vendedor'
+gate: PASS
+status_reason: 'Os atalhos autenticados ocupam as duas últimas posições com URLs e abertura segura exatas, sem capability adicional nem alteração das rotas administrativas. Teste focado, suíte completa e gates obrigatórios passaram.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:764b346f535d1cad731d652121f1a8231f8d3e75'
+updated: '2026-11-12T17:50:35-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 893
+  risks_identified: 0
+  current_run:
+    lint: PASS
+    typecheck: PASS
+    unit_passed: 892
+    unit_skipped: 1
+    focused_unit_passed: 1
+    production_build: PASS
+    git_diff_check: PASS
+    coderabbit: 'Indisponível no worktree conforme registro do desenvolvimento; revisão manual independente do diff concluída sem findings.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Links usam HTTPS, URLs literais, target=_blank e rel="noopener noreferrer"; nenhuma credencial, sessão externa, API ou capability foi introduzida.'
+  performance:
+    status: PASS
+    notes: 'A mudança adiciona somente duas âncoras estáticas e nenhuma dependência, chamada de rede interna ou estado adicional.'
+  reliability:
+    status: PASS
+    notes: 'Os links são renderizados apenas após identidade resolvida, permanecem incondicionais a capabilities e ocupam as duas últimas posições depois das operações internas.'
+  maintainability:
+    status: PASS
+    notes: 'O padrão seller-task-card foi reutilizado no componente existente, sem CSS, abstração ou dependência nova.'
+  accessibility:
+    status: PASS
+    notes: 'Os rótulos visíveis são claros, a semântica nativa de âncora foi preservada e o indicador decorativo continua oculto de tecnologias assistivas.'
+recommendations:
+  immediate: []
+  future: []
