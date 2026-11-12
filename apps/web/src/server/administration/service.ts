@@ -20,8 +20,10 @@ export interface AdministrationRepository {
     origin: 'web' | 'cli'): Promise<UpdateAdministrationUserResult>;
   createUser?(userId: string, command: CreateAdministrationUserRequest,
     origin: 'web' | 'cli'): Promise<CreateAdministrationUserResult>;
-  recordPasswordReset?(userId: string, command: ResetAdministrationPasswordRequest,
-    origin: 'web' | 'cli'): Promise<ResetAdministrationPasswordResult>;
+  authorizePasswordReset?(userId: string, command: ResetAdministrationPasswordRequest,
+    origin: 'web' | 'cli'): Promise<ResetAdministrationPasswordResult & { state: 'pending' | 'completed' }>;
+  completePasswordReset?(userId: string, idempotencyKey: string,
+    origin: 'web' | 'cli'): Promise<ResetAdministrationPasswordResult & { state: 'completed' }>;
 }
 
 export function requireAdministrationAccess(identity: MeResponse) {
@@ -86,12 +88,18 @@ export async function resetAdministrationPassword(identity: MeResponse, userId: 
   if (!target || target.status !== 'active') {
     throw new RouteServiceFailure('NOT_FOUND', 'Usuario ativo nao encontrado.', false);
   }
+  if (!repository.authorizePasswordReset || !repository.completePasswordReset) {
+    throw new RouteServiceFailure('DEPENDENCY_UNAVAILABLE', publicRouteMessage('DEPENDENCY_UNAVAILABLE'), true);
+  }
+  const authorization = await repository.authorizePasswordReset(userId, parsed.data, origin);
+  if (authorization.state === 'completed') {
+    return { schemaVersion: 1 as const, replayed: true, userId };
+  }
   try { await auth.updatePassword(userId, parsed.data.password); }
   catch { throw new RouteServiceFailure('DEPENDENCY_UNAVAILABLE', 'Nao foi possivel redefinir a senha agora.', true); }
-  if (!repository.recordPasswordReset) throw new RouteServiceFailure('DEPENDENCY_UNAVAILABLE', publicRouteMessage('DEPENDENCY_UNAVAILABLE'), true);
-  const result = resetAdministrationPasswordResultSchema.safeParse(
-    await repository.recordPasswordReset(userId, parsed.data, origin),
-  );
+  const completed = await repository.completePasswordReset(userId, parsed.data.idempotencyKey, origin);
+  const result = resetAdministrationPasswordResultSchema.safeParse({ schemaVersion: completed.schemaVersion,
+    replayed: completed.replayed, userId: completed.userId });
   if (!result.success || result.data.userId !== userId) {
     throw new RouteServiceFailure('DEPENDENCY_UNAVAILABLE', publicRouteMessage('DEPENDENCY_UNAVAILABLE'), true);
   }

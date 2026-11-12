@@ -1,10 +1,12 @@
 begin;
-select plan(9);
+select plan(11);
 
 select has_function('api','create_administration_user',array['uuid','jsonb','text'],
   'administrative user provisioning RPC exists');
 select has_function('api','record_administration_password_reset',array['uuid','jsonb','text'],
   'password reset audit RPC exists');
+select has_function('api','complete_administration_password_reset',array['uuid','uuid','text'],
+  'password reset completion RPC exists');
 select ok(has_function_privilege('authenticated','api.create_administration_user(uuid,jsonb,text)','EXECUTE'),
   'authenticated callers can reach provisioning authorization');
 select ok(not has_function_privilege('anon','api.create_administration_user(uuid,jsonb,text)','EXECUTE'),
@@ -23,6 +25,8 @@ select is((:'result')::jsonb->>'replayed','false','first password reset audit is
 select is(api.record_administration_password_reset(:'seller',jsonb_build_object(
   'schemaVersion',1,'reason','Redefinicao controlada para teste','idempotencyKey','43700000-0000-4000-8000-000000000001'),'web')->>'replayed',
   'true','password reset audit is idempotent');
+select is(api.complete_administration_password_reset(:'seller','43700000-0000-4000-8000-000000000001','web')->>'state',
+  'completed','password reset completion closes the pending command');
 select ok(exists(select 1 from private.audit_events where target_id=:'seller'
   and action='identity.password.reset.v1' and before_data is null
   and after_data='{"credentialState":"temporary_password_set"}'::jsonb),

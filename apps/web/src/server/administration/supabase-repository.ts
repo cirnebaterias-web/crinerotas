@@ -74,11 +74,19 @@ export class SupabaseAdministrationRepository implements AdministrationRepositor
     return data as never;
   }
 
-  async recordPasswordReset(userId: string, command: ResetAdministrationPasswordRequest, origin: 'web' | 'cli') {
+  async authorizePasswordReset(userId: string, command: ResetAdministrationPasswordRequest, origin: 'web' | 'cli') {
     const { data, error } = await this.client.schema('api').rpc('record_administration_password_reset', {
       p_user_id: userId,
       p_command: { schemaVersion: command.schemaVersion, reason: command.reason,
         idempotencyKey: command.idempotencyKey }, p_origin: origin,
+    });
+    if (error) throw databaseFailure(error);
+    return data as never;
+  }
+
+  async completePasswordReset(userId: string, idempotencyKey: string, origin: 'web' | 'cli') {
+    const { data, error } = await this.client.schema('api').rpc('complete_administration_password_reset', {
+      p_user_id: userId, p_idempotency_key: idempotencyKey, p_origin: origin,
     });
     if (error) throw databaseFailure(error);
     return data as never;

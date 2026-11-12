@@ -5,6 +5,7 @@ do $membership$ begin
 end $membership$;
 
 grant insert on api.user_profiles to cirne_administration_executor;
+grant update on private.administration_commands to cirne_administration_executor;
 grant create on schema api to cirne_administration_executor;
 set local role cirne_administration_executor;
 
@@ -97,18 +98,54 @@ begin
     return jsonb_set(existing.canonical_result,'{replayed}','true'::jsonb);
   end if;
   insert into private.audit_events(actor_id,target_type,target_id,action,before_data,after_data,reason,origin,request_id)
-    values(v_actor_id,'user_profile',p_user_id,'identity.password.reset.v1',null,
-      jsonb_build_object('credentialState','temporary_password_set'),btrim(p_command->>'reason'),p_origin,key_value);
-  result_document:=jsonb_build_object('schemaVersion',1,'replayed',false,'userId',p_user_id);
+    values(v_actor_id,'user_profile',p_user_id,'identity.password.reset.requested.v1',null,
+      jsonb_build_object('state','pending'),btrim(p_command->>'reason'),p_origin,key_value);
+  result_document:=jsonb_build_object('schemaVersion',1,'replayed',false,'userId',p_user_id,'state','pending');
   insert into private.administration_commands(actor_id,idempotency_key,payload_hash,target_user_id,canonical_result)
     values(v_actor_id,key_value,payload_hash,p_user_id,result_document);
   return result_document;
 end $function$;
 
+create function api.complete_administration_password_reset(p_user_id uuid, p_idempotency_key uuid,
+  p_origin text default 'web')
+returns jsonb language plpgsql volatile security definer set search_path = '' as $function$
+declare
+  identity_document jsonb := private.administration_identity();
+  v_actor_id uuid := (identity_document->>'id')::uuid;
+  existing private.administration_commands%rowtype;
+  result_document jsonb;
+  event_reason text;
+begin
+  if p_user_id is null or p_user_id=v_actor_id or p_idempotency_key is null or p_origin not in ('web','cli') then
+    raise exception using errcode='P0001',message='VALIDATION_FAILED';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    v_actor_id::text||':identity.password.reset.v1:'||p_idempotency_key::text,0));
+  select * into existing from private.administration_commands command
+    where command.actor_id=v_actor_id and command.idempotency_key=p_idempotency_key
+      and command.target_user_id=p_user_id for update;
+  if not found then raise exception using errcode='P0001',message='NOT_FOUND'; end if;
+  if existing.canonical_result->>'state'='completed' then
+    return jsonb_set(existing.canonical_result,'{replayed}','true'::jsonb);
+  end if;
+  select event.reason into event_reason from private.audit_events event
+    where event.actor_id=v_actor_id and event.target_id=p_user_id
+      and event.request_id=p_idempotency_key and event.action='identity.password.reset.requested.v1'
+    order by event.occurred_at desc limit 1;
+  result_document:=jsonb_build_object('schemaVersion',1,'replayed',false,'userId',p_user_id,'state','completed');
+  update private.administration_commands set canonical_result=result_document where id=existing.id;
+  insert into private.audit_events(actor_id,target_type,target_id,action,before_data,after_data,reason,origin,request_id)
+    values(v_actor_id,'user_profile',p_user_id,'identity.password.reset.v1',null,
+      jsonb_build_object('credentialState','temporary_password_set'),event_reason,p_origin,p_idempotency_key);
+  return result_document;
+end $function$;
+
 revoke all on function api.create_administration_user(uuid,jsonb,text),
-  api.record_administration_password_reset(uuid,jsonb,text) from public,anon,authenticated;
+  api.record_administration_password_reset(uuid,jsonb,text),
+  api.complete_administration_password_reset(uuid,uuid,text) from public,anon,authenticated;
 grant execute on function api.create_administration_user(uuid,jsonb,text),
-  api.record_administration_password_reset(uuid,jsonb,text) to authenticated;
+  api.record_administration_password_reset(uuid,jsonb,text),
+  api.complete_administration_password_reset(uuid,uuid,text) to authenticated;
 revoke create on schema api from cirne_administration_executor;
 reset role;
 
