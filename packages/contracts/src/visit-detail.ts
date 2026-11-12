@@ -190,6 +190,11 @@ export const visitDetailResponseSchema = z.object({
     'Somente dados recebidos e confirmados pelo servidor estão presentes; conteúdo ainda apenas no aparelho não é conhecido.',
   ),
   sections: z.object({
+    sales: z.discriminatedUnion('state', [visitDetailEmptySectionSchema, z.object({
+      state: z.literal('available'), recordedAt: timestampSchema,
+      heliarQuantity: z.number().int().nonnegative(), americaQuantity: z.number().int().nonnegative(),
+      stradaDurexQuantity: z.number().int().nonnegative(),
+    }).strict()]).default({ state: 'unknown_to_server' }),
     stock: stockSectionSchema,
     competitorPrices: pricesSectionSchema,
     commercialActions: actionsSectionSchema,

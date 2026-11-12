@@ -1066,6 +1066,27 @@ export const visitStartedPayloadSchema = startVisitRequestSchema.omit({ schemaVe
 }).strict();
 export type VisitStartedPayload = z.infer<typeof visitStartedPayloadSchema>;
 
+export const visitSalesInputSchema = z.object({
+  heliarQuantity: z.number().int().nonnegative().max(2147483647),
+  americaQuantity: z.number().int().nonnegative().max(2147483647),
+  stradaDurexQuantity: z.number().int().nonnegative().max(2147483647),
+}).strict();
+export type VisitSalesInput = z.infer<typeof visitSalesInputSchema>;
+export const saveVisitSalesRequestSchema = visitSalesInputSchema.extend({
+  schemaVersion: z.literal(1), offlineId: z.uuid(), deviceSavedAt: z.iso.datetime({ offset: true }),
+  expectedVersion: z.number().int().nonnegative(),
+}).strict();
+export type SaveVisitSalesRequest = z.infer<typeof saveVisitSalesRequestSchema>;
+export const visitSalesResultSchema = visitSalesInputSchema.extend({
+  schemaVersion: z.literal(1), visitId: z.uuid(), offlineId: z.uuid(), reportId: z.uuid(),
+  version: z.number().int().positive(),
+  deviceSavedAt: z.iso.datetime({ offset: true }), serverSavedAt: z.iso.datetime({ offset: true }),
+}).strict();
+export type VisitSalesResult = z.infer<typeof visitSalesResultSchema>;
+export const visitSalesReadResultSchema = z.object({ schemaVersion: z.literal(1), sales: visitSalesResultSchema.nullable() }).strict();
+export const visitSalesSavedPayloadSchema = saveVisitSalesRequestSchema.omit({ schemaVersion: true });
+export const visitSalesPath = (offlineId: string) => `${visitsPath}/${offlineId}/sections/sales`;
+
 export const visitStockSavedPayloadSchema = saveStockRequestSchema.omit({ schemaVersion: true }).strict();
 export type VisitStockSavedPayload = z.infer<typeof visitStockSavedPayloadSchema>;
 
@@ -1092,6 +1113,7 @@ export const syncOperationSchema = z.enum([
   'visit.prices.saved.v1',
   'visit.commercial-actions.saved.v1',
   'visit.scrap.saved.v1',
+  'visit.sales.saved.v1',
 ]);
 export const syncAggregateTypeSchema = z.enum(['visit_draft', 'visit']);
 export const syncErrorCodeSchema = z.enum([
@@ -1238,7 +1260,18 @@ const visitScrapSavedSyncCommandSchema = syncCommandBaseSchema.extend({
   }
 });
 
+const visitSalesSavedSyncCommandSchema = syncCommandBaseSchema.extend({
+  operation: z.literal('visit.sales.saved.v1'),
+  aggregateType: z.literal('visit'),
+  payload: visitSalesSavedPayloadSchema,
+}).strict().superRefine((command, context) => {
+  if (command.sequence < 5) context.addIssue({ code: 'custom', path: ['sequence'], message: 'O informe exige as etapas anteriores.' });
+  if (command.aggregateId !== command.payload.offlineId) context.addIssue({ code: 'custom', path: ['payload', 'offlineId'], message: 'O agregado deve corresponder à visita.' });
+  if (command.occurredAt !== command.payload.deviceSavedAt) context.addIssue({ code: 'custom', path: ['occurredAt'], message: 'O horário deve corresponder ao salvamento.' });
+});
+
 export const syncCommandSchema = z.discriminatedUnion('operation', [
+  visitSalesSavedSyncCommandSchema,
   legacyDraftSyncCommandSchema,
   visitStartedSyncCommandSchema,
   visitStockSavedSyncCommandSchema,
@@ -1433,7 +1466,7 @@ export const localVisitDraftSchema = z.object({
   userId: z.uuid(),
   deviceId: z.uuid(),
   routeVersionStopId: z.uuid(),
-  currentStep: z.enum(['start', 'stock', 'competitor-stock', 'prices', 'actions', 'scrap', 'review', 'complete']),
+  currentStep: z.enum(['start', 'stock', 'competitor-stock', 'prices', 'actions', 'sales', 'scrap', 'review', 'complete']),
   acknowledged: z.boolean().optional(),
   deviceStartedAt: z.iso.datetime({ offset: true }).optional(),
   client: routeClientSnapshotSchema.optional(),
@@ -1468,6 +1501,13 @@ export const localVisitDraftSchema = z.object({
     serverSavedAt: z.iso.datetime({ offset: true }).optional(),
     persistenceState: z.enum(['saved_on_device', 'synced']),
   }).strict().optional(),
+  sales: visitSalesInputSchema.extend({
+    version: z.number().int().positive(),
+    eventId: z.uuid(),
+    deviceSavedAt: z.iso.datetime({ offset: true }),
+    serverSavedAt: z.iso.datetime({ offset: true }).optional(),
+    persistenceState: z.enum(['saved_on_device', 'synced']),
+  }).strict().optional(),
   scrap: z.object({
     deviceSavedAt: z.iso.datetime({ offset: true }),
     availability: z.enum(['none', 'collected', 'scheduled']),
@@ -1484,6 +1524,16 @@ export const localVisitDraftSchema = z.object({
   }).optional(),
   localStatus: z.enum(['draft', 'completed']),
   deviceCompletedAt: z.iso.datetime({ offset: true }).optional(),
+  serverCompletedAt: z.iso.datetime({ offset: true }).optional(),
+  salesCompletionRecovery: z.boolean().optional(),
+  salesRecoveryResolution: z.object({
+    outcome: z.literal('server_already_completed'),
+    serverCompletedAt: z.iso.datetime({ offset: true }),
+    cancelledSalesEvents: z.array(z.object({
+      eventId: z.uuid(), idempotencyKey: z.uuid(), sequence: z.number().int().positive(),
+      payload: visitSalesSavedPayloadSchema,
+    }).strict()).min(1),
+  }).strict().optional(),
   persistenceState: z.enum(['saved_on_device', 'synced']),
   updatedAt: z.iso.datetime({ offset: true }),
 }).strict();
@@ -1621,7 +1671,15 @@ const visitScrapSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
   payload: visitScrapSavedPayloadSchema,
 }).strict();
 
+const visitSalesSavedOfflineOutboxEventSchema = offlineOutboxBaseSchema.extend({
+  operation: z.literal('visit.sales.saved.v1'),
+  aggregateType: z.literal('visit').default('visit'),
+  sequence: z.number().int().min(5),
+  payload: visitSalesSavedPayloadSchema,
+}).strict();
+
 export const offlineOutboxEventSchema = z.discriminatedUnion('operation', [
+  visitSalesSavedOfflineOutboxEventSchema,
   legacyOfflineOutboxEventSchema,
   visitStartedOfflineOutboxEventSchema,
   visitStockSavedOfflineOutboxEventSchema,

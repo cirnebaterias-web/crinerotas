@@ -1,5 +1,6 @@
 import {
   visitErrorCodeSchema,
+  visitSalesResultSchema, type SaveVisitSalesRequest,
   competitorPricesResultSchema,
   competitorPriceParameterSetSchema,
   visitStartResultSchema,
@@ -68,6 +69,35 @@ export class SupabaseVisitRepository implements VisitStartRepository, VisitStock
   VisitCompetitorPricesRepository, CompetitorPriceParametersRepository, VisitDetailRepository,
   VisitAttachmentDownloadRepository {
   constructor(private readonly client: SupabaseClient) {}
+
+  async saveSales(deviceId: string, idempotencyKey: string, command: SaveVisitSalesRequest) {
+    let response: { data: unknown; error: { message: string } | null };
+    try {
+      response = await this.client.schema('api').rpc('save_visit_sales', {
+        p_device_id: deviceId, p_idempotency_key: idempotencyKey, p_command: command,
+      }).abortSignal(AbortSignal.timeout(30_000));
+    } catch { throw unavailable(); }
+    const { data, error } = response;
+    if (error) throw mapDatabaseFailure(error.message);
+    const parsed = visitSalesResultSchema.safeParse(data);
+    if (!parsed.success) throw unavailable();
+    return parsed.data;
+  }
+
+  async getSales(deviceId: string, offlineId: string) {
+    let response: { data: unknown; error: { message: string } | null };
+    try {
+      response = await this.client.schema('api').rpc('get_visit_sales', {
+        p_device_id: deviceId, p_offline_id: offlineId,
+      }).abortSignal(AbortSignal.timeout(30_000));
+    } catch { throw unavailable(); }
+    const { data, error } = response;
+    if (error) throw mapDatabaseFailure(error.message);
+    if (data === null) return null;
+    const parsed = visitSalesResultSchema.safeParse(data);
+    if (!parsed.success) throw unavailable();
+    return parsed.data;
+  }
 
   async start(deviceId: string, idempotencyKey: string, command: StartVisitRequest) {
     let response: { data: unknown; error: { message: string } | null };

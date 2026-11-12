@@ -34,6 +34,7 @@ import {
   syncBatchPath,
   syncBatchResponseSchema,
   syncCommandSchema,
+  visitSalesPath, visitSalesResultSchema, visitSalesReadResultSchema, saveVisitSalesRequestSchema,
   type SyncCommand,
 } from '@cirne/contracts';
 import { checkIdentity } from './identity';
@@ -65,7 +66,7 @@ async function requestJson(
     const error = new Error(parsed.success
       ? `${parsed.data.error.message} (HTTP ${response.status}).`
       : `Visita retornou HTTP ${response.status}.`);
-    Object.assign(error, { status: response.status });
+    Object.assign(error, { status: response.status, code: parsed.success ? parsed.data.error.code : undefined });
     throw error;
   }
   return body;
@@ -76,6 +77,10 @@ export interface VisitRoundTripResult {
   visitId: string;
   visitStatus: 'in_progress';
   checks: {
+    salesSaved: true;
+    salesReplayMatched: true;
+    salesDivergentRejected: true;
+    salesReadMatched: true;
     started: true;
     replayMatched: true;
     divergentRejected: true;
@@ -354,6 +359,7 @@ export async function runVisitRoundTrip(
       actionDivergent.results[0].error.code !== 'IDEMPOTENCY_KEY_REUSED') {
     throw new Error('O servidor não rejeitou ações comerciais divergentes com a mesma chave.');
   }
+  const salesChecks = await runVisitSalesRoundTrip(baseUrl, sellerAccessToken, deviceId, command.offlineId, request);
   const scrapSavedAt = new Date().toISOString();
   const collectionOfflineId = crypto.randomUUID();
   const photoOfflineId = crypto.randomUUID();
@@ -371,7 +377,7 @@ export async function runVisitRoundTrip(
   const scrapEvent = syncCommandSchema.parse({
     eventId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(),
     operation: 'visit.scrap.saved.v1', schemaVersion: 1,
-    sequence: 5, aggregateType: 'visit', aggregateId: command.offlineId,
+    sequence: 6, aggregateType: 'visit', aggregateId: command.offlineId,
     occurredAt: scrapSavedAt,
     payload: scrapPayload,
   });
@@ -521,6 +527,7 @@ export async function runVisitRoundTrip(
     visitId: first.visitId,
     visitStatus: first.status,
     checks: {
+      ...salesChecks,
       started: true,
       replayMatched: true,
       divergentRejected: true,
@@ -543,4 +550,37 @@ export async function runVisitRoundTrip(
     },
     ...(custody ? { custody } : {}),
   };
+}
+
+/** Local synthetic diagnostic: creates a declaration, reads it and verifies replay/divergence. */
+export async function runVisitSalesRoundTrip(baseUrl: string, token: string, deviceId: string,
+  offlineId: string, request: typeof fetch = fetch) {
+  const origin = parseLocalOrigin(baseUrl);
+  const command = saveVisitSalesRequestSchema.parse({ schemaVersion: 1, offlineId, expectedVersion: 0,
+    heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3, deviceSavedAt: new Date().toISOString() });
+  const key = crypto.randomUUID();
+  const send = (body: unknown) => requestJson(origin, visitSalesPath(offlineId), token, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Device-Id': deviceId, 'Idempotency-Key': key },
+    body: JSON.stringify(body),
+  }, request);
+  const first = visitSalesResultSchema.parse(await send(command));
+  const replay = visitSalesResultSchema.parse(await send(command));
+  let divergentRejected = false;
+  try { await send({ ...command, americaQuantity: 4 }); }
+  catch (error) { divergentRejected = error instanceof Error && 'status' in error && error.status === 409 &&
+    'code' in error && error.code === 'IDEMPOTENCY_KEY_REUSED'; }
+  const read = visitSalesReadResultSchema.parse(await requestJson(origin, visitSalesPath(offlineId), token,
+    { method: 'GET', headers: { 'X-Device-Id': deviceId } }, request));
+  const stored = visitSalesResultSchema.parse(read.sales);
+  const readMatched = first.reportId === stored.reportId && first.visitId === stored.visitId &&
+    first.offlineId === stored.offlineId && first.version === stored.version &&
+    first.heliarQuantity === stored.heliarQuantity && first.americaQuantity === stored.americaQuantity &&
+    first.stradaDurexQuantity === stored.stradaDurexQuantity &&
+    Date.parse(first.deviceSavedAt) === Date.parse(stored.deviceSavedAt) &&
+    Date.parse(first.serverSavedAt) === Date.parse(stored.serverSavedAt);
+  if (JSON.stringify(first) !== JSON.stringify(replay) || !readMatched ||
+      !divergentRejected || first.heliarQuantity !== 0 || first.americaQuantity !== 2 || first.stradaDurexQuantity !== 3) {
+    throw new Error('O informe de venda não confirmou gravação, leitura, replay e divergência canônicos.');
+  }
+  return { salesSaved: true, salesReplayMatched: true, salesDivergentRejected: true, salesReadMatched: true } as const;
 }

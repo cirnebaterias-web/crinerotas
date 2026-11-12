@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { CommercialActionsInput, CompetitorPricesInput, StockInput } from '@cirne/contracts';
+import type { CommercialActionsInput, CompetitorPricesInput, StockInput, VisitSalesInput } from '@cirne/contracts';
 import { Brand } from '@/features/auth/brand';
 import { OfflineFoundationService } from '@/lib/offline/service';
 import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
@@ -14,12 +14,13 @@ import type { CompressedStockPhoto } from './stock/stock-photo-compression';
 import { VisitEvidenceCapture, type VisitEvidenceCaptureValue } from './visit-evidence-capture';
 import { VisitCommercialActionsStep } from './actions/visit-commercial-actions-step';
 import { VisitScrapStep } from './scrap/visit-scrap-step';
+import { VisitSalesStep } from './sales/visit-sales-step';
 
-type VisitScreenStep = 'start' | 'stock' | 'competitor-stock' | 'stock-photos' | 'prices' | 'actions' | 'scrap' | 'review' | 'complete';
+type VisitScreenStep = 'start' | 'stock' | 'competitor-stock' | 'stock-photos' | 'prices' | 'actions' | 'sales' | 'scrap' | 'review' | 'complete';
 
 const visitStepLabels: Record<VisitScreenStep, string> = {
   start: 'Tarefas', stock: 'Estoque 1/3', 'competitor-stock': 'Estoque 2/3',
-  'stock-photos': 'Estoque 3/3', prices: 'Preços', actions: 'Ações', scrap: 'Sucata',
+  'stock-photos': 'Estoque 3/3', prices: 'Preços', actions: 'Ações', sales: 'Informe de venda', scrap: 'Sucata',
   review: 'Revisão', complete: 'Concluída',
 };
 
@@ -34,40 +35,44 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const [showRouteExit, setShowRouteExit] = useState(false);
   const [competitorDirty, setCompetitorDirty] = useState(false);
   const [pricesDirty, setPricesDirty] = useState(false);
-  const navigationStateRef = useRef({ step, competitorDirty, pricesDirty });
+  const [salesDirty, setSalesDirty] = useState(false);
+  const navigationStateRef = useRef({ step, competitorDirty, pricesDirty, salesDirty });
   const { draft, state, message: syncMessage } = view;
+  const recoveringSales = Boolean(draft?.localStatus === 'completed' &&
+    draft.salesCompletionRecovery && !draft.serverCompletedAt);
   const stockPhotos = view.attachments.filter((item) => item.purpose === 'stock_evidence');
   const stockComplete = Boolean(draft?.stock?.collectionCompletedAt &&
     stockPhotos.length >= 3 && stockPhotos.length <= 5);
   const checkinEvidence = view.evidence.find((item) => item.kind === 'checkin' && item.latitude && item.longitude);
 
   useEffect(() => {
-    navigationStateRef.current = { step, competitorDirty, pricesDirty };
-  }, [step, competitorDirty, pricesDirty]);
+    navigationStateRef.current = { step, competitorDirty, pricesDirty, salesDirty };
+  }, [step, competitorDirty, pricesDirty, salesDirty]);
 
   useEffect(() => {
     if (state === 'ready' && step === 'review') nextStepTitleRef.current?.focus();
   }, [state, step]);
 
   useEffect(() => {
-    if (state !== 'ready' || draft?.localStatus !== 'completed' ||
-      !['review', 'actions', 'scrap'].includes(step)) return;
+    if (state !== 'ready' || draft?.localStatus !== 'completed') return;
+    const target = recoveringSales && !draft.sales ? 'sales' : 'complete';
+    if (step === target || (recoveringSales && step === 'sales')) return;
     const url = new URL(window.location.href);
-    url.searchParams.set('step', 'complete');
+    url.searchParams.set('step', target);
     window.history.replaceState({}, '', url);
     setShowCheckout(false);
-    setStep('complete');
-  }, [draft, state, step]);
+    setStep(target);
+  }, [draft, state, step, recoveringSales]);
 
   useEffect(() => {
     const readStep = () => {
       const requested = new URLSearchParams(window.location.search).get('step');
       const next = requested === 'stock' || requested === 'competitor-stock' || requested === 'stock-photos' ||
-        requested === 'prices' || requested === 'actions' || requested === 'scrap' || requested === 'review' || requested === 'complete'
+        requested === 'prices' || requested === 'actions' || requested === 'sales' || requested === 'scrap' || requested === 'review' || requested === 'complete'
         ? requested
         : 'start';
       const current = navigationStateRef.current;
-      const hasUnsavedChanges = current.competitorDirty || current.pricesDirty;
+      const hasUnsavedChanges = current.competitorDirty || current.pricesDirty || current.salesDirty;
       if (next !== current.step && hasUnsavedChanges) {
         const restored = new URL(window.location.href);
         if (current.step === 'start') restored.searchParams.delete('step');
@@ -119,8 +124,8 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   };
 
   useEffect(() => {
-    if (state !== 'ready' || !draft || stockComplete ||
-      !['prices', 'actions', 'scrap', 'review'].includes(step)) return;
+    if (state !== 'ready' || !draft || draft.localStatus === 'completed' || stockComplete ||
+      !['prices', 'actions', 'sales', 'scrap', 'review'].includes(step)) return;
     const target: VisitScreenStep = !draft.stock?.completedOwnBrands || draft.stock.completedOwnBrands.length < 4
       ? 'stock' : draft.stock.competitorLines === undefined ? 'competitor-stock' : 'stock-photos';
     const url = new URL(window.location.href);
@@ -130,7 +135,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   }, [draft, state, step, stockComplete]);
 
   useEffect(() => {
-    if (state !== 'ready' || !draft || !['competitor-stock', 'prices', 'actions', 'scrap', 'review'].includes(step)
+    if (state !== 'ready' || !draft || draft.localStatus === 'completed' || !['competitor-stock', 'prices', 'actions', 'sales', 'scrap', 'review'].includes(step)
       || (draft.stock && (!draft.stock.completedOwnBrands || draft.stock.completedOwnBrands.length === 4))) return;
     const url = new URL(window.location.href);
     url.searchParams.set('step', 'stock');
@@ -139,7 +144,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   }, [draft, state, step]);
 
   useEffect(() => {
-    if (state !== 'ready' || !draft?.stock || !['prices', 'actions', 'scrap', 'review'].includes(step)
+    if (state !== 'ready' || !draft?.stock || draft.localStatus === 'completed' || !['prices', 'actions', 'sales', 'scrap', 'review'].includes(step)
       || !draft.stock.completedOwnBrands || draft.stock.completedOwnBrands.length < 4
       || draft.stock.competitorLines !== undefined) return;
     const url = new URL(window.location.href);
@@ -150,7 +155,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   }, [draft, state, step]);
 
   useEffect(() => {
-    if (state !== 'ready' || !draft || step !== 'actions' || !draft.stock || draft.prices) return;
+    if (state !== 'ready' || !draft || draft.localStatus === 'completed' || step !== 'actions' || !draft.stock || draft.prices) return;
     const url = new URL(window.location.href);
     url.searchParams.set('step', 'prices');
     window.history.replaceState({}, '', url);
@@ -158,7 +163,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   }, [draft, state, step]);
 
   useEffect(() => {
-    if (state !== 'ready' || !draft || !['scrap', 'review'].includes(step) || draft.commercialActions) return;
+    if (state !== 'ready' || !draft || draft.localStatus === 'completed' || !['sales', 'scrap', 'review'].includes(step) || draft.commercialActions) return;
     const url = new URL(window.location.href);
     url.searchParams.set('step', 'actions');
     window.history.replaceState({}, '', url);
@@ -166,7 +171,17 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   }, [draft, state, step]);
 
   useEffect(() => {
-    if (state !== 'ready' || !draft?.commercialActions || step !== 'review' || draft.scrap) return;
+    if (state !== 'ready' || !draft?.commercialActions || draft.localStatus === 'completed' ||
+      !['scrap', 'review'].includes(step) || draft.sales) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('step', 'sales');
+    window.history.replaceState({}, '', url);
+    setShowCheckout(false);
+    setStep('sales');
+  }, [draft, state, step]);
+
+  useEffect(() => {
+    if (state !== 'ready' || !draft?.sales || draft.localStatus === 'completed' || step !== 'review' || draft.scrap) return;
     const url = new URL(window.location.href);
     url.searchParams.set('step', 'scrap');
     window.history.replaceState({}, '', url);
@@ -213,7 +228,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   };
 
   const returnToTasks = () => {
-    if (step === 'prices' && pricesDirty) {
+    if ((step === 'prices' && pricesDirty) || (step === 'sales' && salesDirty)) {
       setShowStockExit(true);
       return;
     }
@@ -232,7 +247,15 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     const controller = controllerRef.current;
     if (!controller) throw new Error('A visita ainda não está pronta para edição.');
     await controller.saveCommercialActions(values);
-    navigateStep('scrap');
+    navigateStep('sales');
+  };
+
+  const saveSales = async (values: VisitSalesInput, expectedVersion: number) => {
+    const controller = controllerRef.current;
+    if (!controller) throw new Error('A visita ainda não está pronta para edição.');
+    await controller.saveSales(values, expectedVersion);
+    setSalesDirty(false);
+    navigateStep(recoveringSales ? 'complete' : 'start');
   };
 
   const addCommercialActionEvidence = async (targetOfflineId: string, photo: CompressedStockPhoto, fileName: string) => {
@@ -261,7 +284,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     navigateStep('complete');
   };
 
-  const showStockStep = step === 'stock';
+  const showStockStep = step === 'stock' && draft?.localStatus !== 'completed';
 
   return <div className="seller-app seller-route-page">
     <header className="seller-topbar"><div className="seller-topbar-inner"><Brand /></div></header>
@@ -300,6 +323,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           >Tentar sincronizar novamente</button>}
         </section>}
         {step !== 'start' && syncMessage && <p className="seller-muted" role="status">{syncMessage}</p>}
+        {recoveringSales && view.requiresLogin && <a className="seller-button seller-primary" href="/login">Entrar novamente</a>}
         {step === 'start' && draft.localStatus !== 'completed' && <section className="seller-task-list" aria-labelledby="visit-tasks-title">
           <p className="seller-kicker">TAREFAS DA VISITA</p>
           <h2 id="visit-tasks-title">O que você vai coletar?</h2>
@@ -317,9 +341,16 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
             <span><strong>Ações comerciais</strong><small>Heliar e concorrência</small></span>
             <span>{draft.commercialActions ? '✓ Concluído' : draft.prices ? 'Iniciar' : '🔒 Após preços'}</span>
           </button>
-          <button className="seller-task-card" data-state={!draft.commercialActions ? 'locked' : draft.scrap ? 'completed' : 'available'} disabled={!draft.commercialActions} onClick={() => navigateStep('scrap')}>
+          <button className="seller-task-card" data-state={!draft.commercialActions ? 'locked' : draft.sales ? 'completed' : 'available'} disabled={!draft.commercialActions}
+            onClick={() => navigateStep('sales')}>
+            <span><strong>Informe de venda na visita</strong><small>{draft.sales
+              ? draft.sales.persistenceState === 'synced' ? 'Confirmado no servidor' : 'Salvo no aparelho'
+              : 'Heliar, América e Strada/Durex'}</small></span>
+            <span>{draft.sales ? '✓ Concluído' : draft.commercialActions ? 'Iniciar' : '🔒 Após ações'}</span>
+          </button>
+          <button className="seller-task-card" data-state={!draft.sales ? 'locked' : draft.scrap ? 'completed' : 'available'} disabled={!draft.sales} onClick={() => navigateStep('scrap')}>
             <span><strong>Sucata</strong><small>Coleta realizada, agendamento ou sem sucata</small></span>
-            <span>{draft.scrap ? '✓ Concluído' : draft.commercialActions ? 'Iniciar' : '🔒 Após ações'}</span>
+            <span>{draft.scrap ? '✓ Concluído' : draft.sales ? 'Iniciar' : '🔒 Após informe de venda'}</span>
           </button>
         </section>}
         {showStockStep && <><p className="seller-kicker" role="status">ESTOQUE · ETAPA 1 DE 3 · PRODUTOS PRÓPRIOS</p><VisitStockStep
@@ -328,7 +359,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           onSave={saveStock}
           onContinue={() => navigateStep('competitor-stock')}
         /></>}
-        {step === 'competitor-stock' && draft.stock && <>
+        {step === 'competitor-stock' && draft.localStatus !== 'completed' && draft.stock && <>
           <p className="seller-kicker" role="status">ESTOQUE · ETAPA 2 DE 3 · CONCORRÊNCIA</p>
           <button className="seller-button seller-secondary" type="button"
             onClick={() => navigateStep('stock', 'ACDelco')}>Voltar ao estoque próprio</button>
@@ -339,13 +370,13 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
             onDirtyChange={setCompetitorDirty}
           />
         </>}
-        {step === 'stock-photos' && draft.stock && <VisitStockPhotosStep
+        {step === 'stock-photos' && draft.localStatus !== 'completed' && draft.stock && <VisitStockPhotosStep
           attachments={stockPhotos}
           onAdd={addStockPhoto}
           onRemove={removeStockPhoto}
           onDone={() => void completeStockCollection()}
         />}
-        {step === 'prices' && draft.stock && <VisitCompetitorPricesStep
+        {step === 'prices' && draft.localStatus !== 'completed' && draft.stock && <VisitCompetitorPricesStep
           key={draft.prices?.eventId ?? 'new-prices'}
           draft={draft}
           parameters={view.priceParameters ?? null}
@@ -354,14 +385,19 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         />}
         {step !== 'start' && step !== 'complete' && <button className="seller-button seller-secondary" type="button"
           onClick={returnToTasks}>Voltar</button>}
-        {step === 'actions' && draft.prices && <VisitCommercialActionsStep
+        {step === 'actions' && draft.localStatus !== 'completed' && draft.prices && <VisitCommercialActionsStep
           draft={draft} actions={view.commercialActions} parameters={view.priceParameters ?? null}
           attachments={view.attachments} onAddEvidence={addCommercialActionEvidence} onSave={saveCommercialActions}
         />}
-        {step === 'scrap' && draft.commercialActions && <VisitScrapStep draft={draft} attachments={view.attachments} points={view.scrapPoints}
+        {step === 'sales' && draft.commercialActions && (draft.localStatus !== 'completed' || recoveringSales) && <>
+          {recoveringSales && <p className="seller-notice" role="status">O checkout desta visita está preservado no aparelho. Informe as vendas para concluir o envio; não é necessário refazer as evidências.</p>}
+          <VisitSalesStep
+          key={draft.offlineId} draft={draft} onSave={saveSales} onDirtyChange={setSalesDirty} />
+        </>}
+        {step === 'scrap' && draft.localStatus !== 'completed' && draft.commercialActions && draft.sales && <VisitScrapStep draft={draft} attachments={view.attachments} points={view.scrapPoints}
           onSave={async (values) => { const controller = controllerRef.current; if (!controller) throw new Error('A visita ainda não está pronta.'); await controller.saveScrap(values); navigateStep('review'); }}
           onAddEvidence={async (collectionId, photo, name) => { const controller = controllerRef.current; if (!controller) throw new Error('A visita ainda não está pronta.'); return controller.addScrapEvidence(collectionId, photo, name); }} />}
-        {step === 'review' && draft.commercialActions && draft.scrap && <section className="seller-next-step" aria-labelledby="next-step-title">
+        {step === 'review' && draft.localStatus !== 'completed' && draft.commercialActions && draft.sales && draft.scrap && <section className="seller-next-step" aria-labelledby="next-step-title">
           <p className="seller-kicker">AÇÕES COMERCIAIS</p>
           <h2 id="next-step-title" ref={nextStepTitleRef} tabIndex={-1}>
             {draft.commercialActions.persistenceState === 'synced' ? 'Sincronizadas' : 'Salvas no aparelho'}
@@ -371,18 +407,27 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
               ? `${draft.commercialActions.competitor.actions.length} ação(ões) concorrente(s) registrada(s).`
               : 'nenhuma ação concorrente identificada.'}</p>
           <p className="seller-notice">Revise as coletas e encerre a visita ainda na fachada da loja.</p>
+          <p>Venda declarada na visita: Heliar {draft.sales.heliarQuantity} · América {draft.sales.americaQuantity} · Strada/Durex {draft.sales.stradaDurexQuantity} · {draft.sales.persistenceState === 'synced' ? 'Confirmada no servidor' : 'Salva no aparelho'}</p>
+          <button className="seller-button seller-secondary" onClick={() => navigateStep('sales')}>Editar informe de venda</button>
           <p>Sucata: {draft.scrap.availability === 'collected' ? `${draft.scrap.collection?.actualWeightKg} kg coletados · termo ${draft.scrap.collection?.receiptNumber}` : draft.scrap.availability === 'scheduled' ? `${draft.scrap.schedule?.estimatedWeightKg} kg previstos · ${draft.scrap.schedule?.desiredDate}` : 'Sem sucata'} · {draft.scrap.persistenceState === 'synced' ? 'Confirmada no servidor' : 'Salva no aparelho'}</p>
           <button className="seller-button seller-secondary" onClick={() => navigateStep('scrap')}>Ver registro de sucata</button>
           <button className="seller-button seller-secondary" onClick={() => navigateStep('actions')}>Editar ações</button>
-          {draft.localStatus !== 'completed' && <button className="seller-button seller-primary"
-            onClick={() => setShowCheckout(true)}>Encerrar visita</button>}
+          <button className="seller-button seller-primary"
+            onClick={() => setShowCheckout(true)}>Encerrar visita</button>
         </section>}
         {step === 'complete' && <section className="seller-next-step" aria-labelledby="visit-complete-title">
           <p className="seller-kicker">VISITA ENCERRADA</p>
           <h2 id="visit-complete-title">Checkout salvo no aparelho</h2>
           <p>Foto da fachada, posição e horário foram registrados. A sincronização ocorrerá quando a publicação privada estiver habilitada.</p>
+          {recoveringSales && <>
+            <p>{draft.sales ? 'Informe salvo. Ao conectar, verificaremos primeiro o checkout original; as vendas só serão enviadas se ele ainda estiver pendente.' : 'Falta o informe de venda para concluir o envio do checkout preservado.'}</p>
+            <button className="seller-button seller-primary" onClick={() => navigateStep('sales')}>{draft.sales ? 'Editar informe pendente' : 'Informar vendas para concluir envio'}</button>
+            <button className="seller-button seller-secondary" disabled={view.busy}
+              onClick={() => void controllerRef.current?.resume()}>Tentar enviar checkout preservado</button>
+          </>}
+          {draft.salesRecoveryResolution && <p>O servidor já havia confirmado o checkout. O informe criado depois disso foi cancelado no aparelho; o registro dessa resolução foi preservado.</p>}
         </section>}
-        {showCheckout && draft.localStatus !== 'completed' && draft.client && <div className="seller-evidence-overlay">
+        {showCheckout && draft.sales && draft.localStatus !== 'completed' && draft.client && <div className="seller-evidence-overlay">
           <VisitEvidenceCapture kind="checkout" client={draft.client} busy={view.busy}
             referenceLocation={checkinEvidence?.latitude && checkinEvidence.longitude
               ? { latitude: checkinEvidence.latitude, longitude: checkinEvidence.longitude } : undefined}
@@ -402,20 +447,20 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         {showStockExit && <div className="seller-evidence-overlay" role="dialog" aria-modal="true"
           aria-labelledby="stock-exit-title" aria-describedby="stock-exit-description">
           <section className="seller-stock-card">
-            <h2 id="stock-exit-title">{competitorDirty || pricesDirty ? 'Sair sem salvar?' : 'Pausar esta tarefa?'}</h2>
-            <p id="stock-exit-description">{competitorDirty || pricesDirty
+            <h2 id="stock-exit-title">{competitorDirty || pricesDirty || salesDirty ? 'Sair sem salvar?' : 'Pausar esta tarefa?'}</h2>
+            <p id="stock-exit-description">{competitorDirty || pricesDirty || salesDirty
               ? 'As alterações ainda não salvas serão perdidas.'
               : 'A coleta ainda não foi concluída. Você poderá continuar depois.'}</p>
             <button className="seller-button seller-primary" autoFocus type="button"
               onClick={() => setShowStockExit(false)}>Continuar preenchendo</button>{' '}
             <button className="seller-button seller-secondary" type="button" onClick={() => {
-              setCompetitorDirty(false); setPricesDirty(false); setShowStockExit(false); navigateStep('start');
-            }}>Sair {competitorDirty || pricesDirty ? 'sem salvar' : 'agora'}</button>
+              setCompetitorDirty(false); setPricesDirty(false); setSalesDirty(false); setShowStockExit(false); navigateStep('start');
+            }}>Sair {competitorDirty || pricesDirty || salesDirty ? 'sem salvar' : 'agora'}</button>
           </section>
         </div>}
         {step === 'start' && draft.localStatus !== 'completed' && <button className="seller-button seller-secondary"
           type="button" onClick={() => setShowRouteExit(true)}>Pausar visita e voltar à rota</button>}
-        {step === 'complete' && <a className="seller-button seller-secondary" href="/route">Voltar à rota</a>}
+        {(step === 'complete' || recoveringSales) && <a className="seller-button seller-secondary" href="/route">Voltar à rota</a>}
         {showRouteExit && <div className="seller-evidence-overlay" role="dialog" aria-modal="true"
           aria-labelledby="route-exit-title" aria-describedby="route-exit-description">
           <section className="seller-stock-card">

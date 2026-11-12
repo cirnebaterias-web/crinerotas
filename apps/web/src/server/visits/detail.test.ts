@@ -23,7 +23,7 @@ const detail: VisitDetailResponse = {
   status: 'in_progress', deviceStartedAt: at, serverStartedAt: at, deviceCompletedAt: null,
   serverCompletedAt: null, lastKnownUpdateAt: at,
   serverVisibilityNote: 'Somente dados recebidos e confirmados pelo servidor estão presentes; conteúdo ainda apenas no aparelho não é conhecido.',
-  sections: { stock: { state: 'absent' }, competitorPrices: { state: 'absent' }, commercialActions: { state: 'absent' }, scrap: { state: 'absent' }, result: { state: 'absent' } },
+  sections: { sales: { state: 'absent' }, stock: { state: 'absent' }, competitorPrices: { state: 'absent' }, commercialActions: { state: 'absent' }, scrap: { state: 'absent' }, result: { state: 'absent' } },
   synchronization: { status: 'confirmed', occurredAt: at, receivedAt: at, confirmedAt: at, attemptCount: 1, lastErrorCode: null },
   exceptions: [], location: { state: 'withheld' }, evidence: { state: 'withheld' }, timeline: [],
 };

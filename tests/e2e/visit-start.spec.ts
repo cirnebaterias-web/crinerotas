@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { CanonicalRoute, MeResponse } from '@cirne/contracts';
+import type { CanonicalRoute, LocalAttachment, LocalVisitDraft, LocalVisitEvidence, MeResponse, OfflineOutboxEvent } from '@cirne/contracts';
 
 const sellerId = '33333333-3333-4333-8333-333333333331';
 const routeStopId = '33333333-3333-4333-8333-333333333334';
@@ -96,8 +96,9 @@ async function mockVisitSeller(
   page: Page,
   failure: 'none' | 'lost-response' | 'stock-lost-response' | 'conflict' = 'none',
   catalog: 'complete' | 'empty' = 'complete',
+  recovery: 'none' | 'already_completed' | 'requires_sales' = 'none',
 ) {
-  await page.addInitScript(({ identityFixture, routeFixture, revisedFixture, visitId, failureMode, parameterFixture, commercialActionsFixture, catalogMode }) => {
+  await page.addInitScript(({ identityFixture, routeFixture, revisedFixture, visitId, failureMode, parameterFixture, commercialActionsFixture, catalogMode, recoveryMode }) => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: { getUserMedia: async () => { throw new DOMException('Synthetic camera unavailable', 'NotFoundError'); } },
@@ -138,6 +139,18 @@ async function mockVisitSeller(
         });
       }
       if (url.pathname === '/api/v1/commercial-actions') return json(commercialActionsFixture);
+      if (recoveryMode !== 'none' && /^\/api\/v1\/visits\/[^/]+\/complete$/.test(url.pathname)) {
+        const requests = JSON.parse(sessionStorage.getItem('legacy-recovery-requests') ?? '[]') as unknown[];
+        requests.push({ operation: 'checkout', body: String(init?.body), key: new Headers(init?.headers).get('Idempotency-Key') });
+        sessionStorage.setItem('legacy-recovery-requests', JSON.stringify(requests));
+        if (recoveryMode === 'requires_sales' && sessionStorage.getItem('legacy-recovery-sales-accepted') !== 'true') {
+          return json({ error: { code: 'EVENT_OUT_OF_ORDER', message: 'Falta o informe de venda.', recoverable: false,
+            timestamp: '2026-11-12T19:00:00.000Z', requestId: visitId } }, 409);
+        }
+        const input = JSON.parse(String(init?.body)) as { offlineId: string; deviceCompletedAt: string };
+        return json({ schemaVersion: 1, visitId, offlineId: input.offlineId, status: 'completed',
+          deviceCompletedAt: input.deviceCompletedAt, serverCompletedAt: '2026-11-12T19:00:00.000Z' });
+      }
       if (url.pathname === '/api/v1/attachments/upload-intents' ||
           /^\/api\/v1\/attachments\/[^/]+\/confirm$/.test(url.pathname) ||
           /^\/api\/v1\/visits\/[^/]+\/(?:evidence\/checkin|complete)$/.test(url.pathname)) {
@@ -158,6 +171,12 @@ async function mockVisitSeller(
         const count = Number(sessionStorage.getItem('visit-sync-batches') ?? '0') + 1;
         sessionStorage.setItem('visit-sync-batches', String(count));
         const body = String(init?.body);
+        if (recoveryMode !== 'none') {
+          const requests = JSON.parse(sessionStorage.getItem('legacy-recovery-requests') ?? '[]') as unknown[];
+          requests.push({ operation: 'sales', body });
+          sessionStorage.setItem('legacy-recovery-requests', JSON.stringify(requests));
+          sessionStorage.setItem('legacy-recovery-sales-accepted', 'true');
+        }
         if (count === 1) sessionStorage.setItem('first-visit-batch', body);
         else sessionStorage.setItem('same-visit-batch', String(body === sessionStorage.getItem('first-visit-batch')));
         const stockBatch = batch.events.some(({ operation }) => operation === 'visit.stock.saved.v1');
@@ -202,6 +221,7 @@ async function mockVisitSeller(
     parameterFixture: priceParameters,
     commercialActionsFixture: commercialActions,
     catalogMode: catalog,
+    recoveryMode: recovery,
   });
 }
 
@@ -227,6 +247,8 @@ async function completeVisit(page: Page) {
     await acknowledgements.nth(index).check();
   }
   await saveActions.click();
+  await saveVisitSales(page);
+  await page.getByRole('button', { name: /^Sucata/ }).click();
   await expect(page).toHaveURL(/\?step=scrap$/);
   if (await page.getByRole('radio', { name: 'Sem sucata', exact: true }).isVisible()) {
     await page.getByRole('radio', { name: 'Sem sucata', exact: true }).check();
@@ -238,6 +260,15 @@ async function completeVisit(page: Page) {
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
   await page.getByLabel('Justificativa obrigatória').fill('Câmera e GPS indisponíveis no cenário automatizado.');
   await page.getByRole('button', { name: 'Confirmar e encerrar visita' }).click();
+}
+
+async function saveVisitSales(page: Page) {
+  await expect(page).toHaveURL(/\?step=sales$/);
+  await page.getByLabel('Heliar', { exact: true }).fill('0');
+  await page.getByLabel('América', { exact: true }).fill('0');
+  await page.getByLabel('Strada/Durex', { exact: true }).fill('0');
+  await page.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(page.getByRole('button', { name: /Informe de venda na visita/ })).toContainText('Salvo no aparelho');
 }
 
 async function offlineCounts(page: Page) {
@@ -257,6 +288,71 @@ async function offlineCounts(page: Page) {
     ]);
     database.close();
     return { drafts, events, attachments, evidence };
+  });
+}
+
+async function seedLegacyPendingCheckout(page: Page) {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('cirne-rotas-offline');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const requestValue = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const tx = database.transaction(['visitDrafts', 'visitEvidence', 'attachments', 'outboxEvents'], 'readwrite');
+    const done = new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    const drafts = await requestValue(tx.objectStore('visitDrafts').getAll()) as LocalVisitDraft[];
+    const draft = drafts[0]!;
+    // The legacy actions and scrap below are already canonical (events 4 and 5),
+    // so preserve a valid aggregate history rather than the start-only sequence.
+    const lastConfirmedSequence = Math.max(draft.lastConfirmedSequence ?? 0, 5);
+    const partition = { userId: draft.userId, deviceId: draft.deviceId };
+    const capturedAt = '2026-11-10T12:00:00.000Z';
+    const checkout: LocalVisitEvidence = { schemaVersion: 1, ...partition,
+      offlineId: '33333333-3333-4333-8333-333333333390', visitOfflineId: draft.offlineId, kind: 'checkout',
+      capturedAt, latitude: '-8.047562', longitude: '-34.876964', accuracyM: '12.69', radiusM: 30,
+      desiredAccuracyM: 50, issues: [], attachmentOfflineId: '33333333-3333-4333-8333-333333333391',
+      status: 'pending', expiresAt: '2027-01-01T12:00:00.000Z' };
+    const originalBytes = 'original legacy checkout photograph bytes';
+    const blob = new Blob([originalBytes], { type: 'image/jpeg' });
+    const photo: LocalAttachment = { schemaVersion: 1, ...partition, offlineId: checkout.attachmentOfflineId!,
+      visitOfflineId: draft.offlineId, purpose: 'visit_checkout', fileName: 'legacy-checkout.jpg',
+      contentType: 'image/jpeg', byteSize: blob.size, width: 20, height: 20, checksum: 'a'.repeat(64),
+      capturedAt, status: 'verified', blob };
+    const evidence = await requestValue(tx.objectStore('visitEvidence').getAll()) as LocalVisitEvidence[];
+    for (const item of evidence) tx.objectStore('visitEvidence').put({ ...item, status: 'synced', serverSyncedAt: capturedAt });
+    tx.objectStore('visitEvidence').put(checkout);
+    tx.objectStore('attachments').put(photo);
+    tx.objectStore('outboxEvents').clear();
+    tx.objectStore('visitDrafts').put({ ...draft, localStatus: 'completed', currentStep: 'complete',
+      lastConfirmedSequence,
+      deviceCompletedAt: capturedAt, persistenceState: 'synced', sales: undefined,
+      serverCompletedAt: undefined, salesCompletionRecovery: undefined, salesRecoveryResolution: undefined,
+      commercialActions: { ownAcknowledgements: [], competitor: { availability: 'not_identified' },
+        eventId: crypto.randomUUID(), deviceSavedAt: capturedAt, persistenceState: 'synced' },
+      scrap: { availability: 'none', eventId: crypto.randomUUID(), deviceSavedAt: capturedAt, persistenceState: 'synced' },
+    });
+    await done;
+    database.close();
+    return { checkout, originalBytes, lastConfirmedSequence, offlineId: draft.offlineId };
+  });
+}
+
+async function legacyCheckoutBytes(page: Page) {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('cirne-rotas-offline');
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    const photos = await new Promise<LocalAttachment[]>((resolve, reject) => {
+      const request = database.transaction('attachments').objectStore('attachments').getAll();
+      request.onsuccess = () => resolve(request.result as LocalAttachment[]); request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return photos.find((photo) => photo.offlineId === '33333333-3333-4333-8333-333333333391')!.blob.text();
   });
 }
 
@@ -740,6 +836,8 @@ test('saves repeatable competitor prices offline, restores them and confirms the
   await page.getByLabel('Tipo de ação').selectOption('differentiated_price');
   await page.getByLabel('Descrição da ação').fill('Preço promocional para o PDV sintético.');
   await page.getByRole('button', { name: 'Salvar ações comerciais' }).click();
+  await saveVisitSales(page);
+  await page.getByRole('button', { name: /^Sucata/ }).click();
   await expect(page).toHaveURL(/\?step=scrap$/);
   await expect(page.getByRole('button', { name: 'Encerrar visita' })).toHaveCount(0);
   await page.getByRole('radio', { name: 'Sem sucata', exact: true }).check();
@@ -752,12 +850,14 @@ test('saves repeatable competitor prices offline, restores them and confirms the
     expect.objectContaining({ operation: 'visit.stock.saved.v1', sequence: 6 }),
     expect.objectContaining({ operation: 'visit.prices.saved.v1', sequence: 7 }),
     expect.objectContaining({ operation: 'visit.commercial-actions.saved.v1', sequence: 8 }),
-    expect.objectContaining({ operation: 'visit.scrap.saved.v1', sequence: 9 }),
+    expect.objectContaining({ operation: 'visit.sales.saved.v1', sequence: 9 }),
+    expect.objectContaining({ operation: 'visit.scrap.saved.v1', sequence: 10 }),
   ]));
   expect(saved.drafts).toMatchObject([{
     currentStep: 'review',
     prices: { availability: 'available', quotations: [{ priceBrl: '399.90' }, { priceBrl: '459.50' }] },
     commercialActions: { competitor: { availability: 'identified' } },
+    sales: { heliarQuantity: 0, americaQuantity: 0, stradaDurexQuantity: 0 },
     scrap: { availability: 'none' },
   }]);
 
@@ -778,10 +878,158 @@ test('saves repeatable competitor prices offline, restores them and confirms the
   expect((await offlineCounts(page)).drafts).toMatchObject([{
     prices: { availability: 'available', persistenceState: 'synced' },
     commercialActions: { persistenceState: 'synced' },
+    sales: { persistenceState: 'synced' },
     scrap: { availability: 'none', persistenceState: 'synced' },
-    lastConfirmedSequence: 9,
+    lastConfirmedSequence: 10,
   }]);
 });
+
+test('persists explicit sales zeros, keeps failed edits and reopens the same storage offline', async ({ page, context }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await startVisit(page);
+  await expect(page.getByRole('button', { name: 'Coleta de estoque' })).toBeVisible();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Coleta de estoque' }).click();
+  await saveEmptyStockToPrices(page);
+  await page.getByLabel('Preço não disponível').check();
+  await page.getByLabel('Motivo da indisponibilidade').selectOption(unavailableReasonId);
+  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await page.getByLabel('Apresentei esta ação ao PDV').check();
+  await page.getByRole('button', { name: 'Salvar ações comerciais' }).click();
+  await expect(page).toHaveURL(/\?step=sales$/);
+  const salesUrl = page.url();
+  for (const label of ['Heliar', 'América', 'Strada/Durex']) await expect(page.getByLabel(label, { exact: true })).toHaveValue('');
+  await page.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(page.locator('#sales-heliarQuantity-error')).toBeVisible();
+  await expect(page.getByLabel('Heliar', { exact: true })).toBeFocused();
+  await saveVisitSales(page);
+  expect((await offlineCounts(page)).drafts).toMatchObject([{ sales: { heliarQuantity: 0, americaQuantity: 0, stradaDurexQuantity: 0 } }]);
+
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.setViewportSize({ width: 390, height: 844 });
+  await mockVisitSeller(reopened);
+  await reopened.goto(salesUrl, { waitUntil: 'domcontentloaded' });
+  for (const label of ['Heliar', 'América', 'Strada/Durex']) await expect(reopened.getByLabel(label, { exact: true })).toHaveValue('0');
+  await reopened.getByLabel('América', { exact: true }).fill('4');
+  await reopened.evaluate(() => {
+    const originalAdd = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function failSalesOutboxOnce(value: unknown, key?: IDBValidKey) {
+      if (this.name === 'outboxEvents') {
+        IDBObjectStore.prototype.add = originalAdd;
+        throw new DOMException('Storage full', 'QuotaExceededError');
+      }
+      return key === undefined ? originalAdd.call(this, value) : originalAdd.call(this, value, key);
+    };
+  });
+  await reopened.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(reopened.getByRole('alert').filter({ hasText: 'Não foi possível salvar no aparelho' })).toBeVisible();
+  await expect(reopened).toHaveURL(salesUrl);
+  await expect(reopened.getByLabel('América', { exact: true })).toHaveValue('4');
+  expect((await offlineCounts(reopened)).drafts).toMatchObject([{ sales: { americaQuantity: 0 } }]);
+  await reopened.screenshot({ path: testInfo.outputPath('visit-sales-mobile-failed-edit.png'), fullPage: true });
+  await reopened.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(reopened.getByRole('button', { name: /Informe de venda na visita/ })).toContainText('Salvo no aparelho');
+  await reopened.getByRole('button', { name: /Informe de venda na visita/ }).click();
+  await expect(reopened.getByLabel('América', { exact: true })).toHaveValue('4');
+  expect((await offlineCounts(reopened)).drafts).toMatchObject([{ sales: { heliarQuantity: 0, americaQuantity: 4, stradaDurexQuantity: 0 } }]);
+  expect(await reopened.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await reopened.screenshot({ path: testInfo.outputPath('visit-sales-mobile-restored.png'), fullPage: true });
+});
+
+for (const mode of ['already_completed', 'requires_sales'] as const) {
+  test(`recovers a completed legacy checkout offline and resolves ${mode} without replacing its evidence`, async ({ page, context }, testInfo) => {
+    await mockVisitSeller(page);
+    await page.goto('/route');
+    await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+    await startVisit(page);
+    await expect(page.getByText(protectedEvidenceMessage)).toBeVisible();
+    await expect.poll(async () => (await offlineCounts(page)).events.length).toBe(0);
+    await context.setOffline(true);
+    const legacy = await seedLegacyPendingCheckout(page);
+    const url = new URL(page.url()); url.searchParams.set('step', 'complete');
+    await page.close();
+
+    const reopened = await context.newPage();
+    await reopened.setViewportSize({ width: 390, height: 844 });
+    await mockVisitSeller(reopened, 'none', 'complete', mode);
+    await reopened.goto(url.href, { waitUntil: 'domcontentloaded' });
+    await expect(reopened).toHaveURL(/\?step=sales$/);
+    await expect(reopened.getByText(/não é necessário refazer as evidências/)).toBeVisible();
+    await expect(reopened.locator('.seller-task-list')).toHaveCount(0);
+    await expect(reopened.getByRole('button', { name: 'Encerrar visita', exact: true })).toHaveCount(0);
+    await expect(reopened.locator('input[type="file"]')).toHaveCount(0);
+    for (const label of ['Heliar', 'América', 'Strada/Durex']) await expect(reopened.getByLabel(label, { exact: true })).toHaveValue('');
+    const restored = await offlineCounts(reopened);
+    expect(restored.drafts).toMatchObject([{ localStatus: 'completed', currentStep: 'sales',
+      deviceCompletedAt: legacy.checkout.capturedAt, salesCompletionRecovery: true }]);
+    expect(restored.evidence).toEqual(expect.arrayContaining([legacy.checkout]));
+    expect(await legacyCheckoutBytes(reopened)).toBe(legacy.originalBytes);
+
+    await reopened.getByLabel('Heliar', { exact: true }).fill('0');
+    await reopened.getByLabel('América', { exact: true }).fill('2');
+    await reopened.getByLabel('Strada/Durex', { exact: true }).fill('3');
+    await reopened.getByRole('button', { name: 'Salvar informe de venda' }).click();
+    await expect(reopened).toHaveURL(/\?step=complete$/);
+    await expect(reopened.getByText('Informe salvo. Ao conectar, verificaremos primeiro o checkout original; as vendas só serão enviadas se ele ainda estiver pendente.')).toBeVisible();
+    await expect(reopened.getByRole('button', { name: 'Editar informe pendente' })).toBeVisible();
+    const pending = await offlineCounts(reopened);
+    expect(pending.drafts).toMatchObject([{ localStatus: 'completed', currentStep: 'complete',
+      deviceCompletedAt: legacy.checkout.capturedAt, sales: { heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3 } }]);
+    expect(pending.evidence).toEqual(expect.arrayContaining([legacy.checkout]));
+    const salesEvent = (pending.events as OfflineOutboxEvent[]).find((event) => event.operation === 'visit.sales.saved.v1')!;
+    expect(salesEvent.sequence).toBe((legacy.lastConfirmedSequence ?? 0) + 1);
+    await reopened.screenshot({ path: testInfo.outputPath(`legacy-sales-${mode}-offline.png`), fullPage: true });
+
+    await context.setOffline(false);
+    await expect.poll(async () => ((await offlineCounts(reopened)).drafts[0] as LocalVisitDraft).serverCompletedAt)
+      .toBe('2026-11-12T19:00:00.000Z');
+    const confirmed = await offlineCounts(reopened);
+    const draft = confirmed.drafts[0] as LocalVisitDraft;
+    const requests = await reopened.evaluate(() => JSON.parse(sessionStorage.getItem('legacy-recovery-requests') ?? '[]')) as Array<{
+      operation: 'checkout' | 'sales'; body: string; key?: string;
+    }>;
+    expect(requests.map((request) => request.operation)).toEqual(mode === 'already_completed'
+      ? ['checkout'] : ['checkout', 'sales', 'checkout']);
+    const checkouts = requests.filter((request) => request.operation === 'checkout');
+    for (const request of checkouts) {
+      expect(request.key).toBe(legacy.checkout.offlineId);
+      expect(JSON.parse(request.body)).toMatchObject({ offlineId: legacy.offlineId,
+        deviceCompletedAt: legacy.checkout.capturedAt, evidence: { offlineId: legacy.checkout.offlineId,
+          capturedAt: legacy.checkout.capturedAt, attachmentOfflineId: legacy.checkout.attachmentOfflineId,
+          location: { latitude: legacy.checkout.latitude, longitude: legacy.checkout.longitude, accuracyM: legacy.checkout.accuracyM } } });
+    }
+    expect(draft.localStatus).toBe('completed');
+    expect(draft.deviceCompletedAt).toBe(legacy.checkout.capturedAt);
+    expect(draft.salesCompletionRecovery).toBeUndefined();
+    expect(confirmed.events).toEqual([]);
+    expect(confirmed.evidence).toEqual(expect.arrayContaining([{ ...legacy.checkout, status: 'synced', serverSyncedAt: draft.serverCompletedAt }]));
+    expect(await legacyCheckoutBytes(reopened)).toBe(legacy.originalBytes);
+    if (mode === 'already_completed') {
+      expect(draft.sales).toBeUndefined();
+      expect(draft.salesRecoveryResolution).toMatchObject({ outcome: 'server_already_completed', cancelledSalesEvents: [{
+        eventId: salesEvent.eventId, idempotencyKey: salesEvent.idempotencyKey, sequence: salesEvent.sequence, payload: salesEvent.payload,
+      }] });
+      await expect(reopened.getByText(/o registro dessa resolução foi preservado/)).toBeVisible();
+    } else {
+      expect(checkouts[0]!.body).toBe(checkouts[1]!.body);
+      const submitted = JSON.parse(requests.find((request) => request.operation === 'sales')!.body);
+      expect(submitted.events).toHaveLength(1);
+      expect(submitted.events[0]).toMatchObject({ operation: 'visit.sales.saved.v1', eventId: salesEvent.eventId,
+        idempotencyKey: salesEvent.idempotencyKey, payload: salesEvent.payload });
+      expect(draft.sales).toMatchObject({ heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3, persistenceState: 'synced' });
+      expect(draft.salesRecoveryResolution).toBeUndefined();
+    }
+    await expect(reopened.getByRole('button', { name: 'Editar informe pendente' })).toHaveCount(0);
+    url.searchParams.set('step', 'sales');
+    await reopened.goto(url.href, { waitUntil: 'domcontentloaded' });
+    await expect(reopened).toHaveURL(/\?step=complete$/);
+    await expect(reopened.getByRole('button', { name: 'Salvar informe de venda' })).toHaveCount(0);
+  });
+}
 
 test('reuses own products found in stock and allows pricing another catalog product', async ({ page, context }) => {
   await page.setViewportSize({ width: 390, height: 844 });

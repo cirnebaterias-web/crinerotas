@@ -1,5 +1,7 @@
 import {
   startVisitRequestSchema,
+  saveVisitSalesRequestSchema, visitSalesResultSchema,
+  type SaveVisitSalesRequest, type VisitSalesResult,
   competitorPricesResultSchema,
   competitorPriceParameterSetSchema,
   saveCompetitorPricesRequestSchema,
@@ -39,6 +41,28 @@ export interface VisitStockRepository {
     idempotencyKey: string,
     command: SaveStockRequest,
   ): Promise<StockSnapshotResult>;
+}
+
+export interface VisitSalesRepository {
+  saveSales(deviceId: string, idempotencyKey: string, command: SaveVisitSalesRequest): Promise<VisitSalesResult>;
+  getSales(deviceId: string, offlineId: string): Promise<VisitSalesResult | null>;
+}
+
+export async function saveVisitSales(offlineId: string, deviceId: string, idempotencyKey: string,
+  input: SaveVisitSalesRequest, repository: VisitSalesRepository) {
+  const command = saveVisitSalesRequestSchema.safeParse(input);
+  const uuid = startVisitRequestSchema.shape.offlineId;
+  if (!command.success || command.data.offlineId !== offlineId || !uuid.safeParse(deviceId).success ||
+      !uuid.safeParse(idempotencyKey).success) {
+    throw new VisitServiceFailure('VALIDATION_FAILED', 'Informe de venda inválido.', false);
+  }
+  const result = visitSalesResultSchema.safeParse(await repository.saveSales(deviceId, idempotencyKey, command.data));
+  if (!result.success || result.data.offlineId !== offlineId || result.data.version !== input.expectedVersion + 1 ||
+      result.data.heliarQuantity !== input.heliarQuantity || result.data.americaQuantity !== input.americaQuantity ||
+      result.data.stradaDurexQuantity !== input.stradaDurexQuantity) {
+    throw new VisitServiceFailure('DEPENDENCY_UNAVAILABLE', publicVisitMessage('DEPENDENCY_UNAVAILABLE'), true);
+  }
+  return result.data;
 }
 
 export interface VisitCompetitorPricesRepository {

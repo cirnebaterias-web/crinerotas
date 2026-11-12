@@ -150,6 +150,14 @@ export function VisitDetailDashboard({ initial }: { initial: VisitDetailInitialS
       <section className="manager-day-route"><h2>Ações comerciais</h2><p>{sectionState(confirmed.sections.commercialActions.state)}</p>
         {confirmed.sections.commercialActions.state === 'available' && <p>{confirmed.sections.commercialActions.competitor.availability === 'identified' ? 'Ações concorrentes identificadas.' : 'Não ocorreu identificação de ação concorrente.'}</p>}
       </section>
+      <section className="manager-day-route" aria-labelledby="visit-sales-title"><h2 id="visit-sales-title">Declaração de venda na visita</h2>
+        <p>{sectionState(confirmed.sections.sales.state)}</p>
+        {confirmed.sections.sales.state === 'available' && <dl className="manager-day-counts">
+          <div><dt>Heliar</dt><dd>{confirmed.sections.sales.heliarQuantity}</dd></div>
+          <div><dt>América</dt><dd>{confirmed.sections.sales.americaQuantity}</dd></div>
+          <div><dt>Strada/Durex</dt><dd>{confirmed.sections.sales.stradaDurexQuantity}</dd></div>
+        </dl>}
+      </section>
       <section className="manager-day-route"><h2>Sucata</h2><p>{sectionState(confirmed.sections.scrap.state)}</p>
         {confirmed.sections.scrap.state === 'available' && <dl className="manager-day-counts">
           <div><dt>Kg coletados</dt><dd>{confirmed.sections.scrap.collectedWeightKg ?? 'Não ocorreu'}</dd></div>

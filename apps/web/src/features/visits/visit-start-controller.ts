@@ -2,6 +2,7 @@ import type {
   CompetitorPricesInput,
   CommercialActionsInput,
   VisitScrapInput,
+  VisitSalesInput,
   CommercialAction,
   ScrapPoint,
   LocalCompetitorPriceParameterSet,
@@ -16,7 +17,7 @@ import type { VisitEvidenceCaptureValue } from './visit-evidence-capture';
 
 type VisitService = Pick<OfflineFoundationService,
   'initialize' | 'refresh' | 'synchronize' | 'saveVisitStock' | 'saveVisitPrices' |
-  'listCommercialActions' | 'saveVisitCommercialActions' | 'saveVisitScrap' |
+  'listCommercialActions' | 'saveVisitCommercialActions' | 'saveVisitScrap' | 'saveVisitSales' |
   'listScrapPoints' |
   'getVisitPriceParameters' | 'listVisitAttachments' | 'saveVisitAttachment' |
   'deleteVisitAttachment' | 'completeStockCollection' | 'reopenStockCollection' |
@@ -52,6 +53,7 @@ export class VisitStartController {
   private pricesSaving: Promise<LocalVisitDraft> | null = null;
   private actionsSaving: Promise<LocalVisitDraft> | null = null;
   private scrapSaving: Promise<LocalVisitDraft> | null = null;
+  private salesSaving: Promise<LocalVisitDraft> | null = null;
   private priceParameters: LocalCompetitorPriceParameterSet | null = null;
   private commercialActions: CommercialAction[] | null = null;
   private scrapPoints: ScrapPoint[] = [];
@@ -127,6 +129,30 @@ export class VisitStartController {
       this.closeIfIdle();
     });
     this.actionsSaving = operation;
+    return operation;
+  }
+
+  saveSales(values: VisitSalesInput, expectedVersion = this.lastView.draft?.sales?.version ?? 0) {
+    if (this.salesSaving) return this.salesSaving;
+    const userId = this.userId;
+    if (!this.active || !userId) throw new Error('A visita ainda não está pronta para edição.');
+    const operation = this.service.saveVisitSales({ userId, offlineId: this.offlineId, values, expectedVersion }).then((saved) => {
+      this.localCommitRevision++;
+      this.emit({ ...this.lastView, draft: saved.draft, message: 'Informe de venda salvo no aparelho.', busy: false });
+      if (this.active && this.online()) this.synchronizeAfterCommit();
+      return saved.draft;
+    }).catch(async (error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'VERSION_CONFLICT') {
+        // Refresh the durable snapshot so returning to the task opens the newer version.
+        await this.running;
+        await this.resume();
+      }
+      throw error;
+    }).finally(() => {
+      if (this.salesSaving === operation) this.salesSaving = null;
+      this.closeIfIdle();
+    });
+    this.salesSaving = operation;
     return operation;
   }
 
@@ -376,7 +402,7 @@ export class VisitStartController {
 
   private closeIfIdle() {
     if (!this.active && !this.running && !this.stockSaving && !this.pricesSaving &&
-      !this.actionsSaving && !this.scrapSaving && !this.completionSaving &&
+      !this.actionsSaving && !this.scrapSaving && !this.salesSaving && !this.completionSaving &&
       this.attachmentOperations.size === 0) this.service.close();
   }
 
@@ -451,7 +477,7 @@ export class VisitStartController {
       !this.evidence.some((item) => item.status === 'pending') && !scrapPhotoPending)) return;
     const event = snapshot.outbox.find((candidate) => candidate.aggregateId === this.offlineId);
     const evidencePending = this.evidence.some((item) => item.status === 'pending') || scrapPhotoPending;
-    if (event?.status === 'action_required' || (!event && !evidencePending)) return;
+    if ((event?.status === 'action_required' && !draft.salesCompletionRecovery) || (!event && !evidencePending)) return;
     clearTimeout(this.retryTimer);
     this.emit({
       state: 'ready', draft, message: 'Sincronizando em segundo plano…', busy: true,
@@ -520,6 +546,10 @@ export class VisitStartController {
       || (scrapEvidencePending && !this.scrapEvidenceSyncDisabled);
     if (!event && retryableEvidencePending && !evidenceActionRequired && this.online() && !requiresLogin) {
       this.retryTimer = setTimeout(() => { void this.resume(); }, this.evidenceRetryDelayMs);
+    }
+    if (draft.salesCompletionRecovery && !draft.sales && !draft.serverCompletedAt) {
+      message = 'O checkout está preservado no aparelho. Informe as vendas para concluir o envio desta visita.' +
+        (requiresLogin ? ' Entre novamente com o mesmo vendedor para sincronizar.' : '');
     }
     this.emit({
       state: 'ready', draft, message, busy: false, requiresLogin,

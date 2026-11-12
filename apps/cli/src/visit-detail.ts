@@ -71,6 +71,9 @@ export function formatVisitDetail(detail: VisitDetailResponse) {
     `Estoque: ${sectionLabel(detail.sections.stock)}`,
     `Preços da concorrência: ${sectionLabel(detail.sections.competitorPrices)}`,
     `Ações comerciais: ${sectionLabel(detail.sections.commercialActions)}`,
+    `Declaração de venda na visita: ${detail.sections.sales.state === 'available'
+      ? `Heliar ${detail.sections.sales.heliarQuantity}; América ${detail.sections.sales.americaQuantity}; Strada/Durex ${detail.sections.sales.stradaDurexQuantity}`
+      : sectionLabel(detail.sections.sales)}`,
     `Sucata: ${sectionLabel(detail.sections.scrap)}`,
     `Localização: ${sectionLabel(detail.location)}`,
     `Evidências: ${sectionLabel(detail.evidence)}`,

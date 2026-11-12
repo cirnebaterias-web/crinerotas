@@ -86,10 +86,12 @@ test.describe('standalone scrap scheduling', () => {
       const clientSnapshot = { ...customer, externalReference: null, latitude: null, longitude: null, portfolioReference: null };
       const stamp = { eventId: crypto.randomUUID(), deviceSavedAt: now, persistenceState: 'saved_on_device' };
       const draft = { schemaVersion: 1, userId: user.id, deviceId, offlineId, routeVersionStopId: '51000000-0000-4000-8000-000000000011',
-        currentStep: 'scrap', deviceStartedAt: now, client: clientSnapshot, localStatus: 'draft', persistenceState: 'saved_on_device', updatedAt: now, lastConfirmedSequence: 4,
+        currentStep: 'scrap', deviceStartedAt: now, client: clientSnapshot, localStatus: 'draft', persistenceState: 'saved_on_device', updatedAt: now, lastConfirmedSequence: 5,
         stock: { heliarQuantity: 0, mouraQuantity: 0, ownLines: [], completedOwnBrands: ['Heliar', 'América', 'Durex', 'ACDelco'], competitorLines: [], collectionCompletedAt: now, ...stamp },
         prices: { availability: 'unavailable', unavailableReasonId: '51000000-0000-4000-8000-000000000012', ...stamp, eventId: crypto.randomUUID() },
         commercialActions: { ownAcknowledgements: [], competitor: { availability: 'not_identified' }, ...stamp, eventId: crypto.randomUUID() },
+        sales: { heliarQuantity: 0, americaQuantity: 0, stradaDurexQuantity: 0, version: 1,
+          ...stamp, eventId: crypto.randomUUID(), persistenceState: 'synced', serverSavedAt: now },
       };
       const bundle = { schemaVersion: 3, userId: user.id, deviceId, cachedAt: now,
         routeId: '51000000-0000-4000-8000-000000000013', routeVersionId: '51000000-0000-4000-8000-000000000014',
@@ -139,10 +141,12 @@ test.describe('standalone scrap scheduling', () => {
     await expect(page.getByText(summary, { exact: false })).toBeVisible({ timeout: 35_000 });
     const saved = await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => { const opening = indexedDB.open('cirne-rotas-offline'); opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
-      const values = await new Promise<{ drafts: unknown[]; events: Array<{ operation: string }> }>((resolve, reject) => { const tx = db.transaction(['visitDrafts', 'outboxEvents']); const drafts = tx.objectStore('visitDrafts').getAll(); const events = tx.objectStore('outboxEvents').getAll(); tx.oncomplete = () => resolve({ drafts: drafts.result, events: events.result }); tx.onerror = () => reject(tx.error); }); db.close(); return values;
+      const values = await new Promise<{ drafts: unknown[]; events: Array<{ operation: string; sequence: number }> }>((resolve, reject) => { const tx = db.transaction(['visitDrafts', 'outboxEvents']); const drafts = tx.objectStore('visitDrafts').getAll(); const events = tx.objectStore('outboxEvents').getAll(); tx.oncomplete = () => resolve({ drafts: drafts.result, events: events.result }); tx.onerror = () => reject(tx.error); }); db.close(); return values;
     });
     expect(saved.drafts).toMatchObject([{ scrap: { availability: answer, persistenceState: 'saved_on_device', ...(answer === 'collected' ? { collection: { actualWeightKg: '100', receiptNumber: 'TERMO-INTERIOR-001', destinationType: 'concentration_point', concentrationPointId: '51000000-0000-4000-8000-000000000015', attachmentOfflineIds: [expect.any(String)] } } : {}) }, currentStep: 'review' }]);
-    expect(saved.events.filter((event) => event.operation === 'visit.scrap.saved.v1')).toHaveLength(1);
+    expect(saved.drafts).toMatchObject([{ lastConfirmedSequence: 5,
+      sales: { heliarQuantity: 0, americaQuantity: 0, stradaDurexQuantity: 0, version: 1, persistenceState: 'synced' } }]);
+    expect(saved.events.filter((event) => event.operation === 'visit.scrap.saved.v1')).toMatchObject([{ sequence: 6 }]);
   });
   }
 

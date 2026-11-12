@@ -15,7 +15,7 @@ const detail: VisitDetailResponse = {
   status: 'completed', deviceStartedAt: at, serverStartedAt: at, deviceCompletedAt: at,
   serverCompletedAt: at, lastKnownUpdateAt: at,
   serverVisibilityNote: 'Somente dados recebidos e confirmados pelo servidor estão presentes; conteúdo ainda apenas no aparelho não é conhecido.',
-  sections: { stock: { state: 'absent' }, competitorPrices: { state: 'unknown_to_server' }, commercialActions: { state: 'absent' },
+  sections: { sales: { state: 'absent' }, stock: { state: 'absent' }, competitorPrices: { state: 'unknown_to_server' }, commercialActions: { state: 'absent' },
     scrap: { state: 'available', recordedAt: at, availability: 'scheduled', collectedWeightKg: null,
       scheduledWeightKg: '15.500', collection: null, schedule: { id, desiredDate: '2026-10-27', period: 'morning', status: 'pending', observation: null } },
     result: { state: 'available', outcome: 'completed', deviceCompletedAt: at, serverCompletedAt: at } },
@@ -25,6 +25,26 @@ const detail: VisitDetailResponse = {
 };
 
 describe('VisitDetailDashboard', () => {
+  it('renders the three declared quantities including explicit zero in their own visit section', () => {
+    const result: VisitDetailResponse = { ...detail, sections: { ...detail.sections, sales: {
+      state: 'available', recordedAt: at, heliarQuantity: 0, americaQuantity: 3, stradaDurexQuantity: 8,
+    } } };
+    const html = renderToStaticMarkup(<VisitDetailDashboard initial={{ kind: 'ready', result }} />);
+    expect(html).toContain('Declaração de venda na visita');
+    expect(html).toContain('<dt>Heliar</dt><dd>0</dd>');
+    expect(html).toContain('<dt>América</dt><dd>3</dd>');
+    expect(html).toContain('<dt>Strada/Durex</dt><dd>8</dd>');
+  });
+
+  it.each([['absent', 'Não informado'], ['unknown_to_server', 'Não conhecido pelo servidor']] as const)(
+    'renders %s sales as text without manufactured zero quantities', (state, label) => {
+      const result: VisitDetailResponse = { ...detail, sections: { ...detail.sections, sales: { state } } };
+      const html = renderToStaticMarkup(<VisitDetailDashboard initial={{ kind: 'ready', result }} />);
+      const section = html.split('id="visit-sales-title"')[1]!.split('</section>')[0]!;
+      expect(section).toContain(label);
+      expect(section).not.toContain('<dd>');
+    },
+  );
   it('shows historical source and observed GPS separately only when authorized', () => {
     const result: VisitDetailResponse = { ...detail,
       context: { ...detail.context, client: { ...detail.context.client,
