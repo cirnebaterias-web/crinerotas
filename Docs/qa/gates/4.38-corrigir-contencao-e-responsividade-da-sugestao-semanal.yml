@@ -1,0 +1,51 @@
+schema: 1
+story: '4.38'
+story_title: 'Corrigir contenção e responsividade da Sugestão semanal'
+gate: PASS
+status_reason: 'As três causas-raiz foram separadas por responsabilidade, e a matriz automatizada comprovou contenção, reflow, acessibilidade e preservação funcional em 1920–195 px. Não restou achado bloqueante ou lacuna nos 14 critérios.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:835ab9acb6047ac49b98f2e34bd3e5d942124a41'
+updated: '2026-11-12T17:00:12-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 896
+  risks_identified: 0
+  current_run:
+    lint: PASS
+    typecheck: PASS
+    unit_passed: 891
+    unit_skipped: 1
+    focused_unit_passed: 14
+    production_build: PASS
+    e2e_weekly_passed: 4
+    axe_wcag_a_aa: PASS
+    git_diff_check: PASS
+    visual_evidence: 'Capturas inspecionadas em 1440, 390 e 195 px CSS; mapa, resumo e dia sem sobreposição, corte ou overflow horizontal.'
+    viewport_matrix: 'PASS: 1920, 1440, 1280, 1024, 768, 390, 320 e 195 px CSS (equivalente ao reflow de 390 px a 200%).'
+    coderabbit: 'Indisponível: CLI WSL não reconhece o gitfile do worktree Windows; revisão manual independente equivalente concluída sem findings.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Conteúdo hostil semelhante a HTML permaneceu texto seguro via React; nenhuma API, autorização, contrato ou persistência foi alterada.'
+  performance:
+    status: PASS
+    notes: 'ResizeObserver reutiliza a instância Leaflet, agrupa invalidação em requestAnimationFrame e possui cleanup de observer e frame.'
+  reliability:
+    status: PASS
+    notes: 'Centro, zoom, identidade do mapa, classes de runtime, desenho, borracha, toque, popup e todos os comandos existentes foram preservados por E2E.'
+  maintainability:
+    status: PASS
+    notes: 'Resumo, grade semanal e estado visual do desenho receberam responsabilidades exclusivas; estilos de layout permanecem sob .weekly-route-page, sem regressão estrutural no planner diário.'
+  accessibility:
+    status: PASS
+    notes: 'axe-core WCAG A/AA sem violações; foco visível, ordem Dia 1–5, nomes acessíveis e alvos mínimos de 44 px foram medidos.'
+recommendations:
+  immediate: []
+  future:
+    - action: 'Manter a matriz de breakpoints e axe no E2E semanal para impedir regressões em futuras alterações do shell gerencial.'
+      refs: ['tests/e2e/weekly-route-intelligence.spec.ts']
