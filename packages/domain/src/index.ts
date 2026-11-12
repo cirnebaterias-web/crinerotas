@@ -35,6 +35,8 @@ import {
   startVisitRequestSchema,
   saveStockRequestSchema,
   stockInputSchema,
+  visitSalesInputSchema,
+  type VisitSalesInput,
   saveCompetitorPricesRequestSchema,
   competitorPricesInputSchema,
   commercialActionsInputSchema,
@@ -394,7 +396,7 @@ export function createVisitCommercialActionsMutation(input: {
   });
   const draft = localVisitDraftSchema.parse({
     ...currentDraft,
-    currentStep: 'scrap',
+    currentStep: 'sales',
     commercialActions: {
       ...values,
       eventId: input.ids.eventId,
@@ -425,6 +427,32 @@ export function createVisitCommercialActionsMutation(input: {
   if (event.operation !== 'visit.commercial-actions.saved.v1') {
     throw new VisitDomainError('VALIDATION_FAILED', 'Evento de ações comerciais inválido.');
   }
+  return { draft, event };
+}
+
+export function createVisitSalesMutation(input: {
+  draft: LocalVisitDraft; values: VisitSalesInput; deviceSavedAt: string; sequence: number;
+  ids: { eventId: string; idempotencyKey: string };
+}): { draft: LocalVisitDraft; event: Extract<OfflineOutboxEvent, { operation: 'visit.sales.saved.v1' }> } {
+  const currentDraft = localVisitDraftSchema.parse(input.draft);
+  if (!currentDraft.commercialActions || currentDraft.localStatus === 'completed') {
+    throw new VisitDomainError('VERSION_CONFLICT', 'O informe exige ações comerciais e visita em andamento.');
+  }
+  const values = visitSalesInputSchema.parse(input.values);
+  const expectedVersion = currentDraft.sales?.version ?? 0;
+  const draft = localVisitDraftSchema.parse({
+    ...currentDraft, currentStep: currentDraft.scrap ? 'review' : 'scrap',
+    sales: { ...values, version: expectedVersion + 1, eventId: input.ids.eventId,
+      deviceSavedAt: input.deviceSavedAt, persistenceState: 'saved_on_device' },
+    persistenceState: 'saved_on_device', updatedAt: input.deviceSavedAt,
+  });
+  const event = offlineOutboxEventSchema.parse({
+    schemaVersion: 1, userId: draft.userId, deviceId: draft.deviceId, ...input.ids,
+    operation: 'visit.sales.saved.v1', aggregateId: draft.offlineId, sequence: input.sequence,
+    payload: { ...values, expectedVersion, offlineId: draft.offlineId, deviceSavedAt: input.deviceSavedAt },
+    status: 'pending', attemptCount: 0, occurredAt: input.deviceSavedAt,
+  });
+  if (event.operation !== 'visit.sales.saved.v1') throw new VisitDomainError('VALIDATION_FAILED', 'Evento de informe inválido.');
   return { draft, event };
 }
 

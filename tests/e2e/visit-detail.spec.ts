@@ -24,6 +24,7 @@ const detail = {
   lastKnownUpdateAt: at,
   serverVisibilityNote: 'Somente dados recebidos e confirmados pelo servidor estão presentes; conteúdo ainda apenas no aparelho não é conhecido.',
   sections: {
+    sales: { state: 'available', recordedAt: at, heliarQuantity: 0, americaQuantity: 3, stradaDurexQuantity: 8 },
     stock: { state: 'absent' },
     competitorPrices: { state: 'unknown_to_server' },
     commercialActions: { state: 'absent' },
@@ -80,6 +81,10 @@ test.describe('authorized visit detail experience', () => {
     await page.getByRole('button', { name: 'Atualizar agora' }).click();
     await expect(page.getByRole('heading', { name: 'Cliente Visitado' })).toBeVisible();
     await expect(page.getByText('15.500')).toBeVisible();
+    const sales = page.getByRole('region', { name: 'Declaração de venda na visita' });
+    await expect(sales).toContainText('Heliar0');
+    await expect(sales).toContainText('América3');
+    await expect(sales).toContainText('Strada/Durex8');
     await expect(page.getByText(/N.o conhecido pelo servidor/u)).toBeVisible();
     await expect(page.getByText(/Oculto por permiss.o/u)).toHaveCount(2);
     await expect(page.getByText('Latitude')).toHaveCount(0);

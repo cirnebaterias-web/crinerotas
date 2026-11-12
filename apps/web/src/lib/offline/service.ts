@@ -15,6 +15,7 @@ import {
   type CompetitorPricesInput,
   type CommercialActionsInput,
   type VisitScrapInput,
+  type VisitSalesInput,
   type ScrapPoint,
   type CommercialAction,
   type OwnStockLine,
@@ -710,6 +711,16 @@ export class OfflineFoundationService {
       ids: { eventId: this.createId(), idempotencyKey: this.createId() },
     };
     return this.repository.saveVisitScrapAndEnqueue(command);
+  }
+
+  async saveVisitSales(input: { userId: string; offlineId: string; values: VisitSalesInput; expectedVersion?: number }) {
+    await this.repository.open();
+    const partition = { userId: input.userId, deviceId: this.getDeviceId() };
+    const access = await this.requireLocalAccess(partition);
+    if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de editar.');
+    return this.repository.saveVisitSalesAndEnqueue({ partition, offlineId: input.offlineId,
+      values: input.values, expectedVersion: input.expectedVersion, deviceSavedAt: this.now(),
+      ids: { eventId: this.createId(), idempotencyKey: this.createId() } });
   }
 
   async refresh(partition: OfflinePartition) {

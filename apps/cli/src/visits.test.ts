@@ -1,10 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runVisitRoundTrip } from './visits';
+import { runVisitRoundTrip, runVisitSalesRoundTrip } from './visits';
 
 const sellerId = '11111111-1111-4111-8111-111111111111';
 const stopId = '44444444-4444-4444-8444-444444444444';
 
 describe('visit round-trip CLI', () => {
+  it('does not accept an unrelated 409 as proof of idempotency rejection', async () => {
+    let result: Record<string, unknown> | undefined;
+    let writes = 0;
+    const request = vi.fn<typeof fetch>(async (_url, init) => {
+      if (init?.method === 'GET') return Response.json({ schemaVersion: 1, sales: result });
+      writes++;
+      if (writes === 3) return Response.json({ error: { code: 'VERSION_CONFLICT', message: 'Conflito.',
+        recoverable: false, timestamp: new Date().toISOString(), requestId: crypto.randomUUID() } }, { status: 409 });
+      const body = JSON.parse(String(init?.body));
+      result ??= { schemaVersion: 1, offlineId: body.offlineId, visitId: crypto.randomUUID(), reportId: crypto.randomUUID(),
+        heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3, version: 1,
+        deviceSavedAt: body.deviceSavedAt, serverSavedAt: new Date().toISOString() };
+      return Response.json(result);
+    });
+    await expect(runVisitSalesRoundTrip('http://127.0.0.1:3000', 'synthetic', crypto.randomUUID(), crypto.randomUUID(), request))
+      .rejects.toThrow('não confirmou');
+  });
   it('starts, replays and rejects divergence without returning private payloads', async () => {
     let canonical: Record<string, unknown> | null = null;
     let startCalls = 0;
@@ -16,8 +33,24 @@ describe('visit round-trip CLI', () => {
     let scrapCalls = 0;
     let scheduleCalls = 0;
     let scheduleCanonical: Record<string, unknown> | null = null;
+    let salesCanonical: Record<string, unknown> | null = null;
+    let salesCalls = 0;
     const request = vi.fn<typeof fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname;
+      if (path.endsWith('/sections/sales')) {
+        if (init?.method === 'GET') return Response.json({ schemaVersion: 1, sales: {
+          ...salesCanonical, deviceSavedAt: String(salesCanonical?.deviceSavedAt).replace('Z', '+00:00'),
+        } });
+        salesCalls++;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        if (salesCalls === 3) return Response.json({ error: { code: 'IDEMPOTENCY_KEY_REUSED',
+          message: 'Chave divergente.', recoverable: false, timestamp: new Date().toISOString(), requestId: crypto.randomUUID() } }, { status: 409 });
+        salesCanonical ??= { schemaVersion: 1, offlineId: body.offlineId,
+          visitId: '88888888-8888-4888-8888-888888888888', reportId: crypto.randomUUID(), version: 1,
+          heliarQuantity: body.heliarQuantity, americaQuantity: body.americaQuantity, stradaDurexQuantity: body.stradaDurexQuantity,
+          deviceSavedAt: body.deviceSavedAt, serverSavedAt: new Date().toISOString() };
+        return Response.json(salesCanonical);
+      }
       if (path === '/api/v1/me') return Response.json({
         id: sellerId,
         displayName: 'Vendedor Sintético',
@@ -192,6 +225,7 @@ describe('visit round-trip CLI', () => {
 
     const result = await runVisitRoundTrip('http://127.0.0.1:3000', 'seller-token', request);
     expect(result.checks).toEqual({
+      salesSaved: true, salesReplayMatched: true, salesDivergentRejected: true, salesReadMatched: true,
       started: true,
       replayMatched: true,
       divergentRejected: true,

@@ -17,6 +17,7 @@ import {
   type CompetitorPricesInput,
   type CommercialActionsInput,
   type VisitScrapInput,
+  type VisitSalesInput,
   type ScrapPoint,
   type OwnStockLine,
   type StockInput,
@@ -36,6 +37,7 @@ import {
   createVisitPricesMutation,
   createVisitCommercialActionsMutation,
   createVisitScrapMutation,
+  createVisitSalesMutation,
   orderOutboxEvents,
   type DraftMutationIds,
   type VisitStartMutationIds,
@@ -120,6 +122,12 @@ export interface SaveVisitScrapCommand {
   values: VisitScrapInput;
   deviceSavedAt: string;
   ids: VisitScrapMutationIds;
+}
+
+export interface SaveVisitSalesCommand {
+  partition: OfflinePartition; offlineId: string; values: VisitSalesInput; deviceSavedAt: string;
+  expectedVersion?: number;
+  ids: { eventId: string; idempotencyKey: string };
 }
 
 type FailedOutboxStatus = Extract<OfflineOutboxEvent['status'], 'recoverable_error' | 'action_required'>;
@@ -348,8 +356,8 @@ export class OfflineRepository {
       const key: [string, string, string] = [partition.userId, partition.deviceId, evidence.visitOfflineId];
       const draft = await this.db.visitDrafts.get(key);
       if (!draft) throw new Error('Visita não encontrada nesta partição offline.');
-      if (evidence.kind === 'checkout' && !draft.scrap) {
-        throw new Error('Responda a etapa de sucata antes de concluir a visita.');
+      if (evidence.kind === 'checkout' && (!draft.scrap || !draft.sales)) {
+        throw new Error('Responda o informe de venda e a etapa de sucata antes de concluir a visita.');
       }
       const previous = await this.db.visitEvidence.where('[userId+deviceId+visitOfflineId+kind]').equals([
         partition.userId, partition.deviceId, evidence.visitOfflineId, evidence.kind,
@@ -750,6 +758,9 @@ export class OfflineRepository {
             serverSavedAt: confirmationInput.confirmedAt,
           },
         } : {}),
+        ...(event.operation === 'visit.sales.saved.v1' && draft.sales?.eventId === event.eventId ? {
+          sales: { ...draft.sales, persistenceState: 'synced' as const, serverSavedAt: confirmationInput.confirmedAt },
+        } : {}),
         lastConfirmedSequence: event.operation === 'visit.draft.saved' && draft.deviceStartedAt
           ? draft.lastConfirmedSequence
           : Math.max(draft.lastConfirmedSequence ?? 0, event.sequence),
@@ -1032,6 +1043,32 @@ export class OfflineRepository {
         sequence,
         ids: command.ids,
       });
+      await this.db.visitDrafts.put(mutation.draft);
+      await this.db.outboxEvents.add(mutation.event);
+      return mutation;
+    });
+  }
+
+  async saveVisitSalesAndEnqueue(command: SaveVisitSalesCommand) {
+    const partition = offlinePartitionSchema.parse(command.partition);
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, async () => {
+      const currentDraft = await this.db.visitDrafts.get([partition.userId, partition.deviceId, command.offlineId]);
+      if (!currentDraft) throw new Error('Visita não encontrada nesta partição offline.');
+      assertPartition(partition, currentDraft);
+      if (command.expectedVersion !== undefined && command.expectedVersion !== (currentDraft.sales?.version ?? 0)) {
+        throw Object.assign(new Error('O informe foi alterado em outra tela. Reabra a etapa para conferir os valores atuais.'),
+          { code: 'VERSION_CONFLICT' });
+      }
+      const collision = await this.db.outboxEvents.get([partition.userId, partition.deviceId, command.ids.eventId]);
+      const keyCollision = await this.db.outboxEvents.where('[userId+deviceId+idempotencyKey]')
+        .equals([partition.userId, partition.deviceId, command.ids.idempotencyKey]).first();
+      if (collision || keyCollision) throw new Error('Identificador de evento local já utilizado.');
+      const previous = await this.db.outboxEvents.where('[userId+deviceId+aggregateType+aggregateId+sequence]')
+        .between([partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.minKey],
+          [partition.userId, partition.deviceId, 'visit', command.offlineId, Dexie.maxKey]).last();
+      const mutation = createVisitSalesMutation({ draft: currentDraft, values: command.values,
+        deviceSavedAt: command.deviceSavedAt, ids: command.ids,
+        sequence: Math.max(previous?.sequence ?? 0, currentDraft.lastConfirmedSequence ?? 0) + 1 });
       await this.db.visitDrafts.put(mutation.draft);
       await this.db.outboxEvents.add(mutation.event);
       return mutation;

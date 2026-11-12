@@ -947,6 +947,8 @@ describe('OfflineRepository', () => {
     await db.visitDrafts.update(
       [partitionA.userId, partitionA.deviceId, started.draft.offlineId],
       {
+        sales: { heliarQuantity: 0, americaQuantity: 0, stradaDurexQuantity: 0, version: 1,
+          eventId: crypto.randomUUID(), deviceSavedAt: '2026-10-05T12:05:00.000Z', persistenceState: 'saved_on_device' },
         scrap: {
           eventId: '10000000-0000-4000-8000-000000000030',
           availability: 'none',

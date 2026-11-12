@@ -31,6 +31,7 @@ function fixture() {
     listScrapPoints: vi.fn().mockResolvedValue([]),
     saveVisitCommercialActions: vi.fn(),
     saveVisitScrap: vi.fn(),
+    saveVisitSales: vi.fn(),
     getVisitPriceParameters: vi.fn().mockResolvedValue(null),
     listVisitAttachments: vi.fn().mockResolvedValue([]),
     listVisitEvidence: vi.fn().mockResolvedValue([]),
@@ -50,6 +51,38 @@ function fixture() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('VisitStartController', () => {
+  it('reloads the durable version after a conflicting sales edit so the task can be reopened', async () => {
+    const f = fixture();
+    f.online.mockReturnValue(false);
+    await f.controller.resume();
+    const values = { heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3 };
+    f.snapshot.drafts[0]!.sales = { ...values, version: 2, eventId: 'sales-new',
+      deviceSavedAt: stamp, persistenceState: 'saved_on_device' };
+    f.service.saveVisitSales.mockRejectedValueOnce(Object.assign(new Error('Changed'), { code: 'VERSION_CONFLICT' }));
+    await expect(f.controller.saveSales(values, 1)).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+    expect(f.publish.mock.lastCall?.[0].draft.sales.version).toBe(2);
+    f.controller.dispose();
+  });
+  it('publishes sales confirmation only after the local commit and preserves state on failure', async () => {
+    const f = fixture();
+    f.online.mockReturnValue(false);
+    await f.controller.resume();
+    let release!: (value: unknown) => void;
+    f.service.saveVisitSales.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const before = f.publish.mock.calls.length;
+    const values = { heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3 };
+    const saving = f.controller.saveSales(values);
+    expect(f.publish).toHaveBeenCalledTimes(before);
+    const saved = { ...f.snapshot.drafts[0]!, sales: { ...values, version: 1, eventId: 'sales-a', deviceSavedAt: stamp, persistenceState: 'saved_on_device' } };
+    release({ draft: saved });
+    await saving;
+    expect(f.publish.mock.lastCall?.[0]).toMatchObject({ draft: saved, message: 'Informe de venda salvo no aparelho.' });
+    f.service.saveVisitSales.mockRejectedValueOnce(new Error('storage full'));
+    const after = f.publish.mock.calls.length;
+    await expect(f.controller.saveSales(values)).rejects.toThrow('storage full');
+    expect(f.publish).toHaveBeenCalledTimes(after);
+    f.controller.dispose();
+  });
   it.each(['catalog', 'post-sync evidence'] as const)(
     'never republishes stock from an older %s snapshot after a durable online commit', async (phase) => {
       const f = fixture();

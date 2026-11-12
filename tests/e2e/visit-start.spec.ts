@@ -227,6 +227,8 @@ async function completeVisit(page: Page) {
     await acknowledgements.nth(index).check();
   }
   await saveActions.click();
+  await saveVisitSales(page);
+  await page.getByRole('button', { name: /^Sucata/ }).click();
   await expect(page).toHaveURL(/\?step=scrap$/);
   if (await page.getByRole('radio', { name: 'Sem sucata', exact: true }).isVisible()) {
     await page.getByRole('radio', { name: 'Sem sucata', exact: true }).check();
@@ -238,6 +240,15 @@ async function completeVisit(page: Page) {
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
   await page.getByLabel('Justificativa obrigatória').fill('Câmera e GPS indisponíveis no cenário automatizado.');
   await page.getByRole('button', { name: 'Confirmar e encerrar visita' }).click();
+}
+
+async function saveVisitSales(page: Page) {
+  await expect(page).toHaveURL(/\?step=sales$/);
+  await page.getByLabel('Heliar', { exact: true }).fill('0');
+  await page.getByLabel('América', { exact: true }).fill('0');
+  await page.getByLabel('Strada/Durex', { exact: true }).fill('0');
+  await page.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(page.getByRole('button', { name: /Informe de venda na visita/ })).toContainText('Salvo no aparelho');
 }
 
 async function offlineCounts(page: Page) {
@@ -740,6 +751,8 @@ test('saves repeatable competitor prices offline, restores them and confirms the
   await page.getByLabel('Tipo de ação').selectOption('differentiated_price');
   await page.getByLabel('Descrição da ação').fill('Preço promocional para o PDV sintético.');
   await page.getByRole('button', { name: 'Salvar ações comerciais' }).click();
+  await saveVisitSales(page);
+  await page.getByRole('button', { name: /^Sucata/ }).click();
   await expect(page).toHaveURL(/\?step=scrap$/);
   await expect(page.getByRole('button', { name: 'Encerrar visita' })).toHaveCount(0);
   await page.getByRole('radio', { name: 'Sem sucata', exact: true }).check();
@@ -752,12 +765,14 @@ test('saves repeatable competitor prices offline, restores them and confirms the
     expect.objectContaining({ operation: 'visit.stock.saved.v1', sequence: 6 }),
     expect.objectContaining({ operation: 'visit.prices.saved.v1', sequence: 7 }),
     expect.objectContaining({ operation: 'visit.commercial-actions.saved.v1', sequence: 8 }),
-    expect.objectContaining({ operation: 'visit.scrap.saved.v1', sequence: 9 }),
+    expect.objectContaining({ operation: 'visit.sales.saved.v1', sequence: 9 }),
+    expect.objectContaining({ operation: 'visit.scrap.saved.v1', sequence: 10 }),
   ]));
   expect(saved.drafts).toMatchObject([{
     currentStep: 'review',
     prices: { availability: 'available', quotations: [{ priceBrl: '399.90' }, { priceBrl: '459.50' }] },
     commercialActions: { competitor: { availability: 'identified' } },
+    sales: { heliarQuantity: 0, americaQuantity: 0, stradaDurexQuantity: 0 },
     scrap: { availability: 'none' },
   }]);
 
@@ -778,9 +793,66 @@ test('saves repeatable competitor prices offline, restores them and confirms the
   expect((await offlineCounts(page)).drafts).toMatchObject([{
     prices: { availability: 'available', persistenceState: 'synced' },
     commercialActions: { persistenceState: 'synced' },
+    sales: { persistenceState: 'synced' },
     scrap: { availability: 'none', persistenceState: 'synced' },
-    lastConfirmedSequence: 9,
+    lastConfirmedSequence: 10,
   }]);
+});
+
+test('persists explicit sales zeros, keeps failed edits and reopens the same storage offline', async ({ page, context }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await startVisit(page);
+  await expect(page.getByRole('button', { name: 'Coleta de estoque' })).toBeVisible();
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Coleta de estoque' }).click();
+  await saveEmptyStockToPrices(page);
+  await page.getByLabel('Preço não disponível').check();
+  await page.getByLabel('Motivo da indisponibilidade').selectOption(unavailableReasonId);
+  await page.getByRole('button', { name: 'Salvar preços e continuar' }).click();
+  await page.getByLabel('Apresentei esta ação ao PDV').check();
+  await page.getByRole('button', { name: 'Salvar ações comerciais' }).click();
+  await expect(page).toHaveURL(/\?step=sales$/);
+  const salesUrl = page.url();
+  for (const label of ['Heliar', 'América', 'Strada/Durex']) await expect(page.getByLabel(label, { exact: true })).toHaveValue('');
+  await page.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(page.locator('#sales-heliarQuantity-error')).toBeVisible();
+  await expect(page.getByLabel('Heliar', { exact: true })).toBeFocused();
+  await saveVisitSales(page);
+  expect((await offlineCounts(page)).drafts).toMatchObject([{ sales: { heliarQuantity: 0, americaQuantity: 0, stradaDurexQuantity: 0 } }]);
+
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.setViewportSize({ width: 390, height: 844 });
+  await mockVisitSeller(reopened);
+  await reopened.goto(salesUrl, { waitUntil: 'domcontentloaded' });
+  for (const label of ['Heliar', 'América', 'Strada/Durex']) await expect(reopened.getByLabel(label, { exact: true })).toHaveValue('0');
+  await reopened.getByLabel('América', { exact: true }).fill('4');
+  await reopened.evaluate(() => {
+    const originalAdd = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function failSalesOutboxOnce(value: unknown, key?: IDBValidKey) {
+      if (this.name === 'outboxEvents') {
+        IDBObjectStore.prototype.add = originalAdd;
+        throw new DOMException('Storage full', 'QuotaExceededError');
+      }
+      return key === undefined ? originalAdd.call(this, value) : originalAdd.call(this, value, key);
+    };
+  });
+  await reopened.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(reopened.getByRole('alert').filter({ hasText: 'Não foi possível salvar no aparelho' })).toBeVisible();
+  await expect(reopened).toHaveURL(salesUrl);
+  await expect(reopened.getByLabel('América', { exact: true })).toHaveValue('4');
+  expect((await offlineCounts(reopened)).drafts).toMatchObject([{ sales: { americaQuantity: 0 } }]);
+  await reopened.screenshot({ path: testInfo.outputPath('visit-sales-mobile-failed-edit.png'), fullPage: true });
+  await reopened.getByRole('button', { name: 'Salvar informe de venda' }).click();
+  await expect(reopened.getByRole('button', { name: /Informe de venda na visita/ })).toContainText('Salvo no aparelho');
+  await reopened.getByRole('button', { name: /Informe de venda na visita/ }).click();
+  await expect(reopened.getByLabel('América', { exact: true })).toHaveValue('4');
+  expect((await offlineCounts(reopened)).drafts).toMatchObject([{ sales: { heliarQuantity: 0, americaQuantity: 4, stradaDurexQuantity: 0 } }]);
+  expect(await reopened.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await reopened.screenshot({ path: testInfo.outputPath('visit-sales-mobile-restored.png'), fullPage: true });
 });
 
 test('reuses own products found in stock and allows pricing another catalog product', async ({ page, context }) => {
