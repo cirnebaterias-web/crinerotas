@@ -19,7 +19,11 @@ const dockerPrefix = useRancherDesktopWsl
 let server: ChildProcess | undefined;
 let origin: string;
 let output = '';
-let identityEnvironment: { SUPABASE_PUBLIC_URL: string; SUPABASE_PUBLISHABLE_KEY: string };
+let identityEnvironment: {
+  SUPABASE_PUBLIC_URL: string;
+  SUPABASE_PUBLISHABLE_KEY: string;
+  SUPABASE_SECRET_KEY: string;
+};
 let actorManifest: {
   actors: Record<string, { id: string; accessToken: string; email: string; password: string }>;
 };
@@ -87,12 +91,14 @@ beforeAll(async () => {
   const statusResult = await run(supabaseBinary, ['status', '-o', 'json'], 120_000);
   if (!statusResult.ok) throw new Error('Supabase local is unavailable for integration tests');
   const localStatus = JSON.parse(statusResult.output) as Record<string, unknown>;
-  if (typeof localStatus.API_URL !== 'string' || typeof localStatus.PUBLISHABLE_KEY !== 'string') {
+  if (typeof localStatus.API_URL !== 'string' || typeof localStatus.PUBLISHABLE_KEY !== 'string' ||
+    typeof localStatus.SECRET_KEY !== 'string') {
     throw new Error('Supabase local status is incompatible');
   }
   identityEnvironment = {
     SUPABASE_PUBLIC_URL: localStatus.API_URL,
     SUPABASE_PUBLISHABLE_KEY: localStatus.PUBLISHABLE_KEY,
+    SUPABASE_SECRET_KEY: localStatus.SECRET_KEY,
   };
   actorManifest = JSON.parse(await readFile(path.join(root, '.local', 'identity-actors.json'), 'utf8'));
   const configuredSeller = actorManifest.actors.seller_a;
@@ -1384,11 +1390,12 @@ it('administers existing users through the real caller-scoped API and CLI withou
   expect(response.status).toBe(200);
   expect(response.headers.get('cache-control')).toContain('no-store');
   const text = await response.text();
-  expect(text).not.toMatch(/email|password|access.?token|refresh.?token|raw_user_meta/i);
+  expect(text).not.toMatch(/password|access.?token|refresh.?token|raw_user_meta/i);
   const snapshot = JSON.parse(text) as {
     schemaVersion: number;
     users: Array<{ id: string; updatedAt: string; status: 'active' | 'inactive';
-      roles: string[]; sellerScopeIds: string[] }>;
+      roles: string[]; sellerScopeIds: string[];
+      auth?: { email: string; emailConfirmed: boolean; lastSignInAt: string | null } }>;
     parameters: { mutationAvailability: string; blockers: string[] };
   };
   expect(snapshot).toMatchObject({ schemaVersion: 1, parameters: {
@@ -1396,6 +1403,7 @@ it('administers existing users through the real caller-scoped API and CLI withou
   } });
   const target = snapshot.users.find((user) => user.id === manager.id);
   if (!target) throw new Error('Synthetic manager missing from administration projection');
+  expect(target.auth).toMatchObject({ email: manager.email });
 
   const forbidden = await fetch(`${origin}/api/v1/administration`, {
     headers: { Authorization: `Bearer ${manager.accessToken}` },
