@@ -1,9 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { Map as LeafletMap } from 'leaflet';
+import { proposeWeeklyRoutes } from '@cirne/domain';
+import { weeklyRouteCandidateSchema } from '@cirne/contracts';
+import axe from 'axe-core';
 
 const sellerId = '11111111-1111-4111-8111-111111111111';
 const longName = `Cliente prioritário <nome seguro> ${'NomeComercialExtenso'.repeat(6)}`;
-type ObservedWindow = Window & { __routeMap?: LeafletMap; __originalRouteMap?: LeafletMap };
+type ObservedWindow = Window & { __routeMap?: LeafletMap; __originalRouteMap?: LeafletMap; axe?: typeof axe };
 const candidate = (suffix: string, name: string, latitude: number, overrides: Record<string, unknown> = {}) => ({
   clientId: `40000000-0000-4000-8000-${suffix.padStart(12, '0')}`, name, status: 'active',
   daysSinceLastPurchase: 75, periodicityDays: 30, averageMonthlyVolume: 80,
@@ -17,7 +20,7 @@ const candidate = (suffix: string, name: string, latitude: number, overrides: Re
   ...overrides,
 });
 
-async function openMap(page: Page) {
+async function openMap(page: Page, review = false) {
   // Observe Leaflet through its public init hook; no production test hooks needed.
   await page.addInitScript(() => {
     let current: typeof import('leaflet') | undefined;
@@ -43,8 +46,26 @@ async function openMap(page: Page) {
         scrapBalanceState: 'creditor', scrapDebtKg: null,
       })], counts: { total: 2, eligible: 2, positioned: 2, inactiveLost: 0 } }) }));
   await page.route('https://tiles.example.test/**', (route) => route.fulfill({ status: 204 }));
+  if (review) {
+    const candidates = Array.from({ length: 15 }, (_, index) => weeklyRouteCandidateSchema.strip().parse(
+      candidate(String(index + 1), `${longName.slice(0, 145)} ${index + 1}`, -5.9)));
+    const proposal = proposeWeeklyRoutes({ weekStart: '2026-11-16', generatedAt: '2026-11-09T14:00:00-03:00',
+      origin: { kind: 'base_city', sellerId, city: 'Parnamirim', state: 'RN', ibgeCode: '2403251',
+        latitude: -5.91, longitude: -35.26, reference: 'municipal_seat', source: 'IBGE', configVersion: 1 }, candidates });
+    const stops = proposal.days.flatMap((day) => day.suggestions);
+    proposal.days = proposal.days.map((day, dayIndex) => ({ ...day,
+      suggestions: stops.slice(dayIndex * 3, dayIndex * 3 + 3).map((stop, index) => ({ ...stop, dayIndex,
+        plannedOrder: index + 1, locationPending: true, reasons: candidate('1', 'Cliente', -5.9).reasons })) }));
+    proposal.excluded = [{ clientId: candidates[0]!.clientId, name: candidates[0]!.name, reason: 'daily_capacity_reached' }];
+    await page.route('**/api/v1/management/weekly-route-proposals', (route) => route.fulfill({ status: 200,
+      contentType: 'application/json', body: JSON.stringify({ schemaVersion: 1, outcome: 'existing', record: {
+        schemaVersion: 1, proposalId: '60000000-0000-4000-8000-000000000001', version: 1, status: 'draft', proposal,
+        createdBy: sellerId, createdAt: proposal.generatedAt, updatedAt: proposal.generatedAt,
+        publishedBy: null, publishedAt: null, routeIds: [],
+      } }) }));
+  }
   await page.goto('/management/route-proposals');
-  await page.getByRole('button', { name: 'Abrir mapa inteligente' }).click();
+  await page.getByRole('button', { name: review ? 'Abrir ou criar sugestão' : 'Abrir mapa inteligente' }).click();
   await expect(page.getByText('2 clientes visíveis')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Enquadrar clientes' })).toBeEnabled();
   await page.waitForFunction(() => Boolean((window as ObservedWindow).__routeMap));
@@ -87,7 +108,7 @@ async function centerOnPriorityClient(page: Page) {
 
 async function freehandPoints(page: Page) {
   const canvas = page.getByLabel('Clientes elegíveis no mapa');
-  await expect(canvas).toHaveClass(/is-drawing/);
+  await expect(page.locator('.route-intelligence-canvas-wrap')).toHaveAttribute('data-drawing', 'true');
   await canvas.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
   const box = (await canvas.boundingBox())!;
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -100,6 +121,119 @@ async function freehandPoints(page: Page) {
 
 test.describe('weekly commercial route intelligence', () => {
   test.use({ serviceWorkers: 'block' });
+
+  test('contains map, compact summary, long stops and all actions across desktop, mobile and 200% reflow', async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await openMap(page, true);
+    await page.evaluate(() => { (window as ObservedWindow).__originalRouteMap = (window as ObservedWindow).__routeMap; });
+    await centerOnPriorityClient(page);
+    const original = await view(page);
+    const runtimeClasses = (await page.getByLabel('Clientes elegíveis no mapa').getAttribute('class'))!
+      .split(' ').filter((name) => name.startsWith('leaflet-')
+        && !['leaflet-grab', 'leaflet-touch-drag', 'leaflet-touch-zoom'].includes(name));
+    for (const width of [1920, 1440, 1280, 1024, 768, 390, 320, 195]) {
+      // A 390 CSS-pixel viewport at browser zoom 200% has 195 CSS pixels available.
+      await page.setViewportSize({ width, height: width === 195 ? 422 : 844 });
+      await expect.poll(() => page.evaluate(() => {
+        const map = (window as ObservedWindow).__routeMap!;
+        return map.getSize().x === map.getContainer().clientWidth;
+      })).toBe(true);
+      const measurements = await page.evaluate(() => {
+        const bounds = (element: Element) => { const box = element.getBoundingClientRect(); return {
+          left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width,
+        }; };
+        const main = document.querySelector('.weekly-route-page')!;
+        const map = document.querySelector('.route-intelligence-canvas')!;
+        const summary = document.querySelector('.weekly-route-summary')!;
+        const days = Array.from(document.querySelectorAll('.weekly-route-days > section'));
+        return { overflow: document.documentElement.scrollWidth > innerWidth, main: bounds(main), map: bounds(map),
+          overflowing: Array.from(document.querySelectorAll('body *')).filter((element) => {
+            if (element.closest('.leaflet-pane')) return false;
+            const box = element.getBoundingClientRect();
+            return box.width > 0 && box.right > innerWidth + 1;
+          }).map((element) => `${element.tagName}.${element.getAttribute('class') ?? ''}`).slice(0, 12),
+          summaryPosition: getComputedStyle(summary).position, summary: bounds(summary),
+          days: days.map((day) => ({ ...bounds(day), name: day.getAttribute('aria-label'),
+            scroll: getComputedStyle(day.querySelector('ol')!).overflowY })),
+          stops: Array.from(main.querySelectorAll('.route-planner-stop-list li')).map((stop) => ({
+            box: bounds(stop), buttons: Array.from(stop.querySelectorAll('button')).map(bounds),
+            textClipped: Array.from(stop.querySelectorAll('strong, small, .route-planner-stop-info span'))
+              .some((element) => element.scrollWidth > element.clientWidth + 1),
+          })),
+        };
+      });
+      expect(measurements.overflow, `page overflow at ${width}px: ${measurements.overflowing.join(', ')}`).toBe(false);
+      expect(measurements.map.left).toBeGreaterThanOrEqual(measurements.main.left);
+      expect(measurements.map.right).toBeLessThanOrEqual(measurements.main.right);
+      expect(measurements.map.bottom).toBeLessThanOrEqual(measurements.summary.top);
+      expect(measurements.summaryPosition).toBe('static');
+      expect(measurements.days.map((day) => day.name)).toEqual(['Dia 1', 'Dia 2', 'Dia 3', 'Dia 4', 'Dia 5']);
+      expect(Math.max(...measurements.days.map((day) => day.width)) - Math.min(...measurements.days.map((day) => day.width))).toBeLessThan(1);
+      for (const day of measurements.days) {
+        expect(day.right).toBeLessThanOrEqual(measurements.main.right);
+        expect(day.scroll).toBe('visible');
+      }
+      for (const stop of measurements.stops) {
+        expect(stop.textClipped).toBe(false);
+        expect(stop.buttons).toHaveLength(5);
+        for (const button of stop.buttons) {
+          expect(button.left).toBeGreaterThanOrEqual(stop.box.left);
+          expect(button.right).toBeLessThanOrEqual(stop.box.right + 1);
+          expect(button.bottom).toBeLessThanOrEqual(stop.box.bottom);
+          expect(button.width).toBeGreaterThanOrEqual(44);
+          expect(button.bottom - button.top).toBeGreaterThanOrEqual(44);
+        }
+      }
+      if ([1440, 390, 195].includes(width)) {
+        // Isolated component captures omit the shell's sticky overlay; its menu
+        // stacking and access are verified separately below with normal styles.
+        const style = '.management-mobile-header, .management-skip { visibility: hidden !important; }';
+        await page.locator('.route-intelligence-map').screenshot({ path: testInfo.outputPath(`weekly-map-${width}px.png`), style });
+        await page.locator('.weekly-route-summary').screenshot({ path: testInfo.outputPath(`weekly-summary-${width}px.png`), style });
+        await page.locator('.weekly-route-days > section').first().screenshot({ path: testInfo.outputPath(`weekly-day-${width}px.png`), style });
+      }
+      if (width === 390 || width === 195) {
+        await page.getByRole('button', { name: 'Menu', exact: true }).click();
+        const menu = page.getByRole('region', { name: 'Menu da gestão' });
+        await expect(menu).toBeVisible();
+        expect(await menu.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const target = document.elementFromPoint(box.left + box.width / 2, Math.min(box.bottom - 1, innerHeight - 1));
+          return element.contains(target);
+        })).toBe(true);
+        await page.keyboard.press('Escape');
+        await expect(menu).toHaveCount(0);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(async () => (await view(page)).zoom).toBe(original.zoom);
+    const afterResize = await view(page);
+    expect(Math.abs(afterResize.center[0]! - original.center[0]!)).toBeLessThan(.002);
+    expect(Math.abs(afterResize.center[1]! - original.center[1]!)).toBeLessThan(.002);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await page.getByRole('button', { name: /Caneta: desenhar área/ }).click();
+      for (const name of runtimeClasses) await expect(page.getByLabel('Clientes elegíveis no mapa')).toHaveClass(new RegExp(`\\b${name}\\b`));
+      await page.getByRole('button', { name: /Borracha: apagar desenho/ }).click();
+      for (const name of runtimeClasses) await expect(page.getByLabel('Clientes elegíveis no mapa')).toHaveClass(new RegExp(`\\b${name}\\b`));
+    }
+    expect(await page.evaluate(() => (window as ObservedWindow).__routeMap === (window as ObservedWindow).__originalRouteMap)).toBe(true);
+    // Day order in the DOM is also keyboard order; no visual CSS reordering.
+    const days = page.locator('.weekly-route-days > section');
+    for (let index = 0; index < 4; index += 1) {
+      await days.nth(index).getByRole('button', { name: /^Remover / }).last().focus();
+      await page.keyboard.press('Tab');
+      await expect(days.nth(index + 1).getByRole('button', { name: /^Descer / }).first()).toBeFocused();
+    }
+    await page.evaluate(axe.source);
+    const accessibility = await page.evaluate(async () => {
+      const engine = (window as ObservedWindow).axe!;
+      return engine.run(document.querySelector('.weekly-route-page')!, {
+        runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] },
+      });
+    });
+    expect(accessibility.violations).toEqual([]);
+  });
 
   test('keeps long safe popup content inside the map at 390px after zoom, with keyboard close', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });

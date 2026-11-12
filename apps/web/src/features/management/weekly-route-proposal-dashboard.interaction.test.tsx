@@ -212,4 +212,28 @@ describe('weekly route dashboard interactions', () => {
     expect(app.text()).toContain('Cliente 3');
     expect(app.text()).toContain('local/viagem escolhida');
   });
+
+  it('keeps the weekly summary and five ordered days independent from the daily workspace with every long-stop action', async () => {
+    const base = initialRecord();
+    const name = 'Cliente com nome comercial muito extenso '.repeat(4);
+    const reasons = ['Motivo operacional detalhado '.repeat(5)];
+    persisted = { ...base, proposal: { ...base.proposal, days: base.proposal.days.map((day, dayIndex) => ({
+      ...day, suggestions: [{ ...base.proposal.days[0]!.suggestions[0]!, clientId: clientId(dayIndex + 1),
+        dayIndex, name, reasons, locationPending: true }],
+    })) } };
+    const app = await open();
+    const tree = elements(app.render());
+    const summary = tree.find((item) => item.props.className === 'weekly-route-summary')!;
+    expect(summary.props['aria-label']).toBe('Resumo da sugestão semanal');
+    expect(renderToStaticMarkup(summary)).toContain('5 clientes na semana');
+    const days = tree.find((item) => item.props.className === 'weekly-route-days')!;
+    expect(Children.toArray(days.props.children as ReactNode).map((day) => (day as Element).props['aria-label']))
+      .toEqual(['Dia 1', 'Dia 2', 'Dia 3', 'Dia 4', 'Dia 5']);
+    expect(app.text()).not.toContain('route-planner-workspace');
+    const actions = elements(days).filter((item) => item.type === 'button');
+    expect(actions).toHaveLength(25);
+    for (const action of actions) expect(action.props['aria-label']).toContain(name);
+    expect(renderToStaticMarkup(days)).toContain(reasons[0]);
+    expect(renderToStaticMarkup(days).match(/Sem coordenadas/g)).toHaveLength(5);
+  });
 });

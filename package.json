@@ -82,6 +82,7 @@
     "@types/node": "24.13.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "axe-core": "4.14.0",
     "browserslist": "4.28.9",
     "eslint": "10.10.0",
     "secretlint": "13.0.5",

@@ -321,7 +321,7 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
     finally { setBusy(false); }
   }
 
-  return <main className="route-planner-page">
+  return <main className="route-planner-page weekly-route-page">
     <header className="route-planner-heading"><div><p className="manager-eyebrow">INTELIGÊNCIA DE ROTAS</p>
       <h1>Planejamento semanal de visitas</h1><p>A sugestão por regras protege a rotina da carteira e destaca oportunidades comerciais, proximidade e débito de sucata. O vendedor só recebe após sua aprovação.</p></div></header>
     <section className="route-planner-filters" aria-label="Parâmetros da sugestão">
@@ -354,7 +354,7 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
         {Array.from({ length: 5 }, (_, index) => <option key={index} value={index}>Dia {index + 1}</option>)}</select></label>
         <button type="button" disabled={busy || selectedClientIds.length === 0 || !record}
           onClick={addMapSelection}>Adicionar seleção ao rascunho</button></section></>}
-    {record && <><section className="route-planner-actions"><p>{record.status === 'draft' ? 'RASCUNHO VERSIONADO' : record.status.toUpperCase()}</p><h2>{total} clientes na semana</h2>
+    {record && <><section className="weekly-route-summary" aria-label="Resumo da sugestão semanal"><p className="weekly-route-status">{record.status === 'draft' ? 'RASCUNHO VERSIONADO' : record.status.toUpperCase()}</p><h2>{total} clientes na semana</h2>
       <dl><div><dt>Inteligência</dt><dd>Sugestão por regras auditáveis</dd></div><div><dt>Limite</dt><dd>10 por dia</dd></div>
         <div><dt>Origem</dt><dd>{record.proposal.origin.city}/{record.proposal.origin.state}</dd></div><div><dt>Versão</dt><dd>{record.version}</dd></div>
         <div><dt>Estratégia</dt><dd>{record.proposal.strategy.kind === 'trip' ? 'Semana de viagem' : record.proposal.strategy.kind === 'local' ? 'Semana local' : 'Distâncias pendentes'}
@@ -369,19 +369,19 @@ export function WeeklyRouteProposalDashboard({ mapConfig = { enabled: false, rea
           <div><strong>{item.name ?? planningNames.get(item.clientId) ?? 'Nome do cliente indisponível'}</strong>
             <small>{exclusionLabels[item.reason] ?? item.reason}</small></div></li>)}</ul>
       </details>}
-      <div className="route-planner-workspace">
-        {record.proposal.days.map((day, dayIndex) => <section className="route-planner-composition" key={day.serviceDate}>
+      <div className="weekly-route-days" role="group" aria-label="Composição dos cinco dias">
+        {record.proposal.days.map((day, dayIndex) => <section className="route-planner-composition" key={day.serviceDate} aria-label={`Dia ${dayIndex + 1}`}>
           <div className="route-planner-section-title"><div><p>DIA {dayIndex + 1}</p><h2>{new Intl.DateTimeFormat('pt-BR',{timeZone:'UTC'}).format(new Date(`${day.serviceDate}T12:00:00Z`))}</h2></div><span>{day.suggestions.length}/10{dayKinds.has(dayIndex) ? ` · ${dayKinds.get(dayIndex) === 'trip' ? 'viagem' : 'local'}` : ''}</span></div>
           {day.suggestions.length === 0 && <p className="route-planner-empty">Nenhum cliente elegível para este dia.</p>}
           <ol className="route-planner-stop-list">{day.suggestions.map((item, index) => <li key={item.clientId}>
             <span className="route-planner-order">{index + 1}</span><div className="route-planner-stop-info"><strong>{item.name}</strong>
               <small>{coverageLabel(item.coverageState)}</small><span>{item.reasons.join(' · ')}</span>
               {item.locationPending && <small className="route-planner-location-pending">Sem coordenadas · localização e distância pendentes.</small>}</div>
-            <div className="route-planner-stop-actions"><button type="button" disabled={index === 0 || busy} onClick={() => move(dayIndex,index,-1)}>↑</button>
-              <button type="button" disabled={index === day.suggestions.length - 1 || busy} onClick={() => move(dayIndex,index,1)}>↓</button>
-              <button type="button" disabled={dayIndex === 0 || busy || record.proposal.days[dayIndex - 1]!.suggestions.length >= 10} onClick={() => changeDay(dayIndex,index,-1)}>Dia anterior</button>
-              <button type="button" disabled={dayIndex === 4 || busy || record.proposal.days[dayIndex + 1]!.suggestions.length >= 10} onClick={() => changeDay(dayIndex,index,1)}>Dia seguinte</button>
-              <button type="button" className="is-danger" disabled={busy} onClick={() => remove(dayIndex,item.clientId)}>Remover</button></div></li>)}</ol>
+            <div className="route-planner-stop-actions"><button type="button" aria-label={`Subir ${item.name}`} disabled={index === 0 || busy} onClick={() => move(dayIndex,index,-1)}>↑</button>
+              <button type="button" aria-label={`Descer ${item.name}`} disabled={index === day.suggestions.length - 1 || busy} onClick={() => move(dayIndex,index,1)}>↓</button>
+              <button type="button" aria-label={`Dia anterior para ${item.name}`} disabled={dayIndex === 0 || busy || record.proposal.days[dayIndex - 1]!.suggestions.length >= 10} onClick={() => changeDay(dayIndex,index,-1)}>Dia anterior</button>
+              <button type="button" aria-label={`Dia seguinte para ${item.name}`} disabled={dayIndex === 4 || busy || record.proposal.days[dayIndex + 1]!.suggestions.length >= 10} onClick={() => changeDay(dayIndex,index,1)}>Dia seguinte</button>
+              <button type="button" aria-label={`Remover ${item.name}`} className="is-danger" disabled={busy} onClick={() => remove(dayIndex,item.clientId)}>Remover</button></div></li>)}</ol>
         </section>)}</div>
       {record.status === 'draft' && <aside className="route-planner-actions"><h2>Decisão do gestor</h2>
         <h3>Adicionar cliente da carteira</h3><label>Buscar por nome, CNPJ ou razão social<input value={clientQuery} onChange={(event) => setClientQuery(event.target.value)} /></label>
