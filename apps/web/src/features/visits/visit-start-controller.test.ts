@@ -51,6 +51,48 @@ function fixture() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('VisitStartController', () => {
+  it.each([false, true])('explains legacy recovery offline and preserves the login requirement (%s)', async (requiresLogin) => {
+    const f = fixture();
+    f.online.mockReturnValue(false);
+    Object.assign(f.snapshot.drafts[0]!, {
+      localStatus: 'completed', currentStep: 'sales', salesCompletionRecovery: true,
+      deviceCompletedAt: stamp,
+    });
+    if (requiresLogin) f.snapshot.outbox[0]!.lastErrorCode = 'AUTH_REQUIRED';
+    await f.controller.resume();
+    expect(f.publish.mock.lastCall?.[0]).toMatchObject({
+      draft: { localStatus: 'completed', deviceCompletedAt: stamp },
+      requiresLogin,
+      message: 'O checkout está preservado no aparelho. Informe as vendas para concluir o envio desta visita.' +
+        (requiresLogin ? ' Entre novamente com o mesmo vendedor para sincronizar.' : ''),
+    });
+    expect(f.service.synchronize).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
+
+  it('reconciles recovery despite an orphaned sales action-required event', async () => {
+    const f = fixture();
+    Object.assign(f.snapshot.drafts[0]!, {
+      localStatus: 'completed', currentStep: 'complete', salesCompletionRecovery: true,
+      deviceCompletedAt: stamp,
+    });
+    f.snapshot.outbox[0]!.status = 'action_required';
+    f.service.synchronize.mockImplementationOnce(async () => {
+      f.snapshot.outbox = [];
+      Object.assign(f.snapshot.drafts[0]!, {
+        salesCompletionRecovery: undefined, serverCompletedAt: stamp, persistenceState: 'synced',
+      });
+      return { attempted: 1, confirmed: 1, recoverable: 0, actionRequired: 0, authenticationRequired: false };
+    });
+    await f.controller.resume();
+    expect(f.service.synchronize).toHaveBeenCalledWith(partition);
+    expect(f.publish.mock.lastCall?.[0]).toMatchObject({
+      draft: { localStatus: 'completed', serverCompletedAt: stamp },
+      message: 'Registro da visita confirmado pelo servidor.', busy: false,
+    });
+    f.controller.dispose();
+  });
+
   it('reloads the durable version after a conflicting sales edit so the task can be reopened', async () => {
     const f = fixture();
     f.online.mockReturnValue(false);

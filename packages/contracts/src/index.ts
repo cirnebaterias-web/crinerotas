@@ -1524,6 +1524,16 @@ export const localVisitDraftSchema = z.object({
   }).optional(),
   localStatus: z.enum(['draft', 'completed']),
   deviceCompletedAt: z.iso.datetime({ offset: true }).optional(),
+  serverCompletedAt: z.iso.datetime({ offset: true }).optional(),
+  salesCompletionRecovery: z.boolean().optional(),
+  salesRecoveryResolution: z.object({
+    outcome: z.literal('server_already_completed'),
+    serverCompletedAt: z.iso.datetime({ offset: true }),
+    cancelledSalesEvents: z.array(z.object({
+      eventId: z.uuid(), idempotencyKey: z.uuid(), sequence: z.number().int().positive(),
+      payload: visitSalesSavedPayloadSchema,
+    }).strict()).min(1),
+  }).strict().optional(),
   persistenceState: z.enum(['saved_on_device', 'synced']),
   updatedAt: z.iso.datetime({ offset: true }),
 }).strict();

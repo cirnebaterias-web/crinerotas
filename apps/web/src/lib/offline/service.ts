@@ -739,7 +739,17 @@ export class OfflineFoundationService {
       evidenceDisabled: false,
       scrapEvidenceDisabled: false,
     };
-    const outbox = await this.syncEngine.synchronize(partition);
+    await this.repository.prepareVisitSalesRecovery(partition);
+    const recoveryVisitIds = (await this.repository.listDrafts(partition)).filter((draft) =>
+      draft.salesCompletionRecovery && !draft.serverCompletedAt).map((draft) => draft.offlineId);
+    const recovery = recoveryVisitIds.length ? await this.evidenceSync.synchronize(partition, { recoveryCheckoutsOnly: true }).catch(() => ({
+      attempted: 1, confirmed: 0, recoverable: 1, actionRequired: 0,
+      disabled: false, authenticationRequired: false, salesRecoveryBlocked: true, salesRecoveryReadyVisitIds: [] as string[],
+    })) : { attempted: 0, confirmed: 0, recoverable: 0, actionRequired: 0,
+      disabled: false, authenticationRequired: false, salesRecoveryBlocked: false, salesRecoveryReadyVisitIds: [] as string[] };
+    const blockedVisitIds = recoveryVisitIds.filter((id) => !recovery.salesRecoveryReadyVisitIds?.includes(id));
+    const outbox = blockedVisitIds.length ? await this.syncEngine.synchronize(partition, blockedVisitIds)
+      : await this.syncEngine.synchronize(partition);
     const scrap = await this.scrapEvidenceSync.synchronize(partition).catch(() => ({
       attempted: 1, confirmed: 0, recoverable: 1, actionRequired: 0,
       disabled: false, authenticationRequired: false,
@@ -753,12 +763,12 @@ export class OfflineFoundationService {
       authenticationRequired: false,
     }));
     return {
-      attempted: outbox.attempted + scrap.attempted + evidence.attempted,
-      confirmed: outbox.confirmed + scrap.confirmed + evidence.confirmed,
-      recoverable: outbox.recoverable + scrap.recoverable + evidence.recoverable,
-      actionRequired: outbox.actionRequired + scrap.actionRequired + evidence.actionRequired,
-      authenticationRequired: outbox.authenticationRequired || scrap.authenticationRequired || evidence.authenticationRequired,
-      evidenceDisabled: evidence.disabled,
+      attempted: recovery.attempted + outbox.attempted + scrap.attempted + evidence.attempted,
+      confirmed: recovery.confirmed + outbox.confirmed + scrap.confirmed + evidence.confirmed,
+      recoverable: recovery.recoverable + outbox.recoverable + scrap.recoverable + evidence.recoverable,
+      actionRequired: recovery.actionRequired + outbox.actionRequired + scrap.actionRequired + evidence.actionRequired,
+      authenticationRequired: recovery.authenticationRequired || outbox.authenticationRequired || scrap.authenticationRequired || evidence.authenticationRequired,
+      evidenceDisabled: recovery.disabled || evidence.disabled,
       scrapEvidenceDisabled: scrap.disabled,
     };
   }
@@ -816,6 +826,7 @@ export class OfflineFoundationService {
           : 'A janela local de 24 horas expirou. Os pendentes foram preservados; revalide online.',
       };
     }
+    await this.repository.prepareVisitSalesRecovery(partition);
     await this.repository.purgeExpiredVisitEvidence(partition, this.now());
     const [routes, drafts, outbox, workerReady, storagePersisted] = await Promise.all([
       this.repository.listRouteBundles(partition),

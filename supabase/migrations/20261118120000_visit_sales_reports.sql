@@ -19,6 +19,7 @@ end
 $membership$;
 grant usage on schema api, private, extensions to cirne_visit_sales_executor;
 grant create on schema api, private to cirne_visit_sales_executor;
+grant create on schema api to cirne_visit_executor;
 grant create on schema private to cirne_visit_executor, cirne_visit_detail_executor, cirne_scrap_executor;
 
 set local role cirne_identity_executor;
@@ -33,8 +34,65 @@ create policy clients_checkout_executor_read on api.clients for select to cirne_
     and visit.seller_id = (private.resolve_current_identity() ->> 'id')::uuid));
 reset role;
 set local role cirne_visit_executor;
+-- UPSERT must see the conflicting client row even when its previous observation
+-- belongs to another seller. Limit that visibility to the authenticated checkout
+-- operation, and restore the previous transaction-local context on every exit.
+create function private.can_checkout_observed_location(p_client_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $function$
+  select exists (select 1 from api.visits visit
+    where visit.id::text = current_setting('cirne.checkout_source_visit_id',true)
+      and visit.client_id = p_client_id
+      and visit.seller_id = (private.resolve_current_identity() ->> 'id')::uuid);
+$function$;
+revoke all on function private.can_checkout_observed_location(uuid) from public,anon,authenticated;
+alter function api.complete_visit(uuid,uuid,jsonb) rename to complete_visit_before_sales;
+revoke all on function api.complete_visit_before_sales(uuid,uuid,jsonb) from public,anon,authenticated;
+create function api.complete_visit(p_device_id uuid,p_idempotency_key uuid,p_command jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = '' as $function$
+declare
+  actor_id uuid := private.visit_attachment_identity();
+  v_offline_id uuid;
+  visit_id uuid;
+  v_visit_status text;
+  previous_context text := current_setting('cirne.checkout_source_visit_id',true);
+  result_document jsonb;
+begin
+  if p_device_id is null or p_idempotency_key is null
+    or jsonb_typeof(p_command) is distinct from 'object'
+    or p_command -> 'schemaVersion' is distinct from '1'::jsonb then
+    raise exception using errcode = 'P0001',message = 'VALIDATION_FAILED';
+  end if;
+  v_offline_id := (p_command ->> 'offlineId')::uuid;
+  if v_offline_id is null then
+    raise exception using errcode = 'P0001',message = 'VALIDATION_FAILED';
+  end if;
+  select visit.id,visit.status into visit_id,v_visit_status from api.visits visit
+    where visit.seller_id = actor_id and visit.device_id = p_device_id
+      and visit.offline_id = v_offline_id for update;
+  if not found then raise exception using errcode = 'P0001',message = 'FORBIDDEN'; end if;
+  if v_visit_status = 'completed' then
+    -- The canonical completion validator rechecks identity and the full original
+    -- payload hash, then returns the immutable result. The geofence wrapper
+    -- would continue past that replay and UPSERT an older client observation.
+    return api.complete_visit_without_geofence(p_device_id,p_idempotency_key,p_command);
+  end if;
+  perform set_config('cirne.checkout_source_visit_id',visit_id::text,true);
+  result_document := api.complete_visit_before_sales(p_device_id,p_idempotency_key,p_command);
+  perform set_config('cirne.checkout_source_visit_id',coalesce(previous_context,''),true);
+  return result_document;
+exception when invalid_text_representation then
+  perform set_config('cirne.checkout_source_visit_id',coalesce(previous_context,''),true);
+  raise exception using errcode = 'P0001',message = 'VALIDATION_FAILED';
+when others then
+  perform set_config('cirne.checkout_source_visit_id',coalesce(previous_context,''),true);
+  raise;
+end
+$function$;
+revoke all on function api.complete_visit(uuid,uuid,jsonb) from public,anon;
+grant execute on function api.complete_visit(uuid,uuid,jsonb) to authenticated;
 create policy observed_locations_checkout_executor_read on api.client_observed_locations
-  for select to cirne_visit_executor using (exists (select 1 from api.visits visit
+  for select to cirne_visit_executor using (private.can_checkout_observed_location(client_id)
+    or exists (select 1 from api.visits visit
     where visit.id = source_visit_id and visit.client_id = client_observed_locations.client_id
       and visit.seller_id = (private.resolve_current_identity() ->> 'id')::uuid));
 create policy observed_locations_checkout_executor_insert on api.client_observed_locations
@@ -42,7 +100,8 @@ create policy observed_locations_checkout_executor_insert on api.client_observed
     where visit.id = source_visit_id and visit.client_id = client_observed_locations.client_id
       and visit.seller_id = (private.resolve_current_identity() ->> 'id')::uuid));
 create policy observed_locations_checkout_executor_update on api.client_observed_locations
-  for update to cirne_visit_executor using (exists (select 1 from api.visits visit
+  for update to cirne_visit_executor using (private.can_checkout_observed_location(client_id)
+    or exists (select 1 from api.visits visit
     where visit.id = source_visit_id and visit.client_id = client_observed_locations.client_id
       and visit.seller_id = (private.resolve_current_identity() ->> 'id')::uuid))
   with check (exists (select 1 from api.visits visit
@@ -369,6 +428,7 @@ revoke all on function private.get_visit_detail(uuid,uuid,text) from public,anon
 reset role;
 
 revoke create on schema api, private from cirne_visit_sales_executor;
+revoke create on schema api from cirne_visit_executor;
 revoke create on schema private from cirne_visit_executor, cirne_visit_detail_executor, cirne_scrap_executor;
 do $membership$
 declare executor text;

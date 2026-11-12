@@ -21,11 +21,16 @@ begin
 end
 $membership$;
 grant create on schema private to cirne_scrap_executor, cirne_visit_detail_executor;
+grant create on schema api to cirne_visit_executor;
 
 set local role cirne_visit_executor;
 drop policy observed_locations_checkout_executor_read on api.client_observed_locations;
 drop policy observed_locations_checkout_executor_insert on api.client_observed_locations;
 drop policy observed_locations_checkout_executor_update on api.client_observed_locations;
+drop function private.can_checkout_observed_location(uuid);
+drop function api.complete_visit(uuid,uuid,jsonb);
+alter function api.complete_visit_before_sales(uuid,uuid,jsonb) rename to complete_visit;
+grant execute on function api.complete_visit(uuid,uuid,jsonb) to authenticated;
 drop trigger require_visit_sales_before_completion on api.visits;
 drop function private.lock_visit_for_sales(uuid,uuid);
 drop policy visits_sales_executor_read on api.visits;
@@ -67,6 +72,7 @@ drop policy action_reports_sales_executor_read on api.visit_commercial_action_re
 revoke select on api.visit_commercial_action_reports from cirne_visit_sales_executor;
 revoke usage on schema api, private, extensions from cirne_visit_sales_executor;
 revoke create on schema private from cirne_scrap_executor, cirne_visit_detail_executor;
+revoke create on schema api from cirne_visit_executor;
 do $membership$
 declare executor text;
 begin

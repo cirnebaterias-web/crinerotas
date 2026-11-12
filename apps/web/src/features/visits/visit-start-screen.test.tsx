@@ -62,13 +62,13 @@ function elements(node: ReactNode): Element[] {
   const element = node as Element;
   return [element, ...Children.toArray(element.props.children as ReactNode).flatMap(elements)];
 }
-function mount(draft = fixture(), step = 'start') {
+function mount(draft = fixture(), step = 'start', requiresLogin = false) {
   const location = { href: `https://example.invalid/visit/${id}?step=${step}` };
   vi.stubGlobal('window', { location, history: {
     replaceState(_state: unknown, _unused: string, url: URL) { location.href = String(url); },
     pushState(_state: unknown, _unused: string, url: URL) { location.href = String(url); },
   } });
-  const view: VisitStartView = { state: 'ready', draft, busy: false, requiresLogin: false, message: '',
+  const view: VisitStartView = { state: 'ready', draft, busy: false, requiresLogin, message: '',
     commercialActions: [], scrapPoints: [], evidence: [], attachments: [1, 2, 3].map((index) => ({
       schemaVersion: 1, userId: id, deviceId: id, offlineId: String(index), visitOfflineId: id,
       purpose: 'stock_evidence', contentType: 'image/jpeg', byteSize: 10, checksum: 'a'.repeat(64),
@@ -87,6 +87,14 @@ function mount(draft = fixture(), step = 'start') {
 afterEach(() => { hooks.current = null; vi.unstubAllGlobals(); });
 
 describe('VisitStartScreen sales task', () => {
+  it('offers route exit and same-seller login without leaving the recovery form', () => {
+    const draft = { ...fixture(), localStatus: 'completed' as const, salesCompletionRecovery: true };
+    const screen = mount(draft, 'sales', true);
+    const links = elements(screen.render()).filter((element) => element.type === 'a');
+    expect(links.some((link) => link.props.href === '/route')).toBe(true);
+    expect(links.some((link) => link.props.href === '/login')).toBe(true);
+    expect(elements(screen.render()).some((element) => element.type === VisitSalesStep)).toBe(true);
+  });
   it('places sales between commercial actions and scrap and keeps scrap locked without a declaration', () => {
     const app = mount();
     const tasks = elements(app.render()).filter((element) => element.type === 'button' && element.props.className === 'seller-task-card');
@@ -127,5 +135,61 @@ describe('VisitStartScreen sales task', () => {
     expect(app.text()).toContain('VISITA ENCERRADA');
     expect(app.text()).not.toContain('Salvar informe de venda');
     expect(window.location.href).toContain('step=complete');
+  });
+
+  it.each(['stock', 'prices', 'actions', 'scrap', 'review', 'complete'])(
+    'redirects recoverable completed legacy %s to only sales while preserving completion', (step) => {
+      const draft = { ...fixture(), localStatus: 'completed' as const, currentStep: 'sales' as const,
+        deviceCompletedAt: stamp, salesCompletionRecovery: true };
+      const app = mount(draft, step);
+      app.render();
+      const tree = elements(app.render());
+      const form = tree.find((element) => element.type === VisitSalesStep);
+      expect(form).toBeDefined();
+      expect(form!.props.draft).toMatchObject({ localStatus: 'completed', deviceCompletedAt: stamp, salesCompletionRecovery: true });
+      const html = app.text();
+      expect(html).toContain('não é necessário refazer as evidências');
+      expect(html).not.toContain('seller-task-list');
+      expect(html).not.toContain('Encerrar visita');
+      expect(html).not.toContain('Reabrir coleta');
+      expect(window.location.href).toContain('step=sales');
+    },
+  );
+
+  it('shows the preserved completion with pending sales after recovery is saved', () => {
+    const draft = { ...fixture(), localStatus: 'completed' as const, salesCompletionRecovery: true,
+      deviceCompletedAt: stamp, sales: { heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3,
+        version: 1, eventId: id, deviceSavedAt: stamp, persistenceState: 'saved_on_device' as const } };
+    const app = mount(draft, 'start');
+    app.render();
+    expect(app.text()).toContain('Informe salvo. Ao conectar, verificaremos primeiro o checkout original');
+    expect(app.text()).toContain('Editar informe pendente');
+    expect(app.text()).not.toContain('seller-task-list');
+    expect(window.location.href).toContain('step=complete');
+  });
+
+  it('blocks recovery once a server checkout ACK exists, even with a stale recovery flag', () => {
+    const draft = { ...fixture(), localStatus: 'completed' as const, salesCompletionRecovery: true,
+      serverCompletedAt: stamp, deviceCompletedAt: stamp };
+    const app = mount(draft, 'sales');
+    app.render();
+    const tree = elements(app.render());
+    expect(tree.some((element) => element.type === VisitSalesStep)).toBe(false);
+    expect(app.text()).toContain('VISITA ENCERRADA');
+    expect(app.text()).not.toContain('Editar informe pendente');
+    expect(app.text()).not.toContain('Informar vendas para concluir envio');
+    expect(window.location.href).toContain('step=complete');
+  });
+
+  it('explains a preserved local resolution when the server already completed the legacy checkout', () => {
+    const draft = { ...fixture(), localStatus: 'completed' as const, serverCompletedAt: stamp,
+      salesRecoveryResolution: { outcome: 'server_already_completed' as const, serverCompletedAt: stamp,
+        cancelledSalesEvents: [{ eventId: id, idempotencyKey: id, sequence: 2,
+          payload: { offlineId: id, deviceSavedAt: stamp, expectedVersion: 0,
+            heliarQuantity: 0, americaQuantity: 2, stradaDurexQuantity: 3 } }] } };
+    const app = mount(draft, 'complete');
+    expect(app.text()).toContain('O servidor já havia confirmado o checkout');
+    expect(app.text()).toContain('o registro dessa resolução foi preservado');
+    expect(app.text()).not.toContain('Editar informe pendente');
   });
 });

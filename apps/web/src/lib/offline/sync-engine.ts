@@ -16,6 +16,7 @@ export interface SyncQueueRepository {
     now: string,
     leaseUntil: string,
     limit?: number,
+    excludedVisitIds?: readonly string[],
   ): Promise<OfflineOutboxEvent[]>;
   recordOutboxFailure(
     partition: OfflinePartition,
@@ -63,22 +64,23 @@ export class SyncEngine {
     private readonly random: () => number = Math.random,
   ) {}
 
-  synchronize(partition: OfflinePartition) {
+  synchronize(partition: OfflinePartition, excludedVisitIds: readonly string[] = []) {
     const key = partitionKey(partition);
     const running = activeRuns.get(key);
     if (running) return running;
-    const next = this.run(partition).finally(() => activeRuns.delete(key));
+    const next = this.run(partition, excludedVisitIds).finally(() => activeRuns.delete(key));
     activeRuns.set(key, next);
     return next;
   }
 
-  private async run(partition: OfflinePartition): Promise<SyncRunSummary> {
+  private async run(partition: OfflinePartition, excludedVisitIds: readonly string[]): Promise<SyncRunSummary> {
     const startedAt = this.now();
     const events = await this.repository.reserveOutboxBatch(
       partition,
       startedAt.toISOString(),
       new Date(startedAt.getTime() + syncLeaseMs).toISOString(),
       25,
+      ...(excludedVisitIds.length ? [excludedVisitIds] : []),
     );
     if (events.length === 0) return emptySummary();
 

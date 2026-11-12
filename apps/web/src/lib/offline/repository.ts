@@ -493,15 +493,31 @@ export class OfflineRepository {
         ];
         const draft = await this.db.visitDrafts.get(draftKey);
         if (!draft) throw new SyncEventPersistenceError('Visita local não encontrada após conclusão.');
+        const cancelledSales = draft.salesCompletionRecovery && draft.sales?.persistenceState !== 'synced'
+          ? (await this.db.outboxEvents.where('[userId+deviceId+aggregateId+sequence]')
+            .between([partition.userId, partition.deviceId, evidence.visitOfflineId, Dexie.minKey],
+              [partition.userId, partition.deviceId, evidence.visitOfflineId, Dexie.maxKey]).toArray())
+            .filter((event) => event.operation === 'visit.sales.saved.v1') : [];
+        // The original checkout ACK proves these new local intentions can never be
+        // applied. Retain their exact intent in a durable resolution before cancelling.
+        for (const event of cancelledSales) {
+          await this.db.outboxEvents.delete([partition.userId, partition.deviceId, event.eventId]);
+        }
         const remainingEvents = await this.db.outboxEvents
           .where('[userId+deviceId+aggregateId+sequence]')
           .between(
             [partition.userId, partition.deviceId, evidence.visitOfflineId, Dexie.minKey],
             [partition.userId, partition.deviceId, evidence.visitOfflineId, Dexie.maxKey],
           ).count();
-        if (remainingEvents === 0) {
-          await this.db.visitDrafts.put(localVisitDraftSchema.parse({ ...draft, persistenceState: 'synced' }));
-        }
+        await this.db.visitDrafts.put(localVisitDraftSchema.parse({ ...draft,
+          serverCompletedAt: serverSyncedAt, salesCompletionRecovery: undefined, currentStep: 'complete',
+          ...(cancelledSales.length ? { sales: undefined, salesRecoveryResolution: {
+            outcome: 'server_already_completed', serverCompletedAt: serverSyncedAt,
+            cancelledSalesEvents: cancelledSales.map((event) => ({ eventId: event.eventId,
+              idempotencyKey: event.idempotencyKey, sequence: event.sequence, payload: event.payload })),
+          } } : {}),
+          ...(remainingEvents === 0 ? { persistenceState: 'synced' } : {}),
+        }));
       }
       return updatedEvidence;
     });
@@ -519,10 +535,13 @@ export class OfflineRepository {
 
   async purgeExpiredVisitEvidence(partitionInput: OfflinePartition, now: string) {
     const partition = offlinePartitionSchema.parse(partitionInput);
-    return this.db.transaction('rw', this.db.visitEvidence, this.db.attachments, async () => {
+    return this.db.transaction('rw', this.db.visitEvidence, this.db.attachments, this.db.visitDrafts, async () => {
+      const recovering = new Set((await this.db.visitDrafts.where('[userId+deviceId]')
+        .equals([partition.userId, partition.deviceId]).toArray())
+        .filter((draft) => draft.salesCompletionRecovery && !draft.serverCompletedAt).map((draft) => draft.offlineId));
       const expired = await this.db.visitEvidence.where('[userId+deviceId]').equals([
         partition.userId, partition.deviceId,
-      ]).filter((item) => item.expiresAt <= now).toArray();
+      ]).filter((item) => item.expiresAt <= now && !recovering.has(item.visitOfflineId)).toArray();
       for (const evidence of expired) {
         if (evidence.attachmentOfflineId) {
           await this.db.attachments.delete([partition.userId, partition.deviceId, evidence.attachmentOfflineId]);
@@ -620,6 +639,7 @@ export class OfflineRepository {
     now: string,
     leaseUntil: string,
     limit = 25,
+    excludedVisitIds: readonly string[] = [],
   ) {
     const partition = offlinePartitionSchema.parse(partitionInput);
     const nowMs = Date.parse(now);
@@ -641,6 +661,7 @@ export class OfflineRepository {
 
       for (const event of all) {
         if (selected.length >= limit) break;
+        if (event.aggregateType === 'visit' && excludedVisitIds.includes(event.aggregateId)) continue;
         const aggregateKey = `${event.aggregateType}:${event.aggregateId}`;
         if (blockedAggregates.has(aggregateKey)) continue;
         const eligible = event.status === 'pending' ||
@@ -1049,12 +1070,41 @@ export class OfflineRepository {
     });
   }
 
+  /** Upgrade only a locally completed legacy visit whose original checkout is still pending. */
+  async prepareVisitSalesRecovery(partitionInput: OfflinePartition) {
+    const partition = offlinePartitionSchema.parse(partitionInput);
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.visitEvidence, async () => {
+      const drafts = await this.db.visitDrafts.where('[userId+deviceId]')
+        .equals([partition.userId, partition.deviceId]).toArray();
+      for (const draft of drafts) {
+        if (draft.localStatus !== 'completed') continue;
+        const checkout = await this.db.visitEvidence.where('[userId+deviceId+visitOfflineId+kind]')
+          .equals([partition.userId, partition.deviceId, draft.offlineId, 'checkout']).first();
+        if (checkout?.status === 'synced' && checkout.serverSyncedAt && !draft.serverCompletedAt) {
+          await this.db.visitDrafts.put(localVisitDraftSchema.parse({ ...draft,
+            serverCompletedAt: checkout.serverSyncedAt, salesCompletionRecovery: undefined, currentStep: 'complete' }));
+        } else if (!draft.serverCompletedAt && !draft.sales && checkout?.status === 'pending' && !checkout.serverSyncedAt) {
+          await this.db.visitDrafts.put(localVisitDraftSchema.parse({ ...draft,
+            salesCompletionRecovery: true, currentStep: 'sales', persistenceState: 'saved_on_device' }));
+        }
+      }
+    });
+  }
+
   async saveVisitSalesAndEnqueue(command: SaveVisitSalesCommand) {
     const partition = offlinePartitionSchema.parse(command.partition);
-    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, async () => {
+    return this.db.transaction('rw', this.db.visitDrafts, this.db.outboxEvents, this.db.visitEvidence, async () => {
       const currentDraft = await this.db.visitDrafts.get([partition.userId, partition.deviceId, command.offlineId]);
       if (!currentDraft) throw new Error('Visita não encontrada nesta partição offline.');
       assertPartition(partition, currentDraft);
+      if (currentDraft.localStatus === 'completed') {
+        const checkout = await this.db.visitEvidence.where('[userId+deviceId+visitOfflineId+kind]')
+          .equals([partition.userId, partition.deviceId, command.offlineId, 'checkout']).first();
+        if (!currentDraft.salesCompletionRecovery || currentDraft.serverCompletedAt ||
+            checkout?.status !== 'pending' || checkout.serverSyncedAt) {
+          throw new Error('A visita já foi encerrada; o informe não pode ser alterado.');
+        }
+      }
       if (command.expectedVersion !== undefined && command.expectedVersion !== (currentDraft.sales?.version ?? 0)) {
         throw Object.assign(new Error('O informe foi alterado em outra tela. Reabra a etapa para conferir os valores atuais.'),
           { code: 'VERSION_CONFLICT' });

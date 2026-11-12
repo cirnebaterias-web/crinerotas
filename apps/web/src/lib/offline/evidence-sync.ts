@@ -23,6 +23,7 @@ export class EvidenceSyncError extends Error {
     public readonly status: number,
     public readonly disabled: boolean,
     public readonly actionRequired: boolean,
+    public readonly code?: string,
   ) { super(`evidence_sync_${status}`); }
 }
 
@@ -50,6 +51,7 @@ async function readResponse(response: Response) {
       response.status,
       response.status === 503 && code === 'DEPENDENCY_UNAVAILABLE',
       response.status >= 400 && response.status < 500 && ![401, 409].includes(response.status),
+      code,
     );
   }
   return body;
@@ -130,6 +132,8 @@ export interface EvidenceSyncSummary {
   actionRequired: number;
   disabled: boolean;
   authenticationRequired: boolean;
+  salesRecoveryBlocked?: boolean;
+  salesRecoveryReadyVisitIds?: string[];
 }
 
 function evidencePayload(evidence: LocalVisitEvidence) {
@@ -157,15 +161,22 @@ export class EvidenceSyncCoordinator {
     private readonly transport: EvidenceSyncTransport,
   ) {}
 
-  async synchronize(partition: OfflinePartition): Promise<EvidenceSyncSummary> {
+  async synchronize(partition: OfflinePartition, options: { recoveryCheckoutsOnly?: boolean } = {}): Promise<EvidenceSyncSummary> {
     const pending = await this.repository.listPendingVisitEvidence(partition);
     const summary: EvidenceSyncSummary = {
       attempted: 0, confirmed: 0, recoverable: 0, actionRequired: 0, disabled: false,
       authenticationRequired: false,
     };
     for (const evidence of pending) {
+      if (options.recoveryCheckoutsOnly && evidence.kind !== 'checkout') continue;
       const draft = await this.repository.getDraft(partition, evidence.visitOfflineId);
       if (!draft?.canonicalVisitId) continue;
+      if (options.recoveryCheckoutsOnly && !draft.salesCompletionRecovery) continue;
+      if (!options.recoveryCheckoutsOnly && draft.salesCompletionRecovery &&
+          draft.sales?.persistenceState !== 'synced') continue;
+      // Recovery deliberately replays the original checkout key: an older server may
+      // already have completed it before its response was lost. The RPC either returns
+      // that immutable ACK or requires the missing sales report before a new completion.
       if (evidence.kind === 'checkout' && draft.scrap?.availability === 'collected') {
         let verified = true;
         for (const offlineId of draft.scrap.collection!.attachmentOfflineIds) {
@@ -214,8 +225,14 @@ export class EvidenceSyncCoordinator {
           partition, evidence.offlineId, serverSyncedAt,
         );
         summary.confirmed += 1;
+        if (options.recoveryCheckoutsOnly) (summary.salesRecoveryReadyVisitIds ??= []).push(evidence.visitOfflineId);
       } catch (error) {
         const failure = error instanceof EvidenceSyncError ? error : new EvidenceSyncError(0, false, false);
+        if (options.recoveryCheckoutsOnly && failure.code !== 'EVENT_OUT_OF_ORDER') {
+          summary.salesRecoveryBlocked = true;
+        } else if (options.recoveryCheckoutsOnly) {
+          (summary.salesRecoveryReadyVisitIds ??= []).push(evidence.visitOfflineId);
+        }
         if (failure.disabled) {
           summary.disabled = true;
           summary.attempted -= 1;
@@ -230,7 +247,7 @@ export class EvidenceSyncCoordinator {
         }
       }
     }
-    if (summary.disabled || summary.authenticationRequired) return summary;
+    if (summary.disabled || summary.authenticationRequired || options.recoveryCheckoutsOnly) return summary;
     const actionAttachments = await this.repository.listPendingCommercialActionAttachments(partition);
     for (const attachment of actionAttachments) {
       const draft = await this.repository.getDraft(partition, attachment.visitOfflineId);

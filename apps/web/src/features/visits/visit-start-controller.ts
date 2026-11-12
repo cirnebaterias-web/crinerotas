@@ -477,7 +477,7 @@ export class VisitStartController {
       !this.evidence.some((item) => item.status === 'pending') && !scrapPhotoPending)) return;
     const event = snapshot.outbox.find((candidate) => candidate.aggregateId === this.offlineId);
     const evidencePending = this.evidence.some((item) => item.status === 'pending') || scrapPhotoPending;
-    if (event?.status === 'action_required' || (!event && !evidencePending)) return;
+    if ((event?.status === 'action_required' && !draft.salesCompletionRecovery) || (!event && !evidencePending)) return;
     clearTimeout(this.retryTimer);
     this.emit({
       state: 'ready', draft, message: 'Sincronizando em segundo plano…', busy: true,
@@ -546,6 +546,10 @@ export class VisitStartController {
       || (scrapEvidencePending && !this.scrapEvidenceSyncDisabled);
     if (!event && retryableEvidencePending && !evidenceActionRequired && this.online() && !requiresLogin) {
       this.retryTimer = setTimeout(() => { void this.resume(); }, this.evidenceRetryDelayMs);
+    }
+    if (draft.salesCompletionRecovery && !draft.sales && !draft.serverCompletedAt) {
+      message = 'O checkout está preservado no aparelho. Informe as vendas para concluir o envio desta visita.' +
+        (requiresLogin ? ' Entre novamente com o mesmo vendedor para sincronizar.' : '');
     }
     this.emit({
       state: 'ready', draft, message, busy: false, requiresLogin,

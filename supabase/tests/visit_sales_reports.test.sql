@@ -20,6 +20,8 @@ select ok(not has_function_privilege('authenticated','private.sync_event(uuid,js
   'private sync remains inaccessible to callers');
 select ok(not has_function_privilege('authenticated','private.lock_visit_for_sales(uuid,uuid)','EXECUTE'),
   'row locking helper is private');
+select ok(not has_function_privilege('authenticated','api.complete_visit_before_sales(uuid,uuid,jsonb)','EXECUTE'),
+  'checkout cannot bypass the operation-scoped visibility wrapper');
 select ok((select relrowsecurity and relforcerowsecurity from pg_class where oid='api.visit_sales_reports'::regclass),
   'sales declarations force RLS');
 select ok(not (select rolcanlogin or rolsuper or rolbypassrls from pg_roles where rolname='cirne_visit_sales_executor'),
@@ -91,6 +93,8 @@ select jsonb_build_object('schemaVersion',1,'offlineId','44000000-0000-4000-8000
 select throws_ok(format('select api.complete_visit(''44000000-0000-4000-8000-000000000002'',
   ''44000000-0000-4000-8000-000000000021'',%L::jsonb)',(:'checkout_command')),
   'P0001','EVENT_OUT_OF_ORDER','checkout RPC also requires a complete sales declaration');
+select is(nullif(current_setting('cirne.checkout_source_visit_id',true),''),null::text,
+  'failed checkout restores its prior observation context');
 reset role;
 -- This direct status transition exercises the same non-bypassable guard as checkout.
 set local role cirne_visit_executor;
@@ -201,8 +205,9 @@ reset role;
 update api.user_profiles set status='active' where id=:'seller';
 set local role authenticated;
 select set_config('request.jwt.claim.sub',:'seller',true);
-select is(api.complete_visit('44000000-0000-4000-8000-000000000002','44000000-0000-4000-8000-000000000021',
-  (:'checkout_command')::jsonb)->>'status','completed','checkout succeeds once the declaration exists');
+select api.complete_visit('44000000-0000-4000-8000-000000000002','44000000-0000-4000-8000-000000000021',
+  (:'checkout_command')::jsonb) as first_checkout_result \gset
+select is((:'first_checkout_result')::jsonb->>'status','completed','checkout succeeds once the declaration exists');
 select throws_ok(format('select api.save_visit_sales(''44000000-0000-4000-8000-000000000002'',
   ''44000000-0000-4000-8000-000000000019'',%L::jsonb)',
   ((:'first_command')::jsonb||'{"expectedVersion":2}')::text),'P0001','VERSION_CONFLICT','new writes after checkout fail');
@@ -238,6 +243,131 @@ select is((select count(id)::integer from api.clients where id='44000000-0000-40
   0,'checkout client RLS excludes another seller');
 select is((select count(*)::integer from api.client_observed_locations where source_visit_id=:'visit_id'),
   0,'observed-location RLS excludes another seller');
+reset role;
+
+-- The observed-location PK is client_id: a later authorized seller must replace
+-- an earlier seller's observation through the real checkout UPSERT.
+insert into api.client_seller_scopes(client_id,seller_id,assigned_by)
+values('44000000-0000-4000-8000-000000000001',:'other',:'admin');
+insert into api.user_seller_scopes(manager_user_id,seller_user_id)
+values(:'manager',:'other');
+set local role authenticated;
+select set_config('request.jwt.claim.sub',:'manager',true);
+select api.create_route_draft(jsonb_build_object('schemaVersion',1,'serviceDate','2099-11-19','sellerId',:'other',
+  'stops',jsonb_build_array(jsonb_build_object('clientId','44000000-0000-4000-8000-000000000001',
+    'plannedOrder',1,'priority',0)))) as second_seller_route \gset
+select api.publish_route(((:'second_seller_route')::jsonb->>'routeId')::uuid,1);
+reset role;
+select id as second_seller_stop from api.route_version_stops
+where route_version_id=((:'second_seller_route')::jsonb->>'routeVersionId')::uuid \gset
+set local role authenticated;
+select set_config('request.jwt.claim.sub',:'other',true);
+select api.start_visit('44000000-0000-4000-8000-000000000040','44000000-0000-4000-8000-000000000041',
+  jsonb_build_object('schemaVersion',1,'offlineId','44000000-0000-4000-8000-000000000042',
+    'routeVersionStopId',:'second_seller_stop','deviceStartedAt','2099-11-19T12:00:00Z')) as second_seller_visit \gset
+select api.save_visit_checkin_evidence('44000000-0000-4000-8000-000000000040','44000000-0000-4000-8000-000000000043',
+  jsonb_build_object('schemaVersion',1,'offlineId','44000000-0000-4000-8000-000000000042',
+    'evidence',jsonb_build_object('offlineId','44000000-0000-4000-8000-000000000044',
+      'capturedAt','2099-11-19T12:00:00Z','location',jsonb_build_object('latitude','-7.116','longitude','-34.865'),
+      'issues',jsonb_build_array('camera_unavailable'),'justification','Dispositivo sintetico sem camera')));
+reset role;
+select (:'second_seller_visit')::jsonb->>'visitId' as second_seller_visit_id \gset
+insert into api.visit_commercial_action_reports(visit_id,competitor_availability,last_event_id,device_saved_at)
+values(:'second_seller_visit_id','not_identified','44000000-0000-4000-8000-000000000045',now());
+set local role cirne_visit_executor;
+insert into api.stock_snapshots(visit_id,heliar_quantity,moura_quantity,last_event_id,device_saved_at,server_saved_at)
+values(:'second_seller_visit_id',0,0,'44000000-0000-4000-8000-000000000046',now(),now());
+insert into api.competitor_price_reports(visit_id,parameter_set_id,availability,last_event_id,device_saved_at,server_saved_at)
+select id,parameter_set_id,'available','44000000-0000-4000-8000-000000000047',now(),now()
+from api.visits where id=:'second_seller_visit_id';
+select is((select count(*)::integer from api.client_observed_locations
+  where client_id='44000000-0000-4000-8000-000000000001'),0,
+  'a second seller cannot read the previous seller observation before checkout');
+reset role;
+set local role authenticated;
+select api.save_visit_sales('44000000-0000-4000-8000-000000000040','44000000-0000-4000-8000-000000000048',
+  ((:'first_command')::jsonb||'{"offlineId":"44000000-0000-4000-8000-000000000042","deviceSavedAt":"2099-11-19T12:01:00Z"}'));
+select api.sync_event('44000000-0000-4000-8000-000000000040',
+  ((:'legacy_scrap')::jsonb||jsonb_build_object('eventId','44000000-0000-4000-8000-000000000049',
+    'idempotencyKey','44000000-0000-4000-8000-000000000050','sequence',3,
+    'aggregateId','44000000-0000-4000-8000-000000000042','occurredAt','2099-11-19T12:02:00Z',
+    'payload',((:'legacy_scrap')::jsonb->'payload')||
+      '{"offlineId":"44000000-0000-4000-8000-000000000042","deviceSavedAt":"2099-11-19T12:02:00Z"}')));
+select jsonb_build_object('schemaVersion',1,'offlineId','44000000-0000-4000-8000-000000000042',
+  'deviceCompletedAt','2099-11-19T12:05:00Z','evidence',jsonb_build_object(
+    'offlineId','44000000-0000-4000-8000-000000000051','capturedAt','2099-11-19T12:05:00Z',
+    'location',jsonb_build_object('latitude','-7.116','longitude','-34.865'),
+    'issues',jsonb_build_array('camera_unavailable'),'justification','Dispositivo sintetico sem camera')) as second_checkout \gset
+select is(api.complete_visit('44000000-0000-4000-8000-000000000040','44000000-0000-4000-8000-000000000052',
+  (:'second_checkout')::jsonb)->>'status','completed',
+  'a second authorized seller can checkout the same client after the first seller');
+select is(nullif(current_setting('cirne.checkout_source_visit_id',true),''),null::text,
+  'successful checkout clears its temporary observation context');
+reset role;
+set local role cirne_visit_executor;
+select is((select source_visit_id::text from api.client_observed_locations
+  where client_id='44000000-0000-4000-8000-000000000001'),:'second_seller_visit_id',
+  'the same client observation is replaced by the second seller current visit');
+select to_jsonb(observation) as second_seller_observation from api.client_observed_locations observation
+where client_id='44000000-0000-4000-8000-000000000001' \gset
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claim.sub',:'seller',true);
+select is(api.complete_visit('44000000-0000-4000-8000-000000000002','44000000-0000-4000-8000-000000000021',
+  (:'checkout_command')::jsonb),(:'first_checkout_result')::jsonb,
+  'old checkout replay returns the original complete canonical result');
+select is(nullif(current_setting('cirne.checkout_source_visit_id',true),''),null::text,
+  'old checkout replay does not leave an observation write context');
+select throws_ok(format('select api.complete_visit(''44000000-0000-4000-8000-000000000002'',
+  ''44000000-0000-4000-8000-000000000021'',%L::jsonb)',
+  ((:'checkout_command')::jsonb||'{"deviceCompletedAt":"2099-11-18T12:06:00Z"}')::text),
+  'P0001','IDEMPOTENCY_KEY_REUSED','old checkout replay still rejects a divergent complete payload');
+select set_config('request.jwt.claim.sub',:'other',true);
+select throws_ok(format('select api.complete_visit(''44000000-0000-4000-8000-000000000002'',
+  ''44000000-0000-4000-8000-000000000021'',%L::jsonb)',(:'checkout_command')),
+  'P0001','FORBIDDEN','another seller cannot replay the first seller checkout');
+reset role;
+update api.user_profiles set status='inactive' where id=:'seller';
+set local role authenticated;
+select set_config('request.jwt.claim.sub',:'seller',true);
+select throws_ok(format('select api.complete_visit(''44000000-0000-4000-8000-000000000002'',
+  ''44000000-0000-4000-8000-000000000021'',%L::jsonb)',(:'checkout_command')),
+  'P0001','FORBIDDEN','an inactive original seller cannot replay its completed checkout');
+reset role;
+update api.user_profiles set status='active' where id=:'seller';
+select ok((select count(*)=1 from private.audit_events where target_id=:'visit_id' and action='visit.completed.v1')
+  and (select count(*)=1 from api.location_events where visit_id=:'visit_id' and kind='completion'),
+  'old checkout replay creates no new completion audit or location facts');
+set local role cirne_visit_executor;
+select set_config('request.jwt.claim.sub',:'other',true);
+select is((select to_jsonb(observation) from api.client_observed_locations observation
+  where client_id='44000000-0000-4000-8000-000000000001'),(:'second_seller_observation')::jsonb,
+  'replay of checkout A preserves the complete newer observation from B');
+select throws_ok(format('update api.client_observed_locations set source_visit_id=%L
+  where client_id=''44000000-0000-4000-8000-000000000001''',:'visit_id'),
+  '42501',null,'a seller cannot repoint an observation to another seller visit');
+reset role;
+select id as unrelated_seller from auth.users where raw_user_meta_data->>'actorKey'='seller_e2e' \gset
+set local role cirne_visit_executor;
+select set_config('request.jwt.claim.sub',:'unrelated_seller',true);
+select set_config('cirne.checkout_source_visit_id',:'second_seller_visit_id',true);
+select is((select count(*)::integer from api.client_observed_locations
+  where client_id='44000000-0000-4000-8000-000000000001'),0,
+  'an unrelated seller cannot read the shared client observation');
+select throws_ok(format('insert into api.client_observed_locations(client_id,source_visit_id,checkin_position,
+  checkout_position,observed_position,observed_at) values(''44000000-0000-4000-8000-000000000001'',%L,
+  extensions.st_setsrid(extensions.st_makepoint(-34.865,-7.116),4326)::extensions.geography,
+  extensions.st_setsrid(extensions.st_makepoint(-34.865,-7.116),4326)::extensions.geography,
+  extensions.st_setsrid(extensions.st_makepoint(-34.865,-7.116),4326)::extensions.geography,now())
+  on conflict(client_id) do update set source_visit_id=excluded.source_visit_id,
+    observed_position=excluded.observed_position',:'second_seller_visit_id'),
+  '42501',null,'an unrelated seller cannot upsert another seller observation');
+select set_config('cirne.checkout_source_visit_id','',true);
+reset role;
+set local role authenticated;
+select throws_ok(format('select api.complete_visit(''44000000-0000-4000-8000-000000000040'',
+  ''44000000-0000-4000-8000-000000000053'',%L::jsonb)',(:'second_checkout')),
+  'P0001','FORBIDDEN','an unrelated seller cannot establish another seller checkout context');
 reset role;
 
 select * from finish();

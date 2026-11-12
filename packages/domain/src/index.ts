@@ -435,13 +435,14 @@ export function createVisitSalesMutation(input: {
   ids: { eventId: string; idempotencyKey: string };
 }): { draft: LocalVisitDraft; event: Extract<OfflineOutboxEvent, { operation: 'visit.sales.saved.v1' }> } {
   const currentDraft = localVisitDraftSchema.parse(input.draft);
-  if (!currentDraft.commercialActions || currentDraft.localStatus === 'completed') {
+  if (!currentDraft.commercialActions || currentDraft.serverCompletedAt ||
+      (currentDraft.localStatus === 'completed' && !currentDraft.salesCompletionRecovery)) {
     throw new VisitDomainError('VERSION_CONFLICT', 'O informe exige ações comerciais e visita em andamento.');
   }
   const values = visitSalesInputSchema.parse(input.values);
   const expectedVersion = currentDraft.sales?.version ?? 0;
   const draft = localVisitDraftSchema.parse({
-    ...currentDraft, currentStep: currentDraft.scrap ? 'review' : 'scrap',
+    ...currentDraft, currentStep: currentDraft.localStatus === 'completed' ? 'complete' : currentDraft.scrap ? 'review' : 'scrap',
     sales: { ...values, version: expectedVersion + 1, eventId: input.ids.eventId,
       deviceSavedAt: input.deviceSavedAt, persistenceState: 'saved_on_device' },
     persistenceState: 'saved_on_device', updatedAt: input.deviceSavedAt,
