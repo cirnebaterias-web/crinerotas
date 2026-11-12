@@ -26,6 +26,13 @@ const identitySchema = z.object({
   SUPABASE_PUBLIC_URL: httpOrigin,
   SUPABASE_PUBLISHABLE_KEY: z.string().trim().min(20).max(512),
 });
+const authAdminSchema = identitySchema.extend({
+  SUPABASE_SECRET_KEY: z.string().trim().min(20).max(512),
+}).superRefine((value, context) => {
+  if (value.SUPABASE_SECRET_KEY === value.SUPABASE_PUBLISHABLE_KEY) {
+    context.addIssue({ code: 'custom', path: ['SUPABASE_SECRET_KEY'], message: 'Chave privilegiada invalida.' });
+  }
+});
 
 const evidenceSchema = z.object({
   EVIDENCE_REMOTE_SYNC_ENABLED: z.enum(['true', 'false']).default('false')
@@ -74,6 +81,12 @@ export function readIdentityConfig(env: Record<string, string | undefined>) {
     const keys = [...new Set(result.error.issues.map((issue) => issue.path[0]))].join(', ');
     throw new Error(`Configuração de identidade inválida: ${keys}. Confira o exemplo de ambiente.`);
   }
+  return result.data;
+}
+
+export function readAuthAdminConfig(env: Record<string, string | undefined>) {
+  const result = authAdminSchema.safeParse(env);
+  if (!result.success) throw new Error('Configuracao de provisionamento Auth indisponivel.');
   return result.data;
 }
 

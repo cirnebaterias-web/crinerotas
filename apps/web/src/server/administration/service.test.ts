@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AdministrationSnapshot, MeResponse } from '@cirne/contracts';
 import {
-  getAdministrationSnapshot, requireAdministrationAccess, updateAdministrationUser,
+  createAdministrationUser, getAdministrationSnapshot, requireAdministrationAccess,
+  resetAdministrationPassword, updateAdministrationUser,
 } from './service';
 
 const administrator: MeResponse = {
@@ -47,5 +48,34 @@ describe('administration service', () => {
     await expect(updateAdministrationUser(administrator, targetId, command, 'cli', repository))
       .resolves.toEqual(result);
     expect(repository.updateUser).toHaveBeenCalledWith(targetId, command, 'cli');
+  });
+
+  it('enriches the narrow database snapshot with the authorized Auth directory', async () => {
+    const repository = { getSnapshot: vi.fn(async () => snapshot), updateUser: vi.fn() };
+    const auth = { listUsers: vi.fn(async () => [{ id: targetId, email: 'gestor@example.com',
+      emailConfirmed: true, lastSignInAt: null }]) } as never;
+    const result = await getAdministrationSnapshot(administrator, repository, auth);
+    expect(result.users[0]?.auth).toEqual({ email: 'gestor@example.com', emailConfirmed: true, lastSignInAt: null });
+  });
+
+  it('compensates a newly created Auth identity when profile provisioning fails', async () => {
+    const createCommand = { schemaVersion: 1 as const, displayName: 'Novo Vendedor',
+      email: 'novo@example.com', password: 'Temporaria#2026', roles: ['seller' as const],
+      reason: 'Provisionamento aprovado pelo gestor', idempotencyKey: '20000000-0000-4000-8000-000000000002' };
+    const repository = { getSnapshot: vi.fn(), updateUser: vi.fn(),
+      createUser: vi.fn(async () => { throw new Error('database'); }) };
+    const auth = { createUser: vi.fn(async () => ({ id: targetId, email: createCommand.email,
+      emailConfirmed: true, lastSignInAt: null, created: true })), deleteUser: vi.fn(async () => undefined) } as never;
+    await expect(createAdministrationUser(administrator, createCommand, 'web', repository, auth)).rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+    expect((auth as { deleteUser: ReturnType<typeof vi.fn> }).deleteUser).toHaveBeenCalledWith(targetId);
+  });
+
+  it('blocks self password reset before touching Auth', async () => {
+    const reset = { schemaVersion: 1 as const, password: 'Temporaria#2026',
+      reason: 'Redefinicao solicitada para o piloto', idempotencyKey: '20000000-0000-4000-8000-000000000003' };
+    const auth = { updatePassword: vi.fn() } as never;
+    await expect(resetAdministrationPassword(administrator, administrator.id, reset, 'web',
+      { getSnapshot: vi.fn(), updateUser: vi.fn() }, auth)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect((auth as { updatePassword: ReturnType<typeof vi.fn> }).updatePassword).not.toHaveBeenCalled();
   });
 });

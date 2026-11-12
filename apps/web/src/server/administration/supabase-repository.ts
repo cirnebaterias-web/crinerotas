@@ -3,6 +3,7 @@ import {
   updateAdministrationUserResultSchema,
   type RouteErrorCode,
   type UpdateAdministrationUserRequest,
+  type CreateAdministrationUserRequest, type ResetAdministrationPasswordRequest,
 } from '@cirne/contracts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { publicRouteMessage, RouteServiceFailure } from '../routes/service';
@@ -61,5 +62,25 @@ export class SupabaseAdministrationRepository implements AdministrationRepositor
       );
     }
     return parsed.data;
+  }
+
+  async createUser(userId: string, command: CreateAdministrationUserRequest, origin: 'web' | 'cli') {
+    const { data, error } = await this.client.schema('api').rpc('create_administration_user', {
+      p_user_id: userId, p_command: { schemaVersion: command.schemaVersion,
+        displayName: command.displayName, roles: command.roles, reason: command.reason,
+        idempotencyKey: command.idempotencyKey }, p_origin: origin,
+    });
+    if (error) throw databaseFailure(error);
+    return data as never;
+  }
+
+  async recordPasswordReset(userId: string, command: ResetAdministrationPasswordRequest, origin: 'web' | 'cli') {
+    const { data, error } = await this.client.schema('api').rpc('record_administration_password_reset', {
+      p_user_id: userId,
+      p_command: { schemaVersion: command.schemaVersion, reason: command.reason,
+        idempotencyKey: command.idempotencyKey }, p_origin: origin,
+    });
+    if (error) throw databaseFailure(error);
+    return data as never;
   }
 }

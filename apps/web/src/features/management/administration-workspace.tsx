@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   administrationPath, administrationSnapshotSchema, administrationUserPath, mePath,
-  meResponseSchema, updateAdministrationUserResultSchema,
+  administrationUserPasswordPath, createAdministrationUserResultSchema, meResponseSchema,
+  resetAdministrationPasswordResultSchema, updateAdministrationUserResultSchema,
   type AdministrationRoleCode, type AdministrationSnapshot, type AdministrationUser, type MeResponse,
 } from '@cirne/contracts';
 import { scrapRequest, ScrapRequestError } from '../scrap/scrap-ui';
@@ -13,6 +14,8 @@ import {
 
 type Draft = { status: AdministrationUser['status']; roles: AdministrationRoleCode[];
   sellerScopeIds: string[]; reason: string };
+type CreateDraft = { displayName: string; email: string; password: string;
+  roles: AdministrationRoleCode[]; reason: string };
 
 const categoryLabels: Record<string, string> = {
   competitor: 'Concorrentes', technology: 'Tecnologias', condition: 'Condições',
@@ -25,6 +28,11 @@ function draftFrom(user: AdministrationUser): Draft {
 function formatDate(value: string | null) {
   if (!value) return '—';
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+}
+function temporaryPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  return [...crypto.getRandomValues(new Uint32Array(18))]
+    .map((value) => alphabet[value % alphabet.length]).join('');
 }
 async function loadWorkspace() {
   const [rawIdentity, rawSnapshot] = await Promise.all([scrapRequest(mePath), scrapRequest(administrationPath)]);
@@ -40,6 +48,10 @@ export function AdministrationWorkspace() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createDraft, setCreateDraft] = useState<CreateDraft>({ displayName: '', email: '',
+    password: '', roles: ['seller'], reason: '' });
+  const [temporary, setTemporary] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -116,6 +128,41 @@ export function AdministrationWorkspace() {
     } finally { setBusy(false); }
   }
 
+  async function createAccess(event: FormEvent) {
+    event.preventDefault();
+    if (!window.confirm(`Criar acesso para ${createDraft.displayName}?`)) return;
+    setBusy(true); setNotice('');
+    try {
+      const raw = await scrapRequest(administrationPath, { method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' },
+        body: JSON.stringify({ schemaVersion: 1, ...createDraft, idempotencyKey: crypto.randomUUID() }) });
+      const result = createAdministrationUserResultSchema.parse(raw);
+      setSnapshot((current) => current ? { ...current, users: [...current.users, result.user]
+        .sort((a, b) => a.displayName.localeCompare(b.displayName, 'pt-BR')) } : current);
+      setTemporary(createDraft.password); setCreating(false); selectUser(result.user);
+      setCreateDraft({ displayName: '', email: '', password: '', roles: ['seller'], reason: '' });
+      setNotice('Acesso criado. Copie a senha temporária agora; ela não será exibida novamente.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não foi possível criar o acesso.'); }
+    finally { setBusy(false); }
+  }
+  async function resetPassword() {
+    if (!selected || !draft || selected.id === identity?.id || draft.reason.trim().length < 10) {
+      setNotice('Informe o motivo com 10 caracteres ou mais antes de redefinir a senha.'); return;
+    }
+    const password = temporaryPassword();
+    if (!window.confirm(`Redefinir a senha de ${selected.displayName}?`)) return;
+    setBusy(true); setNotice('');
+    try {
+      const raw = await scrapRequest(administrationUserPasswordPath(selected.id), { method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': 'cirne-route-v1' },
+        body: JSON.stringify({ schemaVersion: 1, password, reason: draft.reason.trim(),
+          idempotencyKey: crypto.randomUUID() }) });
+      resetAdministrationPasswordResultSchema.parse(raw); setTemporary(password);
+      setNotice('Senha redefinida. Copie a senha temporária agora; ela não será exibida novamente.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Não foi possível redefinir a senha.'); }
+    finally { setBusy(false); }
+  }
+
   if (loading) return <main className="administration-page"><p role="status">Carregando administração…</p></main>;
   if (!snapshot || !identity) return <main className="administration-page"><h1>Administração</h1><p className="administration-alert" role="alert">{notice || 'Seu perfil não tem acesso à administração.'}</p></main>;
 
@@ -127,6 +174,26 @@ export function AdministrationWorkspace() {
       <dl><div><dt>Usuários</dt><dd>{snapshot.users.length}</dd></div><div><dt>Ativos</dt><dd>{activeCount}</dd></div>
         <div><dt>Bloqueados</dt><dd>{snapshot.users.length - activeCount}</dd></div></dl></header>
     {notice && <p className="administration-alert" role="status">{notice}</p>}
+    {temporary && <aside className="administration-credential" role="status"><strong>Senha temporária (exibida uma vez)</strong>
+      <code>{temporary}</code><button type="button" onClick={() => void navigator.clipboard.writeText(temporary)}>Copiar senha</button>
+      <button type="button" onClick={() => setTemporary('')}>Ocultar</button></aside>}
+    <div className="administration-create-action"><button className="seller-button seller-primary" type="button"
+      onClick={() => { setCreating((value) => !value); setTemporary(''); }}>{creating ? 'Cancelar criação' : 'Criar acesso'}</button></div>
+    {creating && <form className="administration-create" onSubmit={createAccess}>
+      <h2>Novo acesso</h2><label>Nome completo<input required minLength={2} maxLength={120} value={createDraft.displayName}
+        onChange={(event) => setCreateDraft({ ...createDraft, displayName: event.target.value })} /></label>
+      <label>Email<input required type="email" value={createDraft.email}
+        onChange={(event) => setCreateDraft({ ...createDraft, email: event.target.value })} /></label>
+      <label>Senha inicial<input required type="password" minLength={12} maxLength={128} value={createDraft.password}
+        onChange={(event) => setCreateDraft({ ...createDraft, password: event.target.value })} />
+        <button type="button" onClick={() => setCreateDraft({ ...createDraft, password: temporaryPassword() })}>Gerar senha segura</button></label>
+      <fieldset><legend>Papéis</legend>{snapshot.roles.map((role) => <label key={role.code}><input type="checkbox"
+        checked={createDraft.roles.includes(role.code)} onChange={() => setCreateDraft({ ...createDraft, roles:
+          createDraft.roles.includes(role.code) ? createDraft.roles.filter((item) => item !== role.code) : [...createDraft.roles, role.code] })} /> {role.name}</label>)}</fieldset>
+      <label>Motivo<input required minLength={10} maxLength={500} value={createDraft.reason}
+        onChange={(event) => setCreateDraft({ ...createDraft, reason: event.target.value })} /></label>
+      <button className="seller-button seller-primary" disabled={busy || createDraft.roles.length === 0}>{busy ? 'Criando…' : 'Criar acesso'}</button>
+    </form>}
     <section className="administration-access" aria-labelledby="access-title">
       <div className="administration-directory">
         <div className="administration-section-heading"><div><h2 id="access-title">Usuários e acessos</h2><p>{visibleUsers.length} exibido(s)</p></div>
@@ -142,6 +209,8 @@ export function AdministrationWorkspace() {
           <header><div><p className="manager-eyebrow">PERFIL SELECIONADO</p><h2 id="editor-title">{selected.displayName}</h2></div>
             <span className={`administration-user-status status-${selected.status}`}>{selected.status === 'active' ? 'Ativo' : 'Bloqueado'}</span></header>
           <p className="administration-meta">Atualizado em {formatDate(selected.updatedAt)}</p>
+          <p className="administration-meta"><strong>Email:</strong> {selected.auth?.email ?? 'Identidade Auth não localizada'}<br />
+            <strong>Último acesso:</strong> {formatDate(selected.auth?.lastSignInAt ?? null)}</p>
           {ownAccount && <p className="administration-guard">Sua própria conta pode ser consultada, mas não alterada aqui.</p>}
           <fieldset disabled={busy || ownAccount}><legend>Situação do acesso</legend>
             <label><input type="radio" name="status" checked={draft.status === 'active'} onChange={() => setDraft({ ...draft, status: 'active' })} /> Ativo</label>
@@ -157,6 +226,8 @@ export function AdministrationWorkspace() {
             placeholder="Registre a justificativa para auditoria" /></label>
           {selected.lastAdministrativeChange && <p className="administration-history"><strong>Última mudança:</strong> {selected.lastAdministrativeChange.reason}<br /><small>{formatDate(selected.lastAdministrativeChange.occurredAt)}</small></p>}
           <button className="seller-button seller-primary" type="submit" disabled={busy || ownAccount}>{busy ? 'Salvando…' : 'Salvar acesso'}</button>
+          <button className="seller-button" type="button" disabled={busy || ownAccount || selected.status !== 'active'}
+            onClick={() => void resetPassword()}>Redefinir senha</button>
         </form>}
       </aside>
     </section>

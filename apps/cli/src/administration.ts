@@ -2,11 +2,15 @@ import {
   administrationPath,
   administrationSnapshotSchema,
   administrationUserPath,
+  administrationUserPasswordPath, createAdministrationUserRequestSchema,
+  createAdministrationUserResultSchema, resetAdministrationPasswordRequestSchema,
+  resetAdministrationPasswordResultSchema,
   apiErrorResponseSchema,
   updateAdministrationUserRequestSchema,
   updateAdministrationUserResultSchema,
   type AdministrationSnapshot,
   type UpdateAdministrationUserRequest,
+  type CreateAdministrationUserRequest, type ResetAdministrationPasswordRequest,
 } from '@cirne/contracts';
 import { z } from 'zod';
 
@@ -81,6 +85,33 @@ export async function mutateAdministrationUser(
     throw new AdministrationCliError(69, 'Resposta administrativa invalida.');
   }
   return parsed.data;
+}
+
+export async function createAdministrationAccess(baseUrl: string, token: string,
+  command: CreateAdministrationUserRequest, request: typeof fetch = fetch) {
+  const parsed = createAdministrationUserRequestSchema.safeParse(command);
+  if (!parsed.success) throw new AdministrationCliError(64, 'Novo acesso invalido.');
+  const body = await administrationRequest(baseUrl, token, administrationPath, {
+    method: 'POST', headers: { 'x-csrf-token': 'cirne-route-v1', 'x-cirne-origin': 'cli' },
+    body: JSON.stringify(parsed.data),
+  }, request);
+  const result = createAdministrationUserResultSchema.safeParse(body);
+  if (!result.success) throw new AdministrationCliError(69, 'Resposta administrativa invalida.');
+  return result.data;
+}
+
+export async function resetAdministrationAccessPassword(baseUrl: string, token: string, userId: string,
+  command: ResetAdministrationPasswordRequest, request: typeof fetch = fetch) {
+  const id = z.uuid().safeParse(userId.toLowerCase());
+  const parsed = resetAdministrationPasswordRequestSchema.safeParse(command);
+  if (!id.success || !parsed.success) throw new AdministrationCliError(64, 'Redefinicao invalida.');
+  const body = await administrationRequest(baseUrl, token, administrationUserPasswordPath(id.data), {
+    method: 'POST', headers: { 'x-csrf-token': 'cirne-route-v1', 'x-cirne-origin': 'cli' },
+    body: JSON.stringify(parsed.data),
+  }, request);
+  const result = resetAdministrationPasswordResultSchema.safeParse(body);
+  if (!result.success || result.data.userId !== id.data) throw new AdministrationCliError(69, 'Resposta administrativa invalida.');
+  return result.data;
 }
 
 export function formatAdministration(snapshot: AdministrationSnapshot) {
