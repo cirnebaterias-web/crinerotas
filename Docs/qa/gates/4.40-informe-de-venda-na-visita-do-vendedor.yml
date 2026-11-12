@@ -1,0 +1,63 @@
+schema: 1
+story: '4.40'
+story_title: 'Informe de venda na visita do vendedor'
+gate: PASS
+status_reason: 'Os 11 critérios foram atendidos e os bloqueios de checkout legado, isolamento entre vendedores e replay de localização foram corrigidos e revalidados. Contratos, durabilidade, autorização e compatibilidade estão cobertos por testes e gates finais aprovados.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:bb15a9a2d6f97a27ec3500085aea490388aa8e85'
+implementation_revision: 'commit:3fcde7b93437576d1fdcd77791bf37f756deb07a'
+updated: '2026-11-12T19:32:12-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 2640
+  independent_qa:
+    baseline_unit: '159 arquivos; 923 PASS, 1 skip preexistente.'
+    final_focused_unit: '6 arquivos; 70 PASS, incluindo serviço/repositório real e sync-engine.'
+    final_lint: PASS
+    final_typecheck: PASS
+    baseline_production_build: PASS
+    baseline_playwright: '37 PASS em build de produção.'
+    baseline_sql: '36 suítes; 1641 PASS em transação/savepoints UTF-8.'
+    final_sales_sql: '79 PASS; migration hash 1fac4b72f84dce37e3d4229f57160b52bb48ce4f inalterado durante o ensaio.'
+    final_rollback: 'PASS; funções/ACL/owners, políticas, relações/RLS, colunas, schemas e triggers semanticamente idênticos antes/depois.'
+    diff_check: PASS
+    coderabbit: 'Full do baseline: 0 críticos/altos e 1 minor de navegação não exigido pela story. Full do patch: 16 arquivos, 0 findings; últimos diffs de sync-engine e replay SQL revisados manualmente.'
+  final_implementation_evidence:
+    source: 'Docs/qa/evidence/4.40-visit-sales-report.md'
+    unit: '160 arquivos; 943 PASS, 1 skip; execução serial isolada.'
+    production_build: PASS
+    playwright: '39 PASS; execução final isolada, incluindo ambos os ramos de recovery.'
+    official_database: 'npm run db:test; 36 arquivos, 1658 PASS, exit 0.'
+    database_restoration: 'Rollback no finally; schema/ACL restaurados, 1 visita/7 eventos sync/22 auditorias/10 identidades; tabela e role sales ausentes.'
+    cli: 'Round-trip sintético local real documentado; gravação, leitura, replay e divergência canônicos. CLI e testes revisados independentemente.'
+  resolved_findings:
+    - 'REL-440-01: checkout legado apenas local recupera somente o informe, preserva evidências/chave/horário e distingue resposta perdida sem fabricar zeros.'
+    - 'REL-440-02: checkout de B após A no mesmo cliente funciona com contexto transacional estreito, sem leitura ou escrita ampla.'
+    - 'REL-440-03: replay de checkout A depois de B retorna ACK exato sem regredir a observação de B nem criar fatos novos.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Identidade ativa, propriedade, capacidades e escopo são reavaliados inclusive em replay. FORCE RLS, executores sem login/bypass, search_path vazio, RPCs privadas e ACLs estreitas; contexto de checkout limpo em sucesso/erro. Scans de execução dinâmica, XSS, shell, segredos, SQL injection, validação e CORS sem achado aplicável.'
+  performance:
+    status: PASS
+    notes: 'Tabela própria 1:1 com índice único por visita; sem agregação comercial ou dependência adicional. Reserva da outbox exclui apenas agregados de recuperação ainda indeterminada.'
+  reliability:
+    status: PASS
+    notes: 'Transação local seção/outbox e ACK/resolução atômicos; versão do editor, ACK antigo, ordem legada e idempotência canônica preservados. Resolução durável retém intenções canceladas quando checkout já estava confirmado.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos/domínio, repositórios, BFF/RPC e CLI seguem as fronteiras existentes. Migration e rollback versionados; rollback com histórico não vazio recusa perda de fatos.'
+  accessibility:
+    status: PASS
+    notes: 'Três rótulos associados, teclado numérico, mensagens por campo, foco no primeiro erro e status textual; controles herdados de 52px. Fluxos mobile/offline e ausência de overflow cobertos no navegador.'
+recommendations:
+  immediate: []
+  future: []
+limitations:
+  - 'Android físico, câmera/GPS reais e implantação do piloto não foram executados.'
+  - 'Publicação deve aplicar banco antes do aplicativo e atualizar clientes em andamento; após histórico real, preferir correção progressiva ao rollback destrutivo.'
