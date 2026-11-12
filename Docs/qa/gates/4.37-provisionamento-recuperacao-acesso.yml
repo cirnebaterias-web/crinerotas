@@ -1,0 +1,28 @@
+schema: 1
+story: '4.37'
+story_title: 'Provisionamento e recuperacao de acesso de usuarios'
+gate: PASS
+status_reason: 'Auth Admin isolado no BFF, senha nao persistida, criacao compensavel e redefinicao idempotente em duas fases; gates automatizados aprovados.'
+reviewer: 'Quinn (@qa)'
+updated: '2026-11-12T12:45:00-03:00'
+quality_score: 95
+waiver: { active: false }
+top_issues: []
+evidence:
+  unit_tests: '154 arquivos; 890 passed; 1 skipped preexistente'
+  database_tests: '35 arquivos; 1579 passed'
+  e2e: 'administration.spec.ts: 3 passed'
+  build: PASS
+  lint: PASS
+  typecheck: PASS
+  secretlint: PASS
+  coderabbit: 'unavailable: WSL CLI could not resolve Windows worktree gitfile'
+nfr_validation:
+  security: PASS
+  reliability: PASS
+  maintainability: PASS
+  accessibility: PASS
+recommendations:
+  immediate: []
+  future:
+    - 'Configurar SMTP e fluxo de troca obrigatoria da senha temporaria em story dedicada.'

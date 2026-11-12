@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  administrationSnapshotSchema, updateAdministrationUserRequestSchema,
+  administrationSnapshotSchema, createAdministrationUserRequestSchema,
+  resetAdministrationPasswordRequestSchema, updateAdministrationUserRequestSchema,
 } from './administration';
 
 const id = '10000000-0000-4000-8000-000000000001';
@@ -38,5 +39,15 @@ describe('administration contracts', () => {
     expect(updateAdministrationUserRequestSchema.safeParse({ ...base, roles: ['seller'] }).success).toBe(false);
     expect(updateAdministrationUserRequestSchema.safeParse({ ...base, roles: ['manager', 'manager'] }).success).toBe(false);
     expect(updateAdministrationUserRequestSchema.safeParse({ ...base, reason: 'curto' }).success).toBe(false);
+  });
+
+  it('validates provisioning credentials without ever accepting weak passwords', () => {
+    const create = { schemaVersion: 1, displayName: 'Novo Vendedor', email: 'NOVO@EXAMPLE.COM',
+      password: 'Temporaria#2026', roles: ['seller'], reason: 'Provisionamento aprovado pelo gestor',
+      idempotencyKey: '20000000-0000-4000-8000-000000000001' };
+    expect(createAdministrationUserRequestSchema.parse(create).email).toBe('novo@example.com');
+    expect(createAdministrationUserRequestSchema.safeParse({ ...create, password: 'fraca' }).success).toBe(false);
+    expect(resetAdministrationPasswordRequestSchema.safeParse({ schemaVersion: 1,
+      password: 'OutraSenha#2026', reason: create.reason, idempotencyKey: create.idempotencyKey }).success).toBe(true);
   });
 });

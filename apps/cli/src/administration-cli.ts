@@ -1,8 +1,10 @@
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
-import { updateAdministrationUserRequestSchema } from '@cirne/contracts';
+import { createAdministrationUserRequestSchema, resetAdministrationPasswordRequestSchema,
+  updateAdministrationUserRequestSchema } from '@cirne/contracts';
 import {
-  AdministrationCliError, formatAdministration, loadAdministration, mutateAdministrationUser,
+  AdministrationCliError, createAdministrationAccess, formatAdministration, loadAdministration,
+  mutateAdministrationUser, resetAdministrationAccessPassword,
 } from './administration';
 
 async function stdin() {
@@ -17,13 +19,33 @@ try {
     user: { type: 'string' }, status: { type: 'string' }, roles: { type: 'string' },
     'seller-scopes': { type: 'string' }, reason: { type: 'string' },
     'expected-updated-at': { type: 'string' },
+    create: { type: 'boolean', default: false }, email: { type: 'string' }, name: { type: 'string' },
+    'reset-password': { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
   }, strict: true });
   const token = process.env.CIRNE_ADMIN_ACCESS_TOKEN?.trim() || await stdin();
   if (!token) throw new AdministrationCliError(77,
     'Forneca o token do Administrador por stdin ou CIRNE_ADMIN_ACCESS_TOKEN.');
 
-  if (!values.user) {
+  const password = process.env.CIRNE_ADMIN_PASSWORD?.trim();
+  if (values.create) {
+    const command = createAdministrationUserRequestSchema.safeParse({ schemaVersion: 1,
+      displayName: values.name, email: values.email, password,
+      roles: values.roles?.split(',').map((item) => item.trim()).filter(Boolean), reason: values.reason,
+      idempotencyKey: crypto.randomUUID() });
+    if (!command.success) throw new AdministrationCliError(64,
+      'Para criar, informe --create --name --email --roles --reason e CIRNE_ADMIN_PASSWORD.');
+    const result = await createAdministrationAccess(values.url, token, command.data);
+    console.log(values.json ? JSON.stringify({ ...result, temporaryPassword: undefined })
+      : `OK: acesso criado para ${result.user.displayName}.`);
+  } else if (values['reset-password']) {
+    const command = resetAdministrationPasswordRequestSchema.safeParse({ schemaVersion: 1,
+      password, reason: values.reason, idempotencyKey: crypto.randomUUID() });
+    if (!values.user || !command.success) throw new AdministrationCliError(64,
+      'Para redefinir, informe --reset-password --user --reason e CIRNE_ADMIN_PASSWORD.');
+    const result = await resetAdministrationAccessPassword(values.url, token, values.user, command.data);
+    console.log(values.json ? JSON.stringify(result) : `OK: senha redefinida para ${result.userId}.`);
+  } else if (!values.user) {
     const snapshot = await loadAdministration(values.url, token);
     console.log(values.json ? JSON.stringify(snapshot) : formatAdministration(snapshot));
   } else {

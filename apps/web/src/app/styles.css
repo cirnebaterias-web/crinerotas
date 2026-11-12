@@ -880,6 +880,15 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .administration-heading dt { color: var(--cirne-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .administration-heading dd { margin: 3px 0 0; color: var(--cirne-forest); font-size: 24px; font-weight: 850; }
 .administration-alert { margin: 0 0 16px; padding: 12px 14px; border: 1px solid #d9bd79; border-radius: 10px; background: #fff8e8; color: #68480d; }
+.administration-create-action { display: flex; justify-content: flex-end; margin: 0 0 14px; }
+.administration-create, .administration-credential { display: grid; gap: 12px; margin: 0 0 18px; padding: 18px 20px; border: 1px solid #cbd8d0; border-radius: 15px; background: #fff; }
+.administration-create { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.administration-create h2, .administration-create fieldset, .administration-create > button { grid-column: 1/-1; }
+.administration-create label { display: grid; gap: 6px; font-size: 12px; font-weight: 800; }
+.administration-create input { min-height: 44px; padding: 9px 11px; border: 1px solid #8fa399; border-radius: 8px; font: inherit; }
+.administration-create fieldset { display: flex; flex-wrap: wrap; gap: 12px; border: 1px solid #d5dfd9; border-radius: 10px; }
+.administration-credential { grid-template-columns: 1fr auto auto auto; align-items: center; border-color: #278153; background: #eaf6ee; }
+.administration-credential code { overflow-wrap: anywhere; font-size: 16px; }
 .administration-access { display: grid; grid-template-columns: minmax(520px, 1.45fr) minmax(360px, .85fr); gap: 18px; align-items: start; }
 .administration-directory, .administration-editor, .administration-parameters { border: 1px solid #cbd8d0; border-radius: 15px; background: #fff; box-shadow: 0 5px 18px rgb(10 47 32 / 5%); }
 .administration-section-heading { display: flex; justify-content: space-between; gap: 20px; align-items: end; padding: 18px 20px; border-bottom: 1px solid #e0e7e2; }
@@ -922,6 +931,10 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .administration-parameter-groups ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .administration-parameter-groups li { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
 .administration-parameter-groups code { color: #617168; font-size: 10px; }
+@media (max-width: 640px) {
+  .administration-create, .administration-credential { grid-template-columns: 1fr; }
+  .administration-create > * { grid-column: 1; }
+}
 @media (max-width: 1180px) {
   .administration-access { grid-template-columns: minmax(430px, 1.2fr) minmax(330px, .8fr); }
   .administration-parameter-groups { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
