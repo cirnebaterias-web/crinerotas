@@ -108,6 +108,8 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
   useEffect(() => {
     let active = true;
     let disposePointers: (() => void) | undefined;
+    let resizeObserver: ResizeObserver | undefined;
+    let resizeFrame: number | undefined;
     setMapReady(false);
     setMapFailure(false);
     setTileFailure(false);
@@ -134,6 +136,15 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         map.on('resize', resizePopup);
         map.on('zoomend', updateOpenPopup);
         resizePopup();
+        // The shell can resize without a window resize (sidebar, reflow or zoom).
+        // Invalidate the existing instance and retain its geographic view.
+        resizeObserver = new ResizeObserver(() => {
+          if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+          resizeFrame = requestAnimationFrame(() => {
+            if (active) map.invalidateSize({ animate: false, debounceMoveend: true });
+          });
+        });
+        resizeObserver.observe(container);
 
         function updateStroke(event: PointerEvent) {
           const stroke = strokeRef.current;
@@ -207,6 +218,8 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         setMapReady(true);
       } catch {
         if (active) {
+          resizeObserver?.disconnect();
+          if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
           disposePointers?.();
           mapRef.current?.remove();
           mapRef.current = null;
@@ -218,6 +231,8 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
     void mount();
     return () => {
       active = false;
+      resizeObserver?.disconnect();
+      if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
       disposePointers?.();
       drawingRef.current = false;
       strokeRef.current = null;
@@ -420,9 +435,9 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
     </div>
     <p className="route-intelligence-draw-help">Ative a caneta e contorne livremente a região no mapa. O mapa permanece parado
       durante o desenho. Use a borracha para apagar o contorno e tente novamente; os clientes só entram após confirmar.</p>
-    <div className="route-intelligence-canvas-wrap">
+    <div className="route-intelligence-canvas-wrap" data-drawing={drawing}>
       {mapConfig.enabled && !mapFailure
-        ? <div ref={containerRef} className={`route-intelligence-canvas${drawing ? ' is-drawing' : ''}`}
+        ? <div ref={containerRef} className="route-intelligence-canvas"
           tabIndex={0} aria-label="Clientes elegíveis no mapa" />
         : <p className="route-planner-empty">Mapa indisponível; os filtros e a lista de prioridades continuam utilizáveis.</p>}
       {drawing && <span className="route-intelligence-draw-overlay" aria-hidden="true">✎ Contorne a região e solte para revisar</span>}
@@ -462,7 +477,7 @@ function PlanningMapContext({ planning, mapConfig, selectedIds, onSelection }: P
         onSelection(selectedIds.includes(candidate.clientId) ? selectedIds.filter((id) => id !== candidate.clientId)
           : [...new Set([...selectedIds, candidate.clientId])])} aria-label={`Selecionar ${candidate.name}`} />
       <div><strong>{candidate.name}</strong><span>{candidate.reasons.join(' · ')}</span>
-        <div className="route-intelligence-badges" aria-label="Prioridades comerciais">{commercialPriorityLabels(candidate)
+        <div className="route-intelligence-badges" role="group" aria-label="Prioridades comerciais">{commercialPriorityLabels(candidate)
           .map((label) => <span key={label}>{label}</span>)}</div>
         {!candidate.location && <span>Sem coordenadas · localização pendente</span>}</div>
       <b>{candidate.score.toLocaleString('pt-BR')}</b>
