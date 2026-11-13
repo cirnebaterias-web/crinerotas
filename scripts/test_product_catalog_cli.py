@@ -11,7 +11,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 sys.dont_write_bytecode = True
 SPEC = importlib.util.spec_from_file_location("catalog", Path(__file__).with_name("product-catalog-cli.py"))
@@ -94,11 +94,14 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(summary["coverage"], {"classifiedProducts": 1, "unclassifiedProducts": 1,
                                              "withAmperage": 1, "withTechnology": 1})
+        expected = artifact.read_bytes()
+        self.assertEqual(summary["provenance"]["verifiedPublishedIdentitySha256"],
+                         summary["provenance"]["identitySha256"])
         second, verified = self.run_cli("publish", "--output", str(artifact))
         self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(expected, artifact.read_bytes())
         self.assertEqual(verified["provenance"]["verifiedPublishedIdentitySha256"],
                          verified["provenance"]["identitySha256"])
-        expected = artifact.read_bytes()
         third, _ = self.run_cli("publish", "--output", str(artifact))
         self.assertEqual(third.returncode, 0, third.stderr)
         self.assertEqual(expected, artifact.read_bytes())
@@ -111,6 +114,56 @@ class CatalogTests(unittest.TestCase):
         result, error = self.run_cli("validate", "--verify-published", str(artifact))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("origem divergente", error["diagnostics"][0]["message"])
+
+    def test_same_version_rejects_changed_source_bytes_or_name(self):
+        self.workbook([self.row()])
+        artifact = Path(self.temp.name) / "catalog.generated.ts"
+        result, _ = self.run_cli("publish", "--output", str(artifact))
+        self.assertEqual(result.returncode, 0)
+        expected = artifact.read_bytes()
+        original_bytes = self.source.read_bytes()
+        original_products = catalog.read_products(self.source)
+        workbook = load_workbook(self.source)
+        workbook.properties.title = "Changed document metadata only"
+        workbook.save(self.source)
+        workbook.close()
+        self.assertNotEqual(self.source.read_bytes(), original_bytes)
+        self.assertEqual(catalog.read_products(self.source), original_products)
+        for flags in ([], ["--verify-published", str(artifact)]):
+            result, error = self.run_cli("publish", "--output", str(artifact), *flags)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("proveniência divergente", error["diagnostics"][0]["message"])
+            self.assertEqual(artifact.read_bytes(), expected)
+        renamed = self.source.with_name("renamed.xlsx")
+        renamed.write_bytes(original_bytes)
+        self.source = renamed
+        result, error = self.run_cli("publish", "--output", str(artifact))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("proveniência divergente", error["diagnostics"][0]["message"])
+        self.assertEqual(artifact.read_bytes(), expected)
+
+    def test_legacy_v2_bootstrap_requires_explicit_anchor_then_is_immutable(self):
+        self.workbook([self.row()])
+        products = catalog.read_products(self.source)
+        legacy = [{key: value for key, value in product.items()
+                   if key not in ("amperageAh", "technology")} for product in products]
+        artifact = Path(self.temp.name) / "legacy.generated.ts"
+        artifact.write_text(catalog.render(legacy, 2, "2026-10-02"), encoding="utf-8")
+        expected = artifact.read_bytes()
+        result, error = self.run_cli("publish", "--output", str(artifact))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("bootstrap explícito", error["diagnostics"][0]["message"])
+        self.assertEqual(artifact.read_bytes(), expected)
+        result, summary = self.run_cli("publish", "--output", str(artifact),
+                                       "--verify-published", str(artifact))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(summary["provenance"]["verifiedPublishedIdentitySha256"],
+                         summary["provenance"]["identitySha256"])
+        published = artifact.read_bytes()
+        result, repeated = self.run_cli("publish", "--output", str(artifact))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(published, artifact.read_bytes())
+        self.assertEqual(summary["provenance"], repeated["provenance"])
 
     def test_republish_preserves_provenance_and_effective_date(self):
         self.workbook([self.row()])
@@ -150,9 +203,9 @@ class CatalogTests(unittest.TestCase):
 
     def test_publish_failures_preserve_existing_artifact_and_return_json(self):
         self.workbook([self.row()])
-        products = catalog.read_products(self.source)
         artifact = Path(self.temp.name) / "published.generated.ts"
-        artifact.write_text(catalog.render(products, 2, "2026-10-02"), encoding="utf-8")
+        result, _ = self.run_cli("publish", "--output", str(artifact))
+        self.assertEqual(result.returncode, 0)
         expected = artifact.read_bytes()
         actual_factory = catalog.tempfile.NamedTemporaryFile
 

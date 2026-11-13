@@ -133,7 +133,8 @@ def product_identity_hash(products: list[dict[str, object]]) -> str:
 
 
 def verify_published(products: list[dict[str, object]], artifact: Path, version: int,
-                     valid_from: str | None = None) -> str:
+                     valid_from: str | None = None, provenance: dict[str, object] | None = None,
+                     allow_legacy_bootstrap: bool = False) -> str:
     content = artifact.read_text(encoding="utf-8")
     version_match = re.search(r"GENERATED_STOCK_CATALOG_VERSION = (\d+);", content)
     payload = re.search(r"generatedOwnProductItems = (\[.*\]) as const;", content, re.DOTALL)
@@ -149,6 +150,15 @@ def verify_published(products: list[dict[str, object]], artifact: Path, version:
     for old, new in zip(original, products):
         if any(key in old and old[key] != new[key] for key in ("amperageAh", "technology")):
             raise ValueError("metadados analíticos divergentes da versão publicada; preserve a versão histórica")
+    provenance_match = re.search(r"GENERATED_STOCK_CATALOG_PROVENANCE = (\{.*?\}) as const;", content, re.DOTALL)
+    original_provenance = json.loads(provenance_match[1]) if provenance_match else {}
+    if not original_provenance:
+        # The approved v2 enrichment is an explicit one-time bootstrap. Once
+        # anchored, the source name, exact bytes and metadata rules are immutable.
+        if not allow_legacy_bootstrap or version != 2:
+            raise ValueError("catálogo legado sem proveniência exige bootstrap explícito v2 com --verify-published")
+    elif provenance is not None and original_provenance != provenance:
+        raise ValueError("proveniência divergente da versão publicada; preserve a fonte e a versão histórica")
     return product_identity_hash(original)
 
 
@@ -195,15 +205,19 @@ def main() -> None:
         date.fromisoformat(args.valid_from)
         diagnostics: list[dict[str, object]] = []
         products = read_products(args.source, diagnostics)
-        identity_hash = None
-        if args.command == "publish" and args.output.exists():
-            identity_hash = verify_published(products, args.output, args.version, args.valid_from)
-        if args.verify_published:
-            identity_hash = verify_published(products, args.verify_published, args.version, args.valid_from)
+        # First publication anchors the same identity hash that every subsequent
+        # verification proves; no lifecycle-dependent null enters the artifact.
+        identity_hash = product_identity_hash(products)
         provenance = {"source": args.source.name, "sourceSha256": hashlib.sha256(args.source.read_bytes()).hexdigest(),
-                      "identitySha256": product_identity_hash(products), "verifiedPublishedIdentitySha256": identity_hash,
+                      "identitySha256": identity_hash, "verifiedPublishedIdentitySha256": identity_hash,
                       "metadataColumns": {"amperageAh": "Amperagem (Ah)", "technology": "Tecnologia"},
                       "metadataRulesVersion": 1}
+        if args.command == "publish" and args.output.exists():
+            verify_published(products, args.output, args.version, args.valid_from, provenance,
+                             allow_legacy_bootstrap=bool(args.verify_published))
+        if args.verify_published:
+            verify_published(products, args.verify_published, args.version, args.valid_from, provenance,
+                             allow_legacy_bootstrap=True)
         if args.command == "publish":
             publish_artifact(args.output, render(products, args.version, args.valid_from, provenance))
     except (ValueError, OSError, BadZipFile, InvalidFileException) as error:
