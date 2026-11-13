@@ -160,7 +160,7 @@ describe('SellerHomeScreen external shortcuts', () => {
     expect(renderToStaticMarkup(catalog!)).toContain('Catálogo de baterias');
     expect(catalog?.props).toMatchObject({
       className: 'seller-task-card',
-      href: 'https://catalogo.bateriaspioneiro.com.br/',
+      href: 'https://minhabateriaheliar.vercel.app/',
       target: '_blank',
       rel: 'noopener noreferrer',
     });
