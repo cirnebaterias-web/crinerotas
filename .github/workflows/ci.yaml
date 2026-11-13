@@ -47,6 +47,12 @@ jobs:
       - name: Validate port denylist
         run: npm run validate:port-denylist
 
+      - name: Install catalog test dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/catalog-python"
+          "$RUNNER_TEMP/catalog-python/bin/python" -m pip install --disable-pip-version-check --requirement scripts/requirements-catalog.txt
+          echo "$RUNNER_TEMP/catalog-python/bin" >> "$GITHUB_PATH"
+
       - name: Scan for secrets
         run: npm run security:secrets
 

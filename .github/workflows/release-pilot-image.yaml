@@ -43,6 +43,12 @@ jobs:
           npm install --global npm@11.17.0 --no-audit --no-fund
           npm ci
 
+      - name: Install catalog test dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/catalog-python"
+          "$RUNNER_TEMP/catalog-python/bin/python" -m pip install --disable-pip-version-check --requirement scripts/requirements-catalog.txt
+          echo "$RUNNER_TEMP/catalog-python/bin" >> "$GITHUB_PATH"
+
       - name: Run constitutional quality gates
         run: |
           npm run validate:port-denylist

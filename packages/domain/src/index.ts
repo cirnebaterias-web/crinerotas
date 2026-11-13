@@ -4,6 +4,8 @@ export * from './sales-import';
 export * from './scrap-ledger-import';
 export * from './sales-crm';
 export * from './product-catalog';
+export * from './stock-insights';
+export * from './own-stock-catalog';
 
 import {
   canonicalLocalRouteBundleSchema,

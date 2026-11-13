@@ -387,7 +387,7 @@ export function VisitCompetitorStockStep({ draft, onSave, onDirtyChange }: Visit
         ref={registerControl('form')}>{errors.form}</p>}
       <p className="seller-sr-only" role="status">{announcement}</p>
       <button className="seller-button seller-primary seller-stock-submit" disabled={saving} type="submit">
-        {saving ? 'Salvando no aparelho…' : 'Salvar estoque da concorrência e ir para fotos'}
+        {saving ? 'Salvando no aparelho…' : 'Salvar concorrência e ver análise'}
       </button>
     </form>
   </section>;

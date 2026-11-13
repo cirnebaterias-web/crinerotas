@@ -21,6 +21,7 @@ export * from './report-exports';
 export * from './weekly-route-proposals';
 export * from './seller-route-profiles';
 export * from './scrap-collection-routes';
+export * from './stock-insights';
 
 export const liveResponseSchema = z.object({ status: z.literal('ok') }).strict();
 export type LiveResponse = z.infer<typeof liveResponseSchema>;

@@ -1,0 +1,7 @@
+{
+  "publishedCatalogVersion": 12,
+  "catalogs": [{"version":12,"products":[
+    {"code":"synthetic-h60","brand":"Heliar","model":"Modelo sintético 60","amperageAh":60,"technology":"SLI"},
+    {"code":"synthetic-d60","brand":"Durex","model":"Modelo sintético 60","amperageAh":60,"technology":"SLI"}
+  ]}]
+}

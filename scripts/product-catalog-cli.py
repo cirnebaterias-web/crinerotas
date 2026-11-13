@@ -4,16 +4,47 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import re
+import sys
+import tempfile
+import unicodedata
 from collections import Counter
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 
 BRANDS = {"Heliar": "Heliar", "América": "América", "Durex / Strada": "Durex", "ACDelco": "ACDelco"}
 REQUIRED = ["Cód.Fábrica", "Descrição Cirne", "Item original", "SKU/base", "Fabricante/Marca", "Peso kg"]
+REQUIRED += ["Amperagem (Ah)", "Tecnologia"]
+TECHNOLOGIES = {"sli": "SLI", "sli/frota": "SLI", "efb": "EFB", "efb/frota": "EFB",
+                "agm": "AGM", "agm/frota": "AGM", "agm moto": "AGM"}
+IDENTITY_FIELDS = ("id", "factoryCode", "sku", "brand", "model", "description", "unitWeightKg", "weightSource")
+
+
+def normalize_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return " ".join("".join(char for char in text if not unicodedata.combining(char)).casefold().split())
+
+
+def amperage(value: object) -> int | float | None:
+    if value is None or isinstance(value, bool) or not str(value).strip():
+        return None
+    try:
+        number = Decimal(str(value).strip().replace(",", "."))
+    except InvalidOperation:
+        return None
+    if not number.is_finite() or number <= 0 or number > 9007199254740991:
+        return None
+    canonical = int(number) if number == number.to_integral() else float(number)
+    return canonical if canonical > 0 else None
 
 
 def decimal_text(value: object) -> str | None:
@@ -23,19 +54,28 @@ def decimal_text(value: object) -> str | None:
         number = Decimal(str(value).replace(",", "."))
     except InvalidOperation as error:
         raise ValueError(f"peso inválido: {value}") from error
-    if number <= 0:
+    if not number.is_finite() or number <= 0:
         raise ValueError(f"peso deve ser positivo: {value}")
     return format(number.normalize(), "f")
 
 
-def read_products(source: Path) -> list[dict[str, object]]:
+def read_products(source: Path, diagnostics: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+    diagnostics = diagnostics if diagnostics is not None else []
     workbook = load_workbook(source, read_only=True, data_only=True)
-    sheet = workbook.active
+    try:
+        return read_sheet(workbook.active, diagnostics)
+    finally:
+        workbook.close()
+
+
+def read_sheet(sheet, diagnostics: list[dict[str, object]]) -> list[dict[str, object]]:
     rows = sheet.iter_rows(values_only=True)
-    headers = [str(value).strip() if value is not None else "" for value in next(rows)]
+    headers = [str(value).strip() if value is not None else "" for value in next(rows, ())]
     missing = [header for header in REQUIRED if header not in headers]
     if missing:
         raise ValueError("cabeçalhos ausentes: " + ", ".join(missing))
+    if any(headers.count(header) > 1 for header in REQUIRED):
+        raise ValueError("cabeçalhos obrigatórios duplicados")
     index = {header: headers.index(header) for header in REQUIRED}
     products: list[dict[str, object]] = []
     seen_codes: set[str] = set()
@@ -59,6 +99,16 @@ def read_products(source: Path) -> list[dict[str, object]]:
             raise ValueError(f"linha {row_number}: código de fábrica duplicado: {code}")
         seen_codes.add(normalized_code)
         weight = decimal_text(raw_weight)
+        raw_ah = row[index["Amperagem (Ah)"]]
+        raw_technology = row[index["Tecnologia"]]
+        ah = amperage(raw_ah)
+        technology = TECHNOLOGIES.get(normalize_text(raw_technology))
+        if ah is None:
+            diagnostics.append({"code": "MISSING_AMPERAGE" if raw_ah is None or not str(raw_ah).strip()
+                                else "INVALID_AMPERAGE", "row": row_number, "productCode": code})
+        if technology is None:
+            diagnostics.append({"code": "UNKNOWN_TECHNOLOGY", "row": row_number, "productCode": code,
+                                "value": str(raw_technology or "").strip()})
         products.append({
             "id": stable_id,
             "factoryCode": code,
@@ -68,20 +118,81 @@ def read_products(source: Path) -> list[dict[str, object]]:
             "description": description,
             "unitWeightKg": weight or "15",
             "weightSource": "catalog" if weight else "fallback_15kg",
+            "amperageAh": ah,
+            "technology": technology,
         })
     if not products:
         raise ValueError("a planilha não contém produtos")
     return products
 
 
-def render(products: list[dict[str, object]], version: int, valid_from: str) -> str:
+def product_identity_hash(products: list[dict[str, object]]) -> str:
+    if not isinstance(products, list) or not products or any(
+        not isinstance(product, dict) or any(
+            not isinstance(product.get(key), str) or not product[key].strip() for key in IDENTITY_FIELDS
+        ) for product in products
+    ):
+        raise ValueError("artefato publicado com identidade de produto inválida ou incompleta")
+    identity = [{key: product[key] for key in IDENTITY_FIELDS} for product in products]
+    return hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def verify_published(products: list[dict[str, object]], artifact: Path, version: int,
+                     valid_from: str | None = None, provenance: dict[str, object] | None = None,
+                     allow_legacy_bootstrap: bool = False) -> str:
+    content = artifact.read_text(encoding="utf-8")
+    version_match = re.search(r"GENERATED_STOCK_CATALOG_VERSION = (\d+);", content)
+    payload = re.search(r"generatedOwnProductItems = (\[.*\]) as const;", content, re.DOTALL)
+    if not version_match or int(version_match[1]) != version or not payload:
+        raise ValueError("versão publicada não comprovada pelo artefato informado")
+    if valid_from is not None:
+        date_match = re.search(r"GENERATED_STOCK_CATALOG_VALID_FROM = '([^']+)';", content)
+        if not date_match or date_match[1] != valid_from:
+            raise ValueError("data de vigência divergente da versão publicada; preserve a versão histórica")
+    original = json.loads(payload[1])
+    if product_identity_hash(original) != product_identity_hash(products):
+        raise ValueError("origem divergente: códigos/metadados/pesos diferem da versão publicada")
+    for old, new in zip(original, products):
+        if any(key in old and old[key] != new[key] for key in ("amperageAh", "technology")):
+            raise ValueError("metadados analíticos divergentes da versão publicada; preserve a versão histórica")
+    provenance_match = re.search(r"GENERATED_STOCK_CATALOG_PROVENANCE = (\{.*?\}) as const;", content, re.DOTALL)
+    original_provenance = json.loads(provenance_match[1]) if provenance_match else {}
+    if not original_provenance:
+        # The approved v2 enrichment is an explicit one-time bootstrap. Once
+        # anchored, the source name, exact bytes and metadata rules are immutable.
+        if not allow_legacy_bootstrap or version != 2:
+            raise ValueError("catálogo legado sem proveniência exige bootstrap explícito v2 com --verify-published")
+    elif provenance is not None and original_provenance != provenance:
+        raise ValueError("proveniência divergente da versão publicada; preserve a fonte e a versão histórica")
+    return product_identity_hash(original)
+
+
+def render(products: list[dict[str, object]], version: int, valid_from: str,
+           provenance: dict[str, object] | None = None) -> str:
     payload = json.dumps(products, ensure_ascii=False, indent=2)
     return (
         "// Gerado por scripts/product-catalog-cli.py. Não edite manualmente.\n"
         f"export const GENERATED_STOCK_CATALOG_VERSION = {version};\n"
         f"export const GENERATED_STOCK_CATALOG_VALID_FROM = '{valid_from}';\n"
+        f"export const GENERATED_STOCK_CATALOG_PROVENANCE = {json.dumps(provenance or {}, ensure_ascii=False, indent=2)} as const;\n"
         f"export const generatedOwnProductItems = {payload} as const;\n"
     )
+
+
+def publish_artifact(output: Path, content: str) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
+                                         dir=output.parent, prefix=f".{output.name}.",
+                                         suffix=".tmp", delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(content)
+        os.replace(temporary_path, output)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -90,19 +201,55 @@ def main() -> None:
     parser.add_argument("source", type=Path)
     parser.add_argument("--version", type=int, default=2)
     parser.add_argument("--valid-from", default="2026-10-02")
-    parser.add_argument("--output", type=Path, default=Path("apps/web/src/features/visits/stock/own-product-catalog.generated.ts"))
+    parser.add_argument("--output", type=Path, default=Path("packages/domain/src/own-product-catalog.generated.ts"))
+    parser.add_argument("--verify-published", type=Path,
+                        help="comprova que todos os campos históricos da versão permanecem idênticos")
     args = parser.parse_args()
-    products = read_products(args.source)
+    try:
+        if args.version < 1:
+            raise ValueError("versão deve ser positiva")
+        date.fromisoformat(args.valid_from)
+        diagnostics: list[dict[str, object]] = []
+        products = read_products(args.source, diagnostics)
+        # First publication anchors the same identity hash that every subsequent
+        # verification proves; no lifecycle-dependent null enters the artifact.
+        identity_hash = product_identity_hash(products)
+        provenance = {"source": args.source.name, "sourceSha256": hashlib.sha256(args.source.read_bytes()).hexdigest(),
+                      "identitySha256": identity_hash, "verifiedPublishedIdentitySha256": identity_hash,
+                      "metadataColumns": {"amperageAh": "Amperagem (Ah)", "technology": "Tecnologia"},
+                      "metadataRulesVersion": 1}
+        # Authorize bootstrap by canonical destination, never by flag presence.
+        # Write through a symlink's resolved destination so atomic replacement
+        # updates the verified artifact rather than destroying the alias itself.
+        output = args.output.resolve()
+        verification = args.verify_published.resolve() if args.verify_published else None
+        bootstrap_authorized = verification is not None and verification == output
+        if args.command == "publish" and output.exists():
+            verify_published(products, output, args.version, args.valid_from, provenance,
+                             allow_legacy_bootstrap=bootstrap_authorized)
+        if verification is not None:
+            verify_published(products, verification, args.version, args.valid_from, provenance,
+                             allow_legacy_bootstrap=bootstrap_authorized)
+        if args.command == "publish":
+            publish_artifact(output, render(products, args.version, args.valid_from, provenance))
+    except (ValueError, OSError, BadZipFile, InvalidFileException) as error:
+        print(json.dumps({"ok": False, "diagnostics": [{"code": "INVALID_CATALOG", "message": str(error)}]},
+                         ensure_ascii=False, indent=2))
+        sys.exit(1)
     counts = Counter(str(product["brand"]) for product in products)
     fallback = sum(product["weightSource"] == "fallback_15kg" for product in products)
-    summary = {"products": len(products), "brands": dict(counts), "fallbackWeights": fallback, "version": args.version}
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    classified = sum(product["amperageAh"] is not None and product["technology"] is not None for product in products)
+    summary = {"ok": True, "products": len(products), "brands": dict(counts), "fallbackWeights": fallback,
+               "version": args.version, "coverage": {"classifiedProducts": classified,
+               "unclassifiedProducts": len(products) - classified,
+               "withAmperage": sum(product["amperageAh"] is not None for product in products),
+               "withTechnology": sum(product["technology"] is not None for product in products)},
+               "diagnostics": diagnostics, "provenance": provenance}
     if args.command == "preview":
-        print(json.dumps(products[:5], ensure_ascii=False, indent=2))
+        summary["preview"] = products[:5]
     if args.command == "publish":
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(render(products, args.version, args.valid_from), encoding="utf-8")
-        print(f"publicado: {args.output}")
+        summary["output"] = str(args.output)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,108 @@
+schema: 1
+story: '4.41'
+story_title: 'Análise mobile offline do estoque observado antes das fotos'
+gate: PASS
+status_reason: 'Os 17 critérios permanecem atendidos após a correção do ambiente de testes Python do CI. YAML, isolamento, versões fixadas e execução em venv limpo foram revalidados localmente, sem finding pendente.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:87fda5bd38c7f4d3d33985203b662915f287a0f3'
+implementation_revisions: ['b2157b45e5deaf74531ae563f393568ce60d8168', '59dc9855ef0b45c6432007e69b93993b11d2af97', '1abdad48b371977a4e8dc9eb9d8cd0dea25fe463', '7d7924c5042e61e1da0f7e6c34d01cf7d2bdf32f', 'f047538f6d37474274dda024a69be5da558c95bb', '87fda5bd38c7f4d3d33985203b662915f287a0f3']
+updated: '2026-11-12T21:52:53-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1043
+  risks_identified: 6
+  independent_qa:
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    unit: '167 arquivos; 1003 PASS, 1 skip preexistente; 250,58 s na revisão corrigida.'
+    python: '11/11 PASS; fixtures sintéticas e falhas de publicação atômica.'
+    playwright_baseline: '40/40 PASS em 4,5 min; visita completa, identidade/revogação e isolamento.'
+    playwright_final: '7/7 PASS em 56,3 s no build corrigido; análise/offline/back/edit/fallback, teclado, fotos e commit falho.'
+    playwright_environment: 'OPERATIONAL_TIME_ZONE=America/Sao_Paulo; primeira tentativa sem essa configuração foi rejeitada no preflight, antes dos testes.'
+    cli: 'Execução real sem rede: próprias 20/rivais 30, share 40/60; pares 10/10, 5/5, 2/4; cobertura 19 incluídas/31 excluídas. Diagnósticos inválidos cobertos pela suíte.'
+    catalog: 'Fonte local somente lida: 156/156 classificáveis, zero diagnóstico; oito campos históricos idênticos ao baseline; regeneração real produz bytes idênticos.'
+    source_sha256: '817e456c34128605ae5064b19d38689dca3727137fbe4f07b85057cc9ad9793a'
+    historical_identity_sha256: 'fe931fee8fc34c08ec18e6690a2e295a744e0c261c72207f8cb6874241d3be13'
+    mobile_accessibility: '320/360/390/430 px sem overflow; screenshot 320 inspecionada; alvos 44 px, foco/teclado, texto 200% e axe sem violações.'
+    diff_check: PASS
+    persistence: 'Sem mudança em supabase, repositório/serviço offline, controller de persistência ou lockfile; nenhum XLSX rastreado. Banco/pgTAP N/A.'
+  independent_pre_push_revalidation:
+    revision: 'commit:f047538f6d37474274dda024a69be5da558c95bb'
+    lint: PASS
+    typecheck: PASS
+    python: '14 cenários; 13 PASS e 1 skip de symlink por WinError 1314; 26,78 s.'
+    focused_vitest: '3 arquivos, 6 PASS em 20,10 s: gerador, registro offline e CLI real.'
+    structured_errors: 'Omissão individual dos oito campos históricos em artefato de publish retorna saída 1/INVALID_CATALOG, sem traceback, preservando o output.'
+    path_identity: 'Âncora legada distinta é rejeitada; caminho equivalente com .. é aceito. Regressões cobrem relativo/absoluto, destino novo e preservação de ambos os arquivos.'
+    catalog: 'Fonte real novamente somente lida; 156/156, zero diagnóstico, hashes fonte/identidade iguais; XLSX e artefato gerado inalterados.'
+    runtime_gate_reuse: 'Build, suíte completa e 40/7 E2E acima pertencem à revisão 7d7924c; não repetidos no patch restrito a Python/fixtures/docs, sem diff em apps/packages/lockfile/supabase.'
+    diff_check: PASS
+  independent_ci_revalidation:
+    revision: 'commit:87fda5bd38c7f4d3d33985203b662915f287a0f3'
+    yaml_and_order: 'Ambos workflows parseados sem chaves duplicadas; ubuntu-24.04, venv em RUNNER_TEMP fora do checkout e GITHUB_PATH antes de npm test.'
+    bash_syntax: 'Os dois scripts de instalação passaram bash -n.'
+    clean_venv: 'Venv temporário novo no Windows: pip install -r, pip check e freeze passaram; somente openpyxl==3.1.5 e et_xmlfile==2.0.0.'
+    python: '13 PASS e 1 skip de symlink em 25,83 s usando exclusivamente o venv novo.'
+    vitest_wrapper: '1/1 PASS em 18,52 s com o Python do venv no PATH.'
+    supply_chain: 'Dependências diretas/transitivas fixadas, metadados MIT/Python>=3.8 conferidos no PyPI; sem sudo, nova action, interpolação de entrada não confiável ou expansão de permissões.'
+    package_metadata_sources: ['https://pypi.org/project/openpyxl/3.1.5/', 'https://pypi.org/project/et-xmlfile/2.0.0/']
+    hosted_runner_source: 'https://raw.githubusercontent.com/actions/runner-images/main/images/ubuntu/scripts/build/install-python.sh'
+    scope: 'Somente workflows, requirements de teste e notes/File List; runtime, apps/packages, lockfile, catálogo e banco inalterados. Gates completos anteriores não foram repetidos.'
+    github_execution: 'QA não executou nem declara aprovado um run remoto; DevOps verifica os workflows após push.'
+    diff_check: PASS
+  coderabbit:
+    qa_committed_review: 'CLI 0.7.6/WSL contra e6bbf90: zero CRITICAL/major; dois minor reproduzidos e corrigidos em 1abdad4.'
+    final_patch_review: 'Executor executou revisão final: zero findings; QA revisou integralmente o patch e reexecutou os casos reproduzidos.'
+    devops_patch_review: 'Revisão CodeRabbit do executor sobre o patch pré-push: zero findings; diff completo e regressões revistos independentemente por QA.'
+    ci_patch_review: 'DevOps executou CodeRabbit sobre o patch de CI: zero findings; QA revisou os quatro arquivos do commit.'
+    bootstrap_disposition: 'Proibição genérica do bootstrap histórico não aplicada, conforme parecer arquitetural/coordenador e AC8-9/T1. Bootstrap exige v2 legada, --verify-published explícito resolvendo para o mesmo destino e identidade histórica comprovada; após ancoragem, proveniência/metadados são imutáveis. Não há waiver do gate final.'
+  resolved_findings:
+    - id: 'REQ-441-01'
+      finding: 'Primeira publicação e republicação idênticas alteravam verifiedPublishedIdentitySha256 e os bytes.'
+      verification: 'Reprodução independente passou de bytes diferentes para idênticos; teste compara primeira/segunda/terceira publicação.'
+    - id: 'REQ-441-02'
+      finding: 'Mesma versão aceitava substituir proveniência por workbook de bytes/nome diferentes.'
+      verification: 'Alteração somente de properties.title agora retorna saída1/INVALID_CATALOG e preserva os bytes anteriores; regressão cobre nome, fonte e bootstrap explícito.'
+    - id: 'REQ-441-03'
+      finding: 'Snapshot com um array ausente expunha cortes com zero/percentuais artificiais.'
+      verification: 'Contrato/domínio/UI retornam pares insufficient com nulls/cuts[]; regressões dos dois lados ausentes, [] explícito e inteiros seguros passaram.'
+    - id: 'REQ-441-04'
+      finding: 'Identidade histórica malformada causava KeyError/TypeError e saía sem diagnóstico JSON.'
+      verification: 'Validação defensiva antes do hash e regressões de lista/objeto/campos/tipos; omissão independente dos oito campos retorna JSON/saída 1 e não altera o artefato.'
+    - id: 'REQ-441-05'
+      finding: 'Flag de verificação apontando outro arquivo liberava bootstrap de destino legado não ancorado.'
+      verification: 'Path.resolve vincula a âncora ao destino; outro arquivo ou destino novo são rejeitados, aliases equivalentes são aceitos e a escrita usa o destino resolvido.'
+    - id: 'TEST-441-06'
+      finding: 'Runner limpo não possuía openpyxl para o teste Python chamado por npm test.'
+      verification: 'CI e release instalam os dois pacotes fixados em venv fora do checkout e exportam seu bin antes dos gates; instalação limpa, pip check, Python e wrapper passaram.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Derivação recebe snapshot já autorizado pela partição existente; revogação remove a leitura ativa. Sem nova rede, segredo, SQL, execução dinâmica ou HTML não escapado; isolamento cross-tab revalidado.'
+  performance:
+    status: PASS
+    notes: 'Cálculo local limitado pelos arrays existentes de até 200 linhas/lado e catálogo offline 156; sem I/O, relógio, persistência derivada ou dependência nova.'
+  reliability:
+    status: PASS
+    notes: 'Navegação ocorre após commit; falha analítica mantém estoque/outbox/fotos e ações. Reabertura offline, Back, edição, zeros/legados, soma segura e proveniência foram revalidados.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos únicos, domínio puro e registro versionado compartilhado entre CLI/PWA; adaptador web preservado. Três findings possuem regressões, sem alteração de requisitos ou código de produto por QA.'
+  accessibility:
+    status: PASS
+    notes: 'Uma coluna e ações alcançáveis, semântica, foco e teclado; axe sem violações no escopo main. Teste automatizado de 200% é ampliação de texto, não homologação de zoom nativo/TalkBack.'
+recommendations:
+  immediate: []
+  future: []
+limitations:
+  - 'WSL local sem ensurepip impediu executar o bootstrap Linux completo; bash -n passou e o instalador oficial do runner hospedado inclui python3-venv. Instalação/testes isolados foram executados no Windows.'
+  - 'Limpeza do venv temporário Windows foi rejeitada por política automática; ele permanece na pasta Temp, fora do checkout, sem alteração de ambiente global.'
+  - 'Teste de symlink do gerador pulado no Windows por WinError 1314; WSL não dispõe de openpyxl. Sem instalação de dependência ou mudança de permissão; relativo/absoluto e .. executados.'
+  - 'Android físico/TalkBack, câmera/GPS reais, zoom nativo e encerramento do processo pelo sistema operacional não executados.'
+  - 'Reabertura offline usa o mesmo contexto Chromium; PASS de software não declara homologação física, uso de dados reais ou deploy.'
