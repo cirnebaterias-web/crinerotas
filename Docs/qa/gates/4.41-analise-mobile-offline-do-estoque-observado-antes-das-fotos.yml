@@ -1,0 +1,70 @@
+schema: 1
+story: '4.41'
+story_title: 'Análise mobile offline do estoque observado antes das fotos'
+gate: PASS
+status_reason: 'Os 17 critérios estão atendidos após corrigir determinismo/proveniência do catálogo e comparações de snapshots incompletos. Gates independentes e regressões de produção passaram, sem finding pendente.'
+reviewer: 'Quinn (Test Architect)'
+reviewed_revision: 'commit:7d7924c5042e61e1da0f7e6c34d01cf7d2bdf32f'
+implementation_revisions: ['b2157b45e5deaf74531ae563f393568ce60d8168', '59dc9855ef0b45c6432007e69b93993b11d2af97', '1abdad48b371977a4e8dc9eb9d8cd0dea25fe463', '7d7924c5042e61e1da0f7e6c34d01cf7d2bdf32f']
+updated: '2026-11-12T21:23:31-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 100
+evidence:
+  tests_reviewed: 1043
+  risks_identified: 3
+  independent_qa:
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    unit: '167 arquivos; 1003 PASS, 1 skip preexistente; 250,58 s na revisão corrigida.'
+    python: '11/11 PASS; fixtures sintéticas e falhas de publicação atômica.'
+    playwright_baseline: '40/40 PASS em 4,5 min; visita completa, identidade/revogação e isolamento.'
+    playwright_final: '7/7 PASS em 56,3 s no build corrigido; análise/offline/back/edit/fallback, teclado, fotos e commit falho.'
+    playwright_environment: 'OPERATIONAL_TIME_ZONE=America/Sao_Paulo; primeira tentativa sem essa configuração foi rejeitada no preflight, antes dos testes.'
+    cli: 'Execução real sem rede: próprias 20/rivais 30, share 40/60; pares 10/10, 5/5, 2/4; cobertura 19 incluídas/31 excluídas. Diagnósticos inválidos cobertos pela suíte.'
+    catalog: 'Fonte local somente lida: 156/156 classificáveis, zero diagnóstico; oito campos históricos idênticos ao baseline; regeneração real produz bytes idênticos.'
+    source_sha256: '817e456c34128605ae5064b19d38689dca3727137fbe4f07b85057cc9ad9793a'
+    historical_identity_sha256: 'fe931fee8fc34c08ec18e6690a2e295a744e0c261c72207f8cb6874241d3be13'
+    mobile_accessibility: '320/360/390/430 px sem overflow; screenshot 320 inspecionada; alvos 44 px, foco/teclado, texto 200% e axe sem violações.'
+    diff_check: PASS
+    persistence: 'Sem mudança em supabase, repositório/serviço offline, controller de persistência ou lockfile; nenhum XLSX rastreado. Banco/pgTAP N/A.'
+  coderabbit:
+    qa_committed_review: 'CLI 0.7.6/WSL contra e6bbf90: zero CRITICAL/major; dois minor reproduzidos e corrigidos em 1abdad4.'
+    final_patch_review: 'Executor executou revisão final: zero findings; QA revisou integralmente o patch e reexecutou os casos reproduzidos.'
+    bootstrap_disposition: 'Proibição genérica do bootstrap histórico não aplicada, conforme parecer arquitetural/coordenador e AC8-9/T1. Bootstrap agora exige v2 legada, --verify-published explícito e identidade histórica comprovada; após ancoragem, proveniência/metadados são imutáveis. Não há waiver do gate final.'
+  resolved_findings:
+    - id: 'REQ-441-01'
+      finding: 'Primeira publicação e republicação idênticas alteravam verifiedPublishedIdentitySha256 e os bytes.'
+      verification: 'Reprodução independente passou de bytes diferentes para idênticos; teste compara primeira/segunda/terceira publicação.'
+    - id: 'REQ-441-02'
+      finding: 'Mesma versão aceitava substituir proveniência por workbook de bytes/nome diferentes.'
+      verification: 'Alteração somente de properties.title agora retorna saída1/INVALID_CATALOG e preserva os bytes anteriores; regressão cobre nome, fonte e bootstrap explícito.'
+    - id: 'REQ-441-03'
+      finding: 'Snapshot com um array ausente expunha cortes com zero/percentuais artificiais.'
+      verification: 'Contrato/domínio/UI retornam pares insufficient com nulls/cuts[]; regressões dos dois lados ausentes, [] explícito e inteiros seguros passaram.'
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    ac_gaps: []
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'Derivação recebe snapshot já autorizado pela partição existente; revogação remove a leitura ativa. Sem nova rede, segredo, SQL, execução dinâmica ou HTML não escapado; isolamento cross-tab revalidado.'
+  performance:
+    status: PASS
+    notes: 'Cálculo local limitado pelos arrays existentes de até 200 linhas/lado e catálogo offline 156; sem I/O, relógio, persistência derivada ou dependência nova.'
+  reliability:
+    status: PASS
+    notes: 'Navegação ocorre após commit; falha analítica mantém estoque/outbox/fotos e ações. Reabertura offline, Back, edição, zeros/legados, soma segura e proveniência foram revalidados.'
+  maintainability:
+    status: PASS
+    notes: 'Contratos únicos, domínio puro e registro versionado compartilhado entre CLI/PWA; adaptador web preservado. Três findings possuem regressões, sem alteração de requisitos ou código de produto por QA.'
+  accessibility:
+    status: PASS
+    notes: 'Uma coluna e ações alcançáveis, semântica, foco e teclado; axe sem violações no escopo main. Teste automatizado de 200% é ampliação de texto, não homologação de zoom nativo/TalkBack.'
+recommendations:
+  immediate: []
+  future: []
+limitations:
+  - 'Android físico/TalkBack, câmera/GPS reais, zoom nativo e encerramento do processo pelo sistema operacional não executados.'
+  - 'Reabertura offline usa o mesmo contexto Chromium; PASS de software não declara homologação física, uso de dados reais ou deploy.'
