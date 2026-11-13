@@ -348,24 +348,29 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave, onDirtyCh
     {fieldError(row.rowId, field) && <p className="seller-field-error"
       id={`${fieldId(row.rowId, field)}-error`}>{fieldError(row.rowId, field)}</p>}
   </div>;
-  const detailedRow = (row: Row, index: number, group: Group) => <fieldset className="seller-stock-row" key={row.rowId}>
+  const detailedRow = (row: Row, index: number, group: Group) => {
+    const technologyError = fieldError(row.rowId, 'technologyId');
+    const conditionError = fieldError(row.rowId, 'conditionId');
+    return <fieldset className="seller-stock-row" key={row.rowId}>
     <legend>Bateria {index + 1}</legend><div className="seller-stock-row-fields seller-price-row-fields">
       {input(row, 'modelOrAmperage', 'Modelo ou amperagem', 'Ex.: 60 Ah')}
       <div className="seller-stock-field"><label htmlFor={fieldId(row.rowId, 'technologyId')}>Tecnologia</label>
         <select id={fieldId(row.rowId, 'technologyId')} ref={register(key(row.rowId, 'technologyId'))}
-          value={row.technologyId} aria-invalid={Boolean(fieldError(row.rowId, 'technologyId'))}
+          value={row.technologyId} aria-invalid={Boolean(technologyError)}
+          aria-describedby={technologyError ? `${fieldId(row.rowId, 'technologyId')}-error` : undefined}
           onChange={(event) => updateRow(group.id, row.rowId, 'technologyId', event.target.value)}>
           <option value="">Selecione</option>{parameters?.values.technologies.map((technology) =>
             <option key={technology.id} value={technology.id}>{technology.label}</option>)}</select>
-        {fieldError(row.rowId, 'technologyId') && <p className="seller-field-error">{fieldError(row.rowId, 'technologyId')}</p>}</div>
+        {technologyError && <p className="seller-field-error" id={`${fieldId(row.rowId, 'technologyId')}-error`}>{technologyError}</p>}</div>
       {input(row, 'priceBrl', 'Preço de venda (R$)', '399,90')}
       <div className="seller-stock-field"><label htmlFor={fieldId(row.rowId, 'conditionId')}>Condição</label>
         <select id={fieldId(row.rowId, 'conditionId')} ref={register(key(row.rowId, 'conditionId'))}
-          value={row.conditionId} aria-invalid={Boolean(fieldError(row.rowId, 'conditionId'))}
+          value={row.conditionId} aria-invalid={Boolean(conditionError)}
+          aria-describedby={conditionError ? `${fieldId(row.rowId, 'conditionId')}-error` : undefined}
           onChange={(event) => updateRow(group.id, row.rowId, 'conditionId', event.target.value)}>
           <option value="">Selecione</option>{parameters?.values.conditions.map((condition) =>
             <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select>
-        {fieldError(row.rowId, 'conditionId') && <p className="seller-field-error">{fieldError(row.rowId, 'conditionId')}</p>}</div>
+        {conditionError && <p className="seller-field-error" id={`${fieldId(row.rowId, 'conditionId')}-error`}>{conditionError}</p>}</div>
       <div className="seller-stock-field seller-price-observation"><label htmlFor={fieldId(row.rowId, 'observation')}>Observação (opcional)</label>
         <textarea id={fieldId(row.rowId, 'observation')} value={row.observation} maxLength={500}
           onChange={(event) => updateRow(group.id, row.rowId, 'observation', event.target.value)} /></div>
@@ -373,6 +378,7 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave, onDirtyCh
       aria-label={`Remover bateria ${index + 1} da marca ${brandLabel(group.competitorId)}`}
       onClick={() => removeRow(group.id, row.rowId)}>Remover bateria</button>
   </fieldset>;
+  };
 
   const ownOverview = <div className="seller-price-own-flow">
     <div className="seller-stock-heading"><div><p className="seller-kicker">PESQUISA DE PREÇOS</p>
@@ -423,6 +429,8 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave, onDirtyCh
         const row = rowForProduct(activeGroup, product.factoryCode, product.model);
         const stockLine = stockByCode.get(product.factoryCode) ?? stockByModel.get(product.model.toLocaleLowerCase('pt-BR'));
         const error = row ? fieldError(row.rowId, 'priceBrl') : undefined;
+        const technologyError = row ? fieldError(row.rowId, 'technologyId') : undefined;
+        const conditionError = row ? fieldError(row.rowId, 'conditionId') : undefined;
         return <div className={`seller-stock-model-row seller-price-product-row${stockLine ? ' is-in-stock' : ''}`} key={product.id}>
           <label htmlFor={`catalog-price-${product.factoryCode}`}>{product.model}<small>{product.factoryCode}
             {stockLine ? ` · Em estoque: ${stockLine.quantity} un.` : ''}</small></label>
@@ -432,20 +440,22 @@ export function VisitCompetitorPricesStep({ draft, parameters, onSave, onDirtyCh
             aria-describedby={error && row ? `${fieldId(row.rowId, 'priceBrl')}-error` : undefined}
             onChange={(event) => setCatalogPrice(activeGroup, product.factoryCode, product.model, event.target.value)} /></div>
           {row?.priceBrl && <div className="seller-price-confirmation-fields">
-            <label htmlFor={`catalog-technology-${product.factoryCode}`}>Tecnologia confirmada</label>
-            <select id={`catalog-technology-${product.factoryCode}`} value={row.technologyId}
-              aria-invalid={Boolean(fieldError(row.rowId, 'technologyId'))}
-              onChange={(event) => updateRow(activeGroup.id, row.rowId, 'technologyId', event.target.value)}>
-              <option value="">Selecione</option>{parameters?.values.technologies.map((technology) =>
-                <option key={technology.id} value={technology.id}>{technology.label}</option>)}</select>
-            <label htmlFor={`catalog-condition-${product.factoryCode}`}>Condição confirmada</label>
-            <select id={`catalog-condition-${product.factoryCode}`} value={row.conditionId}
-              aria-invalid={Boolean(fieldError(row.rowId, 'conditionId'))}
-              onChange={(event) => updateRow(activeGroup.id, row.rowId, 'conditionId', event.target.value)}>
-              <option value="">Selecione</option>{parameters?.values.conditions.map((condition) =>
-                <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select>
-            {fieldError(row.rowId, 'technologyId') && <p className="seller-field-error">{fieldError(row.rowId, 'technologyId')}</p>}
-            {fieldError(row.rowId, 'conditionId') && <p className="seller-field-error">{fieldError(row.rowId, 'conditionId')}</p>}
+            <div className="seller-stock-field"><label htmlFor={`catalog-technology-${product.factoryCode}`}>Tecnologia confirmada</label>
+              <select id={`catalog-technology-${product.factoryCode}`} value={row.technologyId}
+                aria-invalid={Boolean(technologyError)}
+                aria-describedby={technologyError ? `catalog-technology-${product.factoryCode}-error` : undefined}
+                onChange={(event) => updateRow(activeGroup.id, row.rowId, 'technologyId', event.target.value)}>
+                <option value="">Selecione</option>{parameters?.values.technologies.map((technology) =>
+                  <option key={technology.id} value={technology.id}>{technology.label}</option>)}</select>
+              {technologyError && <p className="seller-field-error" id={`catalog-technology-${product.factoryCode}-error`}>{technologyError}</p>}</div>
+            <div className="seller-stock-field"><label htmlFor={`catalog-condition-${product.factoryCode}`}>Condição confirmada</label>
+              <select id={`catalog-condition-${product.factoryCode}`} value={row.conditionId}
+                aria-invalid={Boolean(conditionError)}
+                aria-describedby={conditionError ? `catalog-condition-${product.factoryCode}-error` : undefined}
+                onChange={(event) => updateRow(activeGroup.id, row.rowId, 'conditionId', event.target.value)}>
+                <option value="">Selecione</option>{parameters?.values.conditions.map((condition) =>
+                  <option key={condition.id} value={condition.id}>{condition.label}</option>)}</select>
+              {conditionError && <p className="seller-field-error" id={`catalog-condition-${product.factoryCode}-error`}>{conditionError}</p>}</div>
           </div>}
           {error && row && <p className="seller-field-error" id={`${fieldId(row.rowId, 'priceBrl')}-error`}>{error}</p>}
         </div>;

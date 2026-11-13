@@ -1201,6 +1201,22 @@ test('reuses own products found in stock and allows pricing another catalog prod
   await page.getByRole('button', { name: /Heliar: 0 preços/ }).click();
   await expect(page.getByText('Em estoque: 2 un.')).toBeVisible();
   await page.getByLabel('Preço de venda de HG38JD 24-320').fill('529');
+  const pricedProduct = page.getByLabel('Preço de venda de HG38JD 24-320').locator('..').locator('..');
+  const nextProduct = pricedProduct.locator('+ .seller-price-product-row');
+  await expect(page.getByLabel('Tecnologia confirmada')).toBeVisible();
+  await expect(page.getByLabel('Condição confirmada')).toBeVisible();
+  const [pricedBox, confirmationBox, nextBox] = await Promise.all([
+    pricedProduct.boundingBox(), pricedProduct.locator('.seller-price-confirmation-fields').boundingBox(), nextProduct.boundingBox(),
+  ]);
+  expect(pricedBox).not.toBeNull();
+  expect(confirmationBox).not.toBeNull();
+  expect(nextBox).not.toBeNull();
+  expect(confirmationBox!.y + confirmationBox!.height).toBeLessThanOrEqual(pricedBox!.y + pricedBox!.height + 1);
+  expect(pricedBox!.y + pricedBox!.height).toBeLessThanOrEqual(nextBox!.y + 1);
+  expect(await page.locator('.seller-stock-model-list').evaluate((element) => ({
+    maxHeight: getComputedStyle(element).maxHeight, overflowY: getComputedStyle(element).overflowY,
+  }))).toEqual({ maxHeight: 'none', overflowY: 'visible' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.getByLabel('Tecnologia confirmada').selectOption(technologyId);
   await page.getByLabel('Condição confirmada').selectOption(conditionId);
   await page.getByLabel('Buscar modelo').fill('HTZ12S-BS');
@@ -1217,6 +1233,7 @@ test('reuses own products found in stock and allows pricing another catalog prod
 });
 
 test('rejects a non-positive price and accepts explicit unavailability with a published reason', async ({ page, context }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
   await mockVisitSeller(page);
   await page.goto('/route');
   await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
@@ -1232,12 +1249,39 @@ test('rejects a non-positive price and accepts explicit unavailability with a pu
   await page.getByLabel('Tecnologia').selectOption(technologyId);
   await page.getByLabel('Preço de venda (R$)').fill('0');
   await page.getByLabel('Condição').selectOption(conditionId);
+  const competitorRow = page.getByLabel('Modelo ou amperagem').locator('..').locator('..').locator('..');
+  const competitorBox = await competitorRow.boundingBox();
+  expect(competitorBox).not.toBeNull();
+  expect(competitorBox!.x).toBeGreaterThanOrEqual(0);
+  expect(competitorBox!.x + competitorBox!.width).toBeLessThanOrEqual(320);
+  const fieldBoxes = await competitorRow.locator('.seller-stock-field').evaluateAll((fields) => fields.map((field) => {
+    const box = field.getBoundingClientRect(); return { top: box.top, bottom: box.bottom };
+  }));
+  for (let index = 1; index < fieldBoxes.length; index += 1) {
+    expect(fieldBoxes[index]!.top).toBeGreaterThanOrEqual(fieldBoxes[index - 1]!.bottom - 1);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.getByLabel('Observação (opcional)').focus();
+  await expect(page.getByLabel('Observação (opcional)')).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Remover bateria 1 da marca Concorrente Sintético' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Revisar preços informados' })).toBeVisible();
   await page.getByRole('button', { name: 'Revisar preços informados' }).click();
   await expect(page.getByText('Informe um preço de venda maior que zero. Exemplo: 399,90.')).toBeVisible();
   await expect(page.getByLabel('Preço de venda (R$)')).toBeFocused();
   await page.getByRole('button', { name: 'Revisar preços informados' }).click();
   await expect(page.getByLabel('Preço de venda (R$)')).toBeFocused();
   await expect(page).toHaveURL(/\?step=prices&priceView=competitors$/);
+
+  await page.getByLabel('Preço de venda (R$)').fill('399');
+  await page.getByLabel('Tecnologia').selectOption('');
+  await page.getByLabel('Condição').selectOption('');
+  await page.getByRole('button', { name: 'Revisar preços informados' }).click();
+  await expect(page.getByLabel('Tecnologia')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByLabel('Tecnologia')).toHaveAttribute('aria-describedby', /technologyId-error$/);
+  await expect(page.getByLabel('Condição')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByLabel('Condição')).toHaveAttribute('aria-describedby', /conditionId-error$/);
+  await page.getByLabel('Tecnologia').selectOption(technologyId);
+  await page.getByLabel('Condição').selectOption(conditionId);
 
   await page.getByLabel('Preço não disponível').check();
   await page.getByLabel('Motivo da indisponibilidade').selectOption(unavailableReasonId);
