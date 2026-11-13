@@ -127,6 +127,12 @@ def read_sheet(sheet, diagnostics: list[dict[str, object]]) -> list[dict[str, ob
 
 
 def product_identity_hash(products: list[dict[str, object]]) -> str:
+    if not isinstance(products, list) or not products or any(
+        not isinstance(product, dict) or any(
+            not isinstance(product.get(key), str) or not product[key].strip() for key in IDENTITY_FIELDS
+        ) for product in products
+    ):
+        raise ValueError("artefato publicado com identidade de produto inválida ou incompleta")
     identity = [{key: product[key] for key in IDENTITY_FIELDS} for product in products]
     return hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True,
                                      separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -212,14 +218,20 @@ def main() -> None:
                       "identitySha256": identity_hash, "verifiedPublishedIdentitySha256": identity_hash,
                       "metadataColumns": {"amperageAh": "Amperagem (Ah)", "technology": "Tecnologia"},
                       "metadataRulesVersion": 1}
-        if args.command == "publish" and args.output.exists():
-            verify_published(products, args.output, args.version, args.valid_from, provenance,
-                             allow_legacy_bootstrap=bool(args.verify_published))
-        if args.verify_published:
-            verify_published(products, args.verify_published, args.version, args.valid_from, provenance,
-                             allow_legacy_bootstrap=True)
+        # Authorize bootstrap by canonical destination, never by flag presence.
+        # Write through a symlink's resolved destination so atomic replacement
+        # updates the verified artifact rather than destroying the alias itself.
+        output = args.output.resolve()
+        verification = args.verify_published.resolve() if args.verify_published else None
+        bootstrap_authorized = verification is not None and verification == output
+        if args.command == "publish" and output.exists():
+            verify_published(products, output, args.version, args.valid_from, provenance,
+                             allow_legacy_bootstrap=bootstrap_authorized)
+        if verification is not None:
+            verify_published(products, verification, args.version, args.valid_from, provenance,
+                             allow_legacy_bootstrap=bootstrap_authorized)
         if args.command == "publish":
-            publish_artifact(args.output, render(products, args.version, args.valid_from, provenance))
+            publish_artifact(output, render(products, args.version, args.valid_from, provenance))
     except (ValueError, OSError, BadZipFile, InvalidFileException) as error:
         print(json.dumps({"ok": False, "diagnostics": [{"code": "INVALID_CATALOG", "message": str(error)}]},
                          ensure_ascii=False, indent=2))

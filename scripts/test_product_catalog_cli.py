@@ -194,6 +194,84 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(newer["version"], 3)
         self.assertEqual(artifact.read_bytes(), expected)
 
+    def test_malformed_published_identity_returns_structured_diagnostic(self):
+        self.workbook([self.row()])
+        products = catalog.read_products(self.source)
+        incomplete = {key: value for key, value in products[0].items() if key != "id"}
+        artifact = Path(self.temp.name) / "malformed.generated.ts"
+        for payload in ([incomplete], [None], [], [{**products[0], "id": 123}]):
+            with self.subTest(payload=payload):
+                artifact.write_text(catalog.render(payload, 2, "2026-10-02"), encoding="utf-8")
+                result = subprocess.run([sys.executable, str(Path(catalog.__file__)), "validate", str(self.source),
+                                         "--verify-published", str(artifact)], capture_output=True, encoding="utf-8",
+                                        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stdout, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                error = json.loads(result.stdout)
+                self.assertEqual(error["diagnostics"][0]["code"], "INVALID_CATALOG")
+
+    def test_legacy_bootstrap_rejects_another_artifact_and_accepts_resolved_path(self):
+        self.workbook([self.row()])
+        products = catalog.read_products(self.source)
+        artifact = Path(self.temp.name) / "legacy.generated.ts"
+        artifact.write_text(catalog.render(products, 2, "2026-10-02"), encoding="utf-8")
+        other = artifact.with_name("other.generated.ts")
+        other.write_bytes(artifact.read_bytes())
+        expected = artifact.read_bytes()
+        result, error = self.run_cli("publish", "--output", str(artifact), "--verify-published", str(other))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("bootstrap explícito", error["diagnostics"][0]["message"])
+        self.assertEqual(artifact.read_bytes(), expected)
+        self.assertEqual(other.read_bytes(), expected)
+        fresh = artifact.with_name("new.generated.ts")
+        result, _ = self.run_cli("publish", "--output", str(fresh), "--verify-published", str(other))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(fresh.exists())
+        alias_parent = artifact.parent / "path-alias"
+        alias_parent.mkdir()
+        normalized = alias_parent / ".." / artifact.name
+        result, _ = self.run_cli("publish", "--output", str(normalized), "--verify-published", str(artifact))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        published = artifact.read_bytes()
+        result, _ = self.run_cli("publish", "--output", str(artifact), "--verify-published", str(normalized))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(artifact.read_bytes(), published)
+        self.assertEqual(other.read_bytes(), expected)
+        try:
+            relative = os.path.relpath(artifact, Path.cwd())
+        except ValueError:
+            relative = str(artifact)  # Different Windows drives have no relative path.
+        result, _ = self.run_cli("publish", "--output", relative, "--verify-published", str(artifact))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(artifact.read_bytes(), published)
+
+    def test_legacy_bootstrap_resolves_symlinks_without_replacing_the_alias(self):
+        self.workbook([self.row()])
+        products = catalog.read_products(self.source)
+        artifact = Path(self.temp.name) / "legacy.generated.ts"
+        artifact.write_text(catalog.render(products, 2, "2026-10-02"), encoding="utf-8")
+        other = artifact.with_name("other.generated.ts")
+        other.write_bytes(artifact.read_bytes())
+        alias = artifact.with_name("alias.generated.ts")
+        other_alias = artifact.with_name("other-alias.generated.ts")
+        try:
+            alias.symlink_to(artifact)
+            other_alias.symlink_to(other)
+        except OSError as error:
+            self.skipTest(f"Symlink unavailable in this environment: {error}")
+        expected = artifact.read_bytes()
+        result, _ = self.run_cli("publish", "--output", str(alias), "--verify-published", str(other_alias))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(artifact.read_bytes(), expected)
+        self.assertTrue(alias.is_symlink())
+        result, _ = self.run_cli("publish", "--output", str(alias), "--verify-published", str(artifact))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(alias.is_symlink())
+        self.assertNotEqual(artifact.read_bytes(), expected)
+        self.assertEqual(alias.read_bytes(), artifact.read_bytes())
+        self.assertEqual(other.read_bytes(), expected)
+
     def test_cli_structural_error_is_one_json_document(self):
         self.workbook([], ["not a catalog"])
         result, error = self.run_cli("preview")
