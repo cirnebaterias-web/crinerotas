@@ -1,34 +1,32 @@
 schema: 1
 story: '4.42'
 story_title: 'Coleta de preços mobile sem sobreposição'
-gate: FAIL
-status_reason: 'Os AC1–10 estão cobertos, mas o AC11 não: npm test agregado encerrou com exit 1 por timeout contextual do catálogo. O teste isolado passou, porém CI remoto integral com exit 0 é obrigatório.'
+gate: PASS
+status_reason: 'Os 11 critérios estão atendidos no SHA final: matriz 320/390 completa para os dois fluxos, reexecução QA 4/4 e CIs integrais de push/PR aprovados.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'base:2219147+product-diff:8e2ebcbdd022930a6bf51e08f9145a80e17b8e17'
-updated: '2026-11-13T11:59:59-03:00'
-top_issues:
-  - id: 'TEST-442-02'
-    severity: high
-    finding: 'A execução agregada final de npm test encerrou com exit 1: 166 arquivos/1004 testes passaram e 1 foi ignorado, mas scripts/product-catalog-cli.test.ts excedeu o timeout interno de 80 s.'
-    suggested_action: 'Executar o CI remoto integral e exigir npm test com exit 0. O PASS isolado 1/1 em 54,77 s serve como diagnóstico, não como substituto do gate agregado.'
-    suggested_owner: devops
+reviewed_revision: 'commit:5b7a51c2a70d8ec0ca33f63de207d95f6d1cc5b4'
+updated: '2026-11-13T13:07:52-03:00'
+top_issues: []
 waiver: { active: false }
-quality_score: 80
+quality_score: 100
 evidence:
   tests_reviewed: 5
   risks_identified: 2
   independent_qa:
     focused_unit: '5/5 PASS em 1 arquivo; inclui renderização dos fluxos próprio/concorrente e associações de erro.'
-    focused_playwright: '2/2 PASS em 1,1 min na rodada final; próprios 390x844 e concorrente 320x800.'
-    geometry: 'Cartão próprio cresce antes da linha adjacente; concorrente contido em 320 px; sem overflow horizontal; lista própria com max-height none e overflow-y visible.'
+    focused_playwright: '4/4 PASS em 1,8 min na reexecução QA; próprios e concorrentes em 320x800 e 390x844.'
+    geometry: 'Cartão próprio cresce antes da linha adjacente; campos concorrentes mantêm sequência vertical; sem overflow horizontal; lista própria com max-height none e overflow-y visible nas duas larguras.'
     accessibility_inspection: 'JSX e testes finais comprovam labels, IDs distintos, aria-invalid e aria-describedby condicionais para os campos alterados.'
     lint: PASS
     typecheck: PASS
-    reported_full_gates: 'Lint, typecheck, build e diff-check PASS. npm test agregado encerrou com exit 1: 166 arquivos/1004 testes PASS e 1 skip; scripts/product-catalog-cli.test.ts excedeu o limite interno de 80 s. O arquivo restante passou isoladamente 1/1 em 54,77 s. CI remoto integral com exit 0 é obrigatório.'
+    local_full_gates: 'Lint, typecheck, build e diff-check PASS. npm test local agregado teve exit 1 por timeout contextual do catálogo; o arquivo passou isoladamente 1/1 em 54,77 s.'
+    remote_ci_push: 'SUCCESS; run 43457912541, 8m29s, commit 5b7a51c2a70d8ec0ca33f63de207d95f6d1cc5b4; todos os gates, unit agregado/catálogo, build, Playwright, integração e imagem/canário.'
+    remote_ci_pr: 'SUCCESS; run 43457923574, 8m08s, mesmo commit e escopo integral.'
+    coderabbit: 'Finding Minor da matriz incompleta corrigido no SHA final e revalidado 4/4 por QA. Nova revisão remota indisponível por quota; nenhum CRITICAL/major havia sido reportado.'
     diff_check: PASS
   trace:
-    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    ac_gaps: [11]
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    ac_gaps: []
 nfr_validation:
   security:
     status: PASS
@@ -37,8 +35,8 @@ nfr_validation:
     status: PASS
     notes: 'Remove o scroll interno apenas em mobile e não adiciona cálculo, I/O ou dependência.'
   reliability:
-    status: CONCERNS
-    notes: 'Playwright preserva os fluxos alterados e o teste de catálogo passa isolado, mas o gate agregado local encerrou com exit 1; CI remoto completo ainda precisa confirmar estabilidade.'
+    status: PASS
+    notes: 'Matriz completa 4/4 e dois CIs integrais verdes confirmam os fluxos alterados e a suíte agregada no SHA final.'
   maintainability:
     status: PASS
     notes: 'Patch localizado, sem regra comercial alterada; regressões de componente e navegador cobrem a estrutura modificada.'
@@ -46,10 +44,9 @@ nfr_validation:
     status: PASS
     notes: 'Nomes acessíveis, foco no primeiro erro, aria-invalid, aria-describedby, alvos existentes e IDs distintos foram inspecionados e exercitados nos fluxos alterados.'
 recommendations:
-  immediate:
-    - action: 'Executar CI remoto integral e confirmar npm test com exit 0 antes do deploy.'
-      refs: ['scripts/product-catalog-cli.test.ts', 'Docs/stories/4.42.story.md']
+  immediate: []
   future: []
 limitations:
-  - 'O teste do gerador de catálogo excedeu seu limite interno de 80 s no contexto da suíte agregada, fazendo npm test encerrar com exit 1; isoladamente passou 1/1 em 54,77 s. A causa aparenta ser contenção contextual, mas o CI remoto deve confirmar exit 0.'
+  - 'Localmente, o teste do gerador de catálogo excedeu 80 s na suíte agregada e passou isoladamente 1/1 em 54,77 s; os dois CIs remotos integrais passaram a suíte agregada no SHA final.'
+  - 'A nova revisão CodeRabbit após a correção ficou indisponível por quota; o único finding Minor anterior foi coberto pela matriz 4/4 e não havia finding CRITICAL/major.'
   - 'Android físico, teclado virtual real e leitor de tela não foram executados; Playwright validou viewports CSS e foco programático.'
