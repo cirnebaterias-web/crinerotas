@@ -10,17 +10,18 @@ import { VisitCompetitorPricesStep } from './prices/visit-competitor-prices-step
 import { VisitStockStep } from './stock/visit-stock-step';
 import { VisitCompetitorStockStep } from './stock/visit-competitor-stock-step';
 import { VisitStockPhotosStep } from './stock/visit-stock-photos-step';
+import { VisitStockInsightsStep } from './stock/visit-stock-insights-step';
 import type { CompressedStockPhoto } from './stock/stock-photo-compression';
 import { VisitEvidenceCapture, type VisitEvidenceCaptureValue } from './visit-evidence-capture';
 import { VisitCommercialActionsStep } from './actions/visit-commercial-actions-step';
 import { VisitScrapStep } from './scrap/visit-scrap-step';
 import { VisitSalesStep } from './sales/visit-sales-step';
 
-type VisitScreenStep = 'start' | 'stock' | 'competitor-stock' | 'stock-photos' | 'prices' | 'actions' | 'sales' | 'scrap' | 'review' | 'complete';
+type VisitScreenStep = 'start' | 'stock' | 'competitor-stock' | 'stock-insights' | 'stock-photos' | 'prices' | 'actions' | 'sales' | 'scrap' | 'review' | 'complete';
 
 const visitStepLabels: Record<VisitScreenStep, string> = {
   start: 'Tarefas', stock: 'Estoque 1/3', 'competitor-stock': 'Estoque 2/3',
-  'stock-photos': 'Estoque 3/3', prices: 'Preços', actions: 'Ações', sales: 'Informe de venda', scrap: 'Sucata',
+  'stock-insights': 'Estoque · análise', 'stock-photos': 'Estoque 3/3', prices: 'Preços', actions: 'Ações', sales: 'Informe de venda', scrap: 'Sucata',
   review: 'Revisão', complete: 'Concluída',
 };
 
@@ -36,7 +37,9 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const [competitorDirty, setCompetitorDirty] = useState(false);
   const [pricesDirty, setPricesDirty] = useState(false);
   const [salesDirty, setSalesDirty] = useState(false);
-  const navigationStateRef = useRef({ step, competitorDirty, pricesDirty, salesDirty });
+  const [ownDirty, setOwnDirty] = useState(false);
+  const exitStepRef = useRef<VisitScreenStep>('start');
+  const navigationStateRef = useRef({ step, ownDirty, competitorDirty, pricesDirty, salesDirty });
   const { draft, state, message: syncMessage } = view;
   const recoveringSales = Boolean(draft?.localStatus === 'completed' &&
     draft.salesCompletionRecovery && !draft.serverCompletedAt);
@@ -46,8 +49,8 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const checkinEvidence = view.evidence.find((item) => item.kind === 'checkin' && item.latitude && item.longitude);
 
   useEffect(() => {
-    navigationStateRef.current = { step, competitorDirty, pricesDirty, salesDirty };
-  }, [step, competitorDirty, pricesDirty, salesDirty]);
+    navigationStateRef.current = { step, ownDirty, competitorDirty, pricesDirty, salesDirty };
+  }, [step, ownDirty, competitorDirty, pricesDirty, salesDirty]);
 
   useEffect(() => {
     if (state === 'ready' && step === 'review') nextStepTitleRef.current?.focus();
@@ -67,22 +70,37 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   useEffect(() => {
     const readStep = () => {
       const requested = new URLSearchParams(window.location.search).get('step');
-      const next = requested === 'stock' || requested === 'competitor-stock' || requested === 'stock-photos' ||
+      const next = requested === 'stock' || requested === 'competitor-stock' || requested === 'stock-insights' || requested === 'stock-photos' ||
         requested === 'prices' || requested === 'actions' || requested === 'sales' || requested === 'scrap' || requested === 'review' || requested === 'complete'
         ? requested
         : 'start';
       const current = navigationStateRef.current;
-      const hasUnsavedChanges = current.competitorDirty || current.pricesDirty || current.salesDirty;
+      const hasUnsavedChanges = current.ownDirty || current.competitorDirty || current.pricesDirty || current.salesDirty;
       if (next !== current.step && hasUnsavedChanges) {
         const restored = new URL(window.location.href);
         if (current.step === 'start') restored.searchParams.delete('step');
         else restored.searchParams.set('step', current.step);
         window.history.pushState({}, '', restored);
+        exitStepRef.current = next;
         setShowStockExit(true);
         return;
       }
       setStep(next);
     };
+    // A direct offline deep link still has the same contextual Back chain.
+    const initialUrl = new URL(window.location.href);
+    const initialStep = initialUrl.searchParams.get('step');
+    if ((initialStep === 'stock-insights' || initialStep === 'stock-photos') &&
+      !window.history.state?.visitStep) {
+      initialUrl.searchParams.set('step', 'competitor-stock');
+      window.history.replaceState({ visitStep: 'competitor-stock' }, '', initialUrl);
+      initialUrl.searchParams.set('step', 'stock-insights');
+      window.history.pushState({ visitStep: 'stock-insights', previousVisitStep: 'competitor-stock' }, '', initialUrl);
+      if (initialStep === 'stock-photos') {
+        initialUrl.searchParams.set('step', 'stock-photos');
+        window.history.pushState({ visitStep: 'stock-photos', previousVisitStep: 'stock-insights' }, '', initialUrl);
+      }
+    }
     readStep();
     const service = new OfflineFoundationService();
     const controller = new VisitStartController(
@@ -119,9 +137,27 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
       url.searchParams.delete('priceView');
       url.searchParams.delete('priceBrand');
     }
-    window.history.pushState({}, '', url);
+    window.history.pushState({ visitStep: next, previousVisitStep: step }, '', url);
     setStep(next);
   };
+
+  const contextualBack = (target: VisitScreenStep) => {
+    if (window.history.state?.previousVisitStep === target) window.history.back();
+    else navigateStep(target);
+  };
+
+  useEffect(() => {
+    if (state !== 'ready' || !draft || draft.localStatus === 'completed' ||
+      !['stock-insights', 'stock-photos'].includes(step)) return;
+    const target = !draft.stock || draft.stock.completedOwnBrands?.length !== 4
+      ? 'stock' : draft.stock.competitorLines === undefined ? 'competitor-stock' : null;
+    if (!target) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('step', target);
+    url.searchParams.delete('brand');
+    window.history.replaceState({ visitStep: target }, '', url);
+    setStep(target);
+  }, [draft, state, step]);
 
   useEffect(() => {
     if (state !== 'ready' || !draft || draft.localStatus === 'completed' || stockComplete ||
@@ -192,6 +228,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     const controller = controllerRef.current;
     if (!controller) throw new Error('A visita ainda não está pronta para edição.');
     await controller.saveStock(values);
+    setOwnDirty(false);
   };
 
   const saveCompetitorStock = async (values: StockInput) => {
@@ -199,7 +236,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     if (!controller) throw new Error('A visita ainda não está pronta para edição.');
     await controller.saveStock(values);
     setCompetitorDirty(false);
-    navigateStep('stock-photos');
+    navigateStep('stock-insights');
   };
 
   const completeStockCollection = async () => {
@@ -223,12 +260,16 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   };
 
   const requestStockExit = () => {
-    if (['stock', 'competitor-stock', 'stock-photos'].includes(step)) setShowStockExit(true);
+    exitStepRef.current = 'start';
+    if (['stock', 'competitor-stock', 'stock-insights', 'stock-photos'].includes(step)) setShowStockExit(true);
     else navigateStep('start');
   };
 
   const returnToTasks = () => {
+    if (step === 'stock-photos') { contextualBack('stock-insights'); return; }
+    if (step === 'stock-insights') { contextualBack('competitor-stock'); return; }
     if ((step === 'prices' && pricesDirty) || (step === 'sales' && salesDirty)) {
+      exitStepRef.current = 'start';
       setShowStockExit(true);
       return;
     }
@@ -357,12 +398,16 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
           key={draft.offlineId}
           draft={draft}
           onSave={saveStock}
+          onDirtyChange={setOwnDirty}
           onContinue={() => navigateStep('competitor-stock')}
         /></>}
         {step === 'competitor-stock' && draft.localStatus !== 'completed' && draft.stock && <>
           <p className="seller-kicker" role="status">ESTOQUE · ETAPA 2 DE 3 · CONCORRÊNCIA</p>
           <button className="seller-button seller-secondary" type="button"
-            onClick={() => navigateStep('stock', 'ACDelco')}>Voltar ao estoque próprio</button>
+            onClick={() => {
+              if (competitorDirty) { exitStepRef.current = 'stock'; setShowStockExit(true); }
+              else navigateStep('stock', 'ACDelco');
+            }}>Voltar ao estoque próprio</button>
           <VisitCompetitorStockStep
             key={draft.offlineId}
             draft={draft}
@@ -370,6 +415,12 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
             onDirtyChange={setCompetitorDirty}
           />
         </>}
+        {step === 'stock-insights' && draft.localStatus !== 'completed' && draft.stock && <VisitStockInsightsStep
+          key={draft.stock.eventId}
+          snapshot={draft.stock}
+          onEdit={() => navigateStep('stock')}
+          onContinue={() => navigateStep('stock-photos')}
+        />}
         {step === 'stock-photos' && draft.localStatus !== 'completed' && draft.stock && <VisitStockPhotosStep
           attachments={stockPhotos}
           onAdd={addStockPhoto}
@@ -447,15 +498,15 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         {showStockExit && <div className="seller-evidence-overlay" role="dialog" aria-modal="true"
           aria-labelledby="stock-exit-title" aria-describedby="stock-exit-description">
           <section className="seller-stock-card">
-            <h2 id="stock-exit-title">{competitorDirty || pricesDirty || salesDirty ? 'Sair sem salvar?' : 'Pausar esta tarefa?'}</h2>
-            <p id="stock-exit-description">{competitorDirty || pricesDirty || salesDirty
+            <h2 id="stock-exit-title">{ownDirty || competitorDirty || pricesDirty || salesDirty ? 'Sair sem salvar?' : 'Pausar esta tarefa?'}</h2>
+            <p id="stock-exit-description">{ownDirty || competitorDirty || pricesDirty || salesDirty
               ? 'As alterações ainda não salvas serão perdidas.'
               : 'A coleta ainda não foi concluída. Você poderá continuar depois.'}</p>
             <button className="seller-button seller-primary" autoFocus type="button"
               onClick={() => setShowStockExit(false)}>Continuar preenchendo</button>{' '}
             <button className="seller-button seller-secondary" type="button" onClick={() => {
-              setCompetitorDirty(false); setPricesDirty(false); setSalesDirty(false); setShowStockExit(false); navigateStep('start');
-            }}>Sair {competitorDirty || pricesDirty || salesDirty ? 'sem salvar' : 'agora'}</button>
+              setOwnDirty(false); setCompetitorDirty(false); setPricesDirty(false); setSalesDirty(false); setShowStockExit(false); navigateStep(exitStepRef.current);
+            }}>Sair {ownDirty || competitorDirty || pricesDirty || salesDirty ? 'sem salvar' : 'agora'}</button>
           </section>
         </div>}
         {step === 'start' && draft.localStatus !== 'completed' && <button className="seller-button seller-secondary"

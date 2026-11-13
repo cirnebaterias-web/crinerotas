@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import axe from 'axe-core';
 import type { CanonicalRoute, LocalAttachment, LocalVisitDraft, LocalVisitEvidence, MeResponse, OfflineOutboxEvent } from '@cirne/contracts';
 
 const sellerId = '33333333-3333-4333-8333-333333333331';
@@ -371,7 +372,9 @@ async function saveOwnBrandsWithoutStock(page: Page) {
 
 async function saveNoCompetitorStockToPhotos(page: Page) {
   await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).check();
-  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await expect(page.getByRole('heading', { name: 'Análise do estoque' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continuar para fotos' }).click();
   await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeVisible();
 }
 
@@ -404,6 +407,144 @@ async function saveEmptyStockToPrices(page: Page) {
   await saveNoCompetitorStock(page);
 }
 
+test('stock insights survives offline reload, reopen, edit and contextual Back without extra writes', async ({ page, context }) => {
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await startVisit(page);
+  await context.setOffline(true);
+  await page.getByRole('button', { name: /Coleta de estoque/ }).click();
+  await saveOwnBrandsWithoutStock(page);
+  await page.getByRole('button', { name: 'Moura', exact: true }).click();
+  await page.getByLabel('Amperagem (Ah)').fill('60');
+  await page.getByLabel('Tecnologia').selectOption('SLI');
+  await page.getByLabel('Quantidade', { exact: true }).fill('7');
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await expect(page).toHaveURL(/step=stock-insights$/);
+  await expect(page.getByRole('heading', { name: 'Análise do estoque' })).toBeFocused();
+  await expect(page.getByText('Ausência no recorte observado', { exact: true })).toBeVisible();
+  const before = await offlineCounts(page);
+  expect((before.drafts[0] as LocalVisitDraft).stock!.collectionCompletedAt).toBeUndefined();
+  const insightsUrl = page.url();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'Análise do estoque' })).toBeVisible();
+  expect(await offlineCounts(page)).toEqual(before);
+
+  await page.getByRole('button', { name: 'Continuar para fotos' }).click();
+  await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeVisible();
+  await addStockPhotos(page);
+  await expect(page.getByText(/3 foto\(s\)/)).toBeVisible();
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
+  await expect(page).toHaveURL(/step=stock-insights$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/step=competitor-stock$/);
+  await expect(page.getByLabel('Quantidade', { exact: true })).toHaveValue('7');
+  await page.getByLabel('Quantidade', { exact: true }).fill('9');
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await expect(page.getByText('Total observado').locator('..')).toContainText('9 un.');
+  await page.getByRole('button', { name: 'Editar estoque' }).click();
+  await expect(page.getByRole('heading', { name: 'Estoque do cliente' })).toBeVisible();
+  await page.getByRole('button', { name: 'Heliar: 0 unidades. Abrir modelos' }).click();
+  await page.getByRole('button', { name: 'Aumentar HG38JD 24-320' }).click();
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Sair sem salvar?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continuar preenchendo' }).click();
+  await page.getByRole('button', { name: 'Salvar Heliar' }).click();
+  await page.getByRole('button', { name: 'Continuar para estoque da concorrência' }).click();
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await expect(page.getByText('Total observado').locator('..')).toContainText('10 un.');
+  expect((await offlineCounts(page)).attachments).toHaveLength(3);
+  const after = await offlineCounts(page);
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.goto(insightsUrl, { waitUntil: 'domcontentloaded' });
+  await expect(reopened.getByRole('heading', { name: 'Análise do estoque' })).toBeVisible();
+  expect(await offlineCounts(reopened)).toEqual(after);
+  await reopened.getByRole('button', { name: 'Continuar para fotos' }).click();
+  await reopened.goBack();
+  await expect(reopened).toHaveURL(/step=stock-insights$/);
+  await reopened.goBack();
+  await expect(reopened).toHaveURL(/step=competitor-stock$/);
+  expect(await offlineCounts(reopened)).toEqual(after);
+});
+
+test('stock insights is readable at mobile widths, keyboard and 200 percent zoom with axe', async ({ page }, testInfo) => {
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await startVisit(page);
+  await page.getByRole('button', { name: /Coleta de estoque/ }).click();
+  await saveOwnBrandsWithoutStock(page);
+  await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).check();
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await expect(page.getByRole('heading', { name: 'Análise do estoque' })).toBeFocused();
+  for (const width of [320, 360, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    for (const name of ['Editar estoque', 'Continuar para fotos']) {
+      const action = page.getByRole('button', { name, exact: true });
+      const box = await action.boundingBox();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`stock-insights-${width}.png`), fullPage: true });
+  }
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(axe.source);
+  const violations = await page.evaluate(async () => (await (window as Window & { axe?: typeof axe }).axe!.run(document.querySelector('main')!, {
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] },
+  })).violations);
+  expect(violations).toEqual([]);
+  await page.getByRole('button', { name: 'Continuar para fotos' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeFocused();
+});
+
+test('stock insights calculation failure preserves saved data and offers photos and editing', async ({ page, context }) => {
+  await mockVisitSeller(page);
+  await page.goto('/route');
+  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
+  await startVisit(page);
+  await context.setOffline(true);
+  await page.getByRole('button', { name: /Coleta de estoque/ }).click();
+  await saveOwnBrandsWithoutStock(page);
+  await saveNoCompetitorStockToPhotos(page);
+  await addStockPhotos(page);
+  await expect(page.getByText(/3 foto\(s\)/)).toBeVisible();
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
+  // Each stored quantity is legal for the legacy stock schema, but their sum
+  // exceeds the analytics safe integer bound. Exercise the real isolated failure.
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('cirne-rotas-offline');
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    const tx = database.transaction('visitDrafts', 'readwrite');
+    const done = new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    const store = tx.objectStore('visitDrafts');
+    const drafts = await new Promise<LocalVisitDraft[]>((resolve, reject) => {
+      const request = store.getAll(); request.onsuccess = () => resolve(request.result as LocalVisitDraft[]);
+      request.onerror = () => reject(request.error);
+    });
+    const draft = drafts[0]!;
+    store.put({ ...draft, stock: { ...draft.stock,
+      ownLines: [{ brand: 'Heliar', model: 'Modelo sintético extremo', quantity: Number.MAX_SAFE_INTEGER }],
+      competitorLines: [{ brand: 'Moura', amperage: 60, technology: 'SLI', quantity: 1 }],
+    } });
+    await done; database.close();
+  });
+  const before = await offlineCounts(page);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByText(/Análise indisponível neste momento/)).toBeVisible();
+  expect(await offlineCounts(page)).toEqual(before);
+  await page.getByRole('button', { name: 'Continuar para fotos' }).click();
+  await expect(page.getByText(/3 foto\(s\)/)).toBeVisible();
+  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
+  await page.getByRole('button', { name: 'Editar estoque' }).click();
+  await expect(page.getByRole('heading', { name: 'Estoque do cliente' })).toBeVisible();
+  expect(await offlineCounts(page)).toEqual(before);
+});
+
 test('protects unsaved stock changes and requires confirmation to reopen a completed collection', async ({ page }) => {
   await mockVisitSeller(page);
   await page.goto('/route');
@@ -416,7 +557,8 @@ test('protects unsaved stock changes and requires confirmation to reopen a compl
   await expect(page.getByRole('dialog', { name: 'Sair sem salvar?' })).toBeVisible();
   await page.getByRole('button', { name: 'Continuar preenchendo' }).click();
 
-  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await page.getByRole('button', { name: 'Continuar para fotos' }).click();
   await addStockPhotos(page);
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
   const completedStock = page.getByRole('button', { name: 'Coleta de estoque, concluída. Abrir detalhes' });
@@ -526,7 +668,8 @@ test('saves repeatable stock with zero and other models offline, restores it and
   await page.getByLabel('Amperagem (Ah)').fill('80');
   await page.getByLabel('Tecnologia').selectOption('EFB');
   await page.getByLabel('Quantidade', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await page.getByRole('button', { name: 'Continuar para fotos' }).click();
   await expect(page).toHaveURL(/\?step=stock-photos$/);
   await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeVisible();
   await addStockPhotos(page);
@@ -569,7 +712,8 @@ test('saves repeatable stock with zero and other models offline, restores it and
   await expect(page.getByLabel('Quantidade', { exact: true }).nth(1)).toHaveValue('0');
   await page.getByRole('button', { name: 'Marca sintética', exact: false }).click();
   await expect(page.getByLabel('Nome da marca')).toHaveValue('Marca sintética');
-  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).click();
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).click();
+  await page.getByRole('button', { name: 'Continuar para fotos' }).click();
   await page.getByRole('button', { name: 'Concluir coleta de estoque' }).click();
   await page.getByRole('button', { name: /Pesquisa de preços/ }).click();
 
@@ -656,7 +800,10 @@ test('keeps stock validation and step transitions usable by keyboard on mobile',
   await expect(page.getByRole('heading', { name: 'Marcas concorrentes' })).toBeFocused();
   await page.getByRole('checkbox', { name: 'Não há estoque da concorrência neste PDV' }).focus();
   await page.keyboard.press('Space');
-  await page.getByRole('button', { name: 'Salvar estoque da concorrência e ir para fotos' }).focus();
+  await page.getByRole('button', { name: 'Salvar concorrência e ver análise' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Análise do estoque' })).toBeFocused();
+  await page.getByRole('button', { name: 'Continuar para fotos' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Fotos do estoque' })).toBeFocused();
   await addStockPhotos(page);

@@ -5,6 +5,8 @@ import type { LocalVisitDraft } from '@cirne/contracts';
 import type { VisitStartView } from './visit-start-controller';
 import { VisitStartScreen } from './visit-start-screen';
 import { VisitSalesStep } from './sales/visit-sales-step';
+import { VisitCompetitorStockStep } from './stock/visit-competitor-stock-step';
+import { VisitStockInsightsStep } from './stock/visit-stock-insights-step';
 
 type Harness = { values: unknown[]; cursor: number; effects: Array<() => unknown>; view: VisitStartView; step: string };
 const hooks = vi.hoisted(() => ({ current: null as Harness | null }));
@@ -82,9 +84,63 @@ function mount(draft = fixture(), step = 'start', requiresLogin = false) {
     state.effects.splice(0).forEach((effect) => effect());
     return tree;
   };
-  return { render, text: () => renderToStaticMarkup(render()) };
+  return { render, state, text: () => renderToStaticMarkup(render()),
+    controller: (controller: unknown) => { (state.values[0] as { current: unknown }).current = controller; } };
 }
 afterEach(() => { hooks.current = null; vi.unstubAllGlobals(); });
+
+describe('VisitStartScreen stock insights', () => {
+  it('opens analysis only after the durable stock save resolves, without completing or saving again', async () => {
+    const draft = fixture();
+    delete draft.stock!.collectionCompletedAt;
+    const screen = mount(draft, 'competitor-stock');
+    const form = elements(screen.render()).find((element) => element.type === VisitCompetitorStockStep)!;
+    let finish!: () => void;
+    const saveStock = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    screen.controller({ saveStock });
+    const saving = (form.props.onSave as (stock: NonNullable<LocalVisitDraft['stock']>) => Promise<void>)(draft.stock!);
+    expect(window.location.href).toContain('step=competitor-stock');
+    finish(); await saving;
+    expect(window.location.href).toContain('step=stock-insights');
+    expect(draft.stock!.collectionCompletedAt).toBeUndefined();
+    expect(elements(screen.render()).some((element) => element.type === VisitStockInsightsStep)).toBe(true);
+    expect(saveStock).toHaveBeenCalledTimes(1);
+    const insights = elements(screen.render()).find((element) => element.type === VisitStockInsightsStep)!;
+    (insights.props.onContinue as () => void)();
+    expect(window.location.href).toContain('step=stock-photos');
+    expect(saveStock).toHaveBeenCalledTimes(1);
+    expect(screen.state.view.attachments).toHaveLength(3);
+  });
+
+  it('keeps the competitor form when the durable save rejects', async () => {
+    const screen = mount(fixture(), 'competitor-stock');
+    const form = elements(screen.render()).find((element) => element.type === VisitCompetitorStockStep)!;
+    screen.controller({ saveStock: vi.fn().mockRejectedValue(new Error('quota')) });
+    await expect((form.props.onSave as (stock: NonNullable<LocalVisitDraft['stock']>) => Promise<void>)(fixture().stock!)).rejects.toThrow('quota');
+    expect(window.location.href).toContain('step=competitor-stock');
+    expect(elements(screen.render()).some((element) => element.type === VisitStockInsightsStep)).toBe(false);
+  });
+
+  it.each(['stock-insights', 'stock-photos'])('guards direct %s without stock prerequisites', (step) => {
+    const draft = fixture();
+    delete draft.stock;
+    const screen = mount(draft, step);
+    screen.render(); screen.render();
+    expect(window.location.href).toContain('step=stock');
+  });
+
+  it('guards analysis without competition and allows editing both stock sides', () => {
+    const draft = fixture();
+    delete draft.stock!.competitorLines;
+    const screen = mount(draft, 'stock-insights');
+    screen.render(); screen.render();
+    expect(window.location.href).toContain('step=competitor-stock');
+    const ready = mount(fixture(), 'stock-insights');
+    const insights = elements(ready.render()).find((element) => element.type === VisitStockInsightsStep)!;
+    (insights.props.onEdit as () => void)();
+    expect(window.location.href).toContain('step=stock');
+  });
+});
 
 describe('VisitStartScreen sales task', () => {
   it('offers route exit and same-seller login without leaving the recovery form', () => {

@@ -17,6 +17,7 @@ interface Props {
   draft: LocalVisitDraft;
   onSave: (values: StockInput, isLastBrand: boolean) => Promise<void>;
   onContinue: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 type Quantities = Record<OwnStockBrand, Record<string, string>>;
 type CustomModel = { id: string; name: string };
@@ -29,7 +30,7 @@ function initialQuantities(draft: LocalVisitDraft): Quantities {
   ])) as Quantities;
 }
 
-export function VisitStockStep({ draft, onSave, onContinue }: Props) {
+export function VisitStockStep({ draft, onSave, onContinue, onDirtyChange }: Props) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const nextCustomId = useRef(1);
   const [brand, setBrand] = useState<OwnStockBrand | null>(null);
@@ -73,6 +74,7 @@ export function VisitStockStep({ draft, onSave, onContinue }: Props) {
       setObservation(draft.stock?.observation ?? '');
     }
     selectBrand(null);
+    onDirtyChange?.(false);
   };
   const quantityFor = (item: OwnStockBrand, model: string) => quantities[item][model] ?? '0';
   const totalFor = (item: OwnStockBrand) => Object.values(quantities[item]).reduce((sum, value) =>
@@ -81,6 +83,7 @@ export function VisitStockStep({ draft, onSave, onContinue }: Props) {
   const savedWeightFor = (item: OwnStockBrand) => stockWeightKg(draft.stock?.ownLines, item);
   const savedWeight = stockWeightKg(draft.stock?.ownLines);
   const changeQuantity = (item: OwnStockBrand, model: string, value: string) => {
+    onDirtyChange?.(true);
     setQuantities((current) => ({ ...current, [item]: { ...current[item], [model]: value } }));
     setConfirmEmpty(false);
     setError('');
@@ -149,7 +152,7 @@ export function VisitStockStep({ draft, onSave, onContinue }: Props) {
     });
     if (!parsed.success) { setError('Revise os modelos e quantidades antes de salvar.'); return; }
     setSaving(true);
-    try { await onSave(parsed.data, completedOwnBrands.length === OWN_STOCK_BRANDS.length); selectBrand(null); }
+    try { await onSave(parsed.data, completedOwnBrands.length === OWN_STOCK_BRANDS.length); onDirtyChange?.(false); selectBrand(null); }
     catch { setError('Não foi possível salvar no aparelho. Os dados continuam nesta tela; tente novamente.'); }
     finally { setSaving(false); }
   };
@@ -182,12 +185,14 @@ export function VisitStockStep({ draft, onSave, onContinue }: Props) {
     .toLocaleLowerCase('pt-BR').includes(normalizedSearch));
   const brandTotal = totalFor(brand);
   return <section className="seller-stock-card seller-stock-collection" aria-labelledby="stock-title">
-    <button className="seller-stock-back" type="button" onClick={cancelBrand}>‹ Todas as marcas</button>
+    <button className="seller-stock-back" type="button" disabled={saving} onClick={cancelBrand}>‹ Todas as marcas</button>
     <div className="seller-stock-detail-heading"><div><p className="seller-kicker">ESTOQUE PRÓPRIO</p>
       <h2 id="stock-title" ref={titleRef} tabIndex={-1}>{brand}</h2>
       <p className="seller-muted">Ajuste a quantidade de cada modelo encontrado.</p></div>
       <strong>{brandTotal} <small>un.</small></strong></div>
     <form className="seller-stock-form" onSubmit={submit} noValidate>
+      <fieldset className="seller-stock-save-fields" disabled={saving}>
+      <legend className="seller-sr-only">Modelos e quantidades da marca</legend>
       <label className="seller-stock-search-label" htmlFor="own-stock-search">Buscar modelo</label>
       <input id="own-stock-search" className="seller-stock-search" type="search" value={search}
         placeholder="Nome ou código do modelo" onChange={(event) => setSearch(event.target.value)} />
@@ -207,8 +212,8 @@ export function VisitStockStep({ draft, onSave, onContinue }: Props) {
       <div className="seller-stock-other-list">{custom[brand].map((item) => <div className="seller-stock-other-row" key={item.id}>
         <label htmlFor={'other-name-' + item.id}>Outro modelo</label>
         <input id={'other-name-' + item.id} maxLength={120} placeholder="Nome do modelo" value={item.name}
-          onChange={(event) => setCustom((current) => ({ ...current, [brand]: current[brand].map((row) =>
-            row.id === item.id ? { ...row, name: event.target.value } : row) }))} />
+          onChange={(event) => { onDirtyChange?.(true); setCustom((current) => ({ ...current, [brand]: current[brand].map((row) =>
+            row.id === item.id ? { ...row, name: event.target.value } : row) })); }} />
         <div className="seller-stock-stepper">
           <button type="button" aria-label={'Diminuir outro modelo ' + item.id}
             disabled={Number(quantityFor(brand, item.id)) <= 0} onClick={() => adjustQuantity(brand, item.id, -1)}>−</button>
@@ -218,6 +223,7 @@ export function VisitStockStep({ draft, onSave, onContinue }: Props) {
             onClick={() => adjustQuantity(brand, item.id, 1)}>+</button>
         </div>
         <button className="seller-stock-remove" type="button" onClick={() => {
+          onDirtyChange?.(true);
           setCustom((current) => ({ ...current, [brand]: current[brand].filter((row) => row.id !== item.id) }));
           setQuantities((current) => { const next = { ...current[brand] }; delete next[item.id]; return { ...current, [brand]: next }; });
         }}>Remover</button>
@@ -231,10 +237,11 @@ export function VisitStockStep({ draft, onSave, onContinue }: Props) {
         Confirmo que não há estoque de {brand} neste PDV</label>}
       <div className="seller-stock-field seller-stock-note"><label htmlFor="stock-observation">Observação da coleta (opcional)</label>
         <textarea id="stock-observation" maxLength={500} value={observation}
-          onChange={(event) => setObservation(event.target.value)} /></div>
+          onChange={(event) => { onDirtyChange?.(true); setObservation(event.target.value); }} /></div>
       {error && <p className="seller-form-error" role="alert">{error}</p>}
       <button className="seller-button seller-primary seller-stock-submit" disabled={saving} type="submit">
         {saving ? 'Salvando no aparelho…' : 'Salvar ' + brand}</button>
+      </fieldset>
     </form>
   </section>;
 }

@@ -1,6 +1,27 @@
 @import "../styles/tokens.css";
 @import "../styles/components.css";
 
+.seller-stock-insights { min-width: 0; overflow-wrap: anywhere; }
+.seller-stock-save-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+.seller-insights-section { margin-block: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--cirne-border); }
+.seller-insights-section h3 { color: var(--cirne-forest); font-size: 1.2rem; }
+.seller-insights-section h4 { margin-block: .5rem; font-size: 1rem; }
+.seller-insights-highlight { color: var(--cirne-forest); font-size: 2rem; font-weight: 750; }
+.seller-insights-highlight span { display: block; font-size: 1rem; font-weight: 500; }
+.seller-insights-metrics { display: grid; gap: .75rem; }
+.seller-insights-metrics div { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: space-between; }
+.seller-insights-metrics dd { margin: 0; font-weight: 750; }
+.seller-insights-pair { margin-block: .75rem; padding: .75rem; border: 1px solid var(--cirne-border); border-radius: .75rem; }
+.seller-insights-section p, .seller-insights-section li { line-height: 1.6; }
+.seller-insights-section ul { padding-left: 1.25rem; }
+.seller-insights-section summary { min-height: 44px; padding-block: .75rem; cursor: pointer; }
+.seller-insights-section details li { margin-block: .75rem; }
+.seller-insights-opportunities { padding-left: 1.25rem; }
+.seller-insights-opportunities > li { margin-block: 1rem; padding-block: .5rem; border-bottom: 1px solid var(--cirne-border); }
+.seller-insights-actions { display: grid; gap: .75rem; margin-top: 1.5rem; }
+.seller-insights-actions button { min-height: 44px; white-space: normal; width: 100%; }
+.seller-stock-insights :focus-visible { outline: 3px solid var(--cirne-forest); outline-offset: 3px; }
+
 /* Story 4.14: online client sales reads, independent from route composition. */
 .client-sales-trigger { min-height: 44px; min-width: 44px; padding: 5px 0; border: 0; background: transparent; color: var(--cirne-forest); font: inherit; font-weight: 750; text-align: left; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; overflow-wrap: anywhere; }
 .client-sales-dialog.seller-app { width: min(900px, calc(100% - 32px)); max-width: none; min-height: 0; max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid var(--cirne-border); border-radius: 16px; background: var(--cirne-surface); color: var(--cirne-ink); overflow-y: auto; }
