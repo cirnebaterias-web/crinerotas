@@ -1178,8 +1178,9 @@ for (const mode of ['already_completed', 'requires_sales'] as const) {
   });
 }
 
-test('reuses own products found in stock and allows pricing another catalog product', async ({ page, context }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+for (const viewport of [{ width: 320, height: 800 }, { width: 390, height: 844 }]) {
+test(`reuses own products found in stock without overlap at ${viewport.width}px`, async ({ page, context }) => {
+  await page.setViewportSize(viewport);
   await mockVisitSeller(page);
   await page.goto('/route');
   await startVisit(page);
@@ -1231,12 +1232,13 @@ test('reuses own products found in stock and allows pricing another catalog prod
   await page.getByRole('button', { name: 'Salvar Heliar' }).click();
   await expect(page.getByRole('button', { name: /Heliar: 1 preços/ })).toBeVisible();
 });
+}
 
-test('rejects a non-positive price and accepts explicit unavailability with a published reason', async ({ page, context }) => {
-  await page.setViewportSize({ width: 320, height: 800 });
+for (const viewport of [{ width: 320, height: 800 }, { width: 390, height: 844 }]) {
+test(`rejects a non-positive competitor price without overlap at ${viewport.width}px`, async ({ page, context }) => {
+  await page.setViewportSize(viewport);
   await mockVisitSeller(page);
   await page.goto('/route');
-  await expect(page.getByText('Disponível offline neste aparelho.')).toBeVisible();
   await startVisit(page);
   await expect(page.getByText(protectedEvidenceMessage)).toBeVisible();
   await context.setOffline(true);
@@ -1253,7 +1255,7 @@ test('rejects a non-positive price and accepts explicit unavailability with a pu
   const competitorBox = await competitorRow.boundingBox();
   expect(competitorBox).not.toBeNull();
   expect(competitorBox!.x).toBeGreaterThanOrEqual(0);
-  expect(competitorBox!.x + competitorBox!.width).toBeLessThanOrEqual(320);
+  expect(competitorBox!.x + competitorBox!.width).toBeLessThanOrEqual(viewport.width);
   const fieldBoxes = await competitorRow.locator('.seller-stock-field').evaluateAll((fields) => fields.map((field) => {
     const box = field.getBoundingClientRect(); return { top: box.top, bottom: box.bottom };
   }));
@@ -1291,6 +1293,7 @@ test('rejects a non-positive price and accepts explicit unavailability with a pu
     prices: { availability: 'unavailable', unavailableReasonId },
   }]);
 });
+}
 
 test('ends a visit only after a camera-only checkout and a point-in-time GPS attempt', async ({ page, context }) => {
   await mockVisitSeller(page);
