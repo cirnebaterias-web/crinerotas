@@ -48,6 +48,32 @@ describe('mobile saved stock insights', () => {
     expect(html).not.toContain('66,7%');
   });
 
+  it.each([
+    { heliarQuantity: 0, mouraQuantity: 7,
+      competitorLines: [{ brand: 'Moura' as const, amperage: 60, technology: 'SLI', quantity: 7 }] },
+    { heliarQuantity: 7, mouraQuantity: 0,
+      ownLines: [{ brand: 'Heliar' as const, model: 'HG38JD', productCode: '502000030', catalogVersion: 2, quantity: 7 }] },
+  ])('does not convert an absent side into numeric comparisons or cuts', (input) => {
+    vi.mocked(analyzeStockInsights).mockImplementation(actual.analyzeStockInsights);
+    const html = markup(input);
+    expect(html).toContain('Comparação indisponível: registro incompleto');
+    expect(html).not.toContain('Ver recortes');
+    expect(html).not.toContain('Diferença (própria');
+    expect(html).not.toContain('Ausência no recorte observado');
+    expect(html).not.toContain('0%');
+    expect(html).not.toContain('100%');
+  });
+
+  it('treats an explicit empty side as observed zero instead of missing data', () => {
+    vi.mocked(analyzeStockInsights).mockImplementation(actual.analyzeStockInsights);
+    const html = markup({ ...snapshot,
+      competitorLines: [{ brand: 'Moura', amperage: 60, technology: 'SLI', quantity: 7 }] });
+    expect(html).toContain('Ausência no recorte observado');
+    expect(html).toContain('Ver recortes');
+    expect(html).toContain('100%');
+    expect(html).not.toContain('Comparação indisponível');
+  });
+
   it('projects the real saved record without sending commit metadata to the strict domain contract', () => {
     vi.mocked(analyzeStockInsights).mockImplementation(actual.analyzeStockInsights);
     const saved: NonNullable<LocalVisitDraft['stock']> = { ...snapshot,

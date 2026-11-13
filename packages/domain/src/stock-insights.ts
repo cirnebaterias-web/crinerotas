@@ -124,7 +124,10 @@ export function analyzeStockInsights(input: StockInsightsInput): StockInsights {
       rivalUnits: snapshot.competitorLines === undefined ? null : rivalUnits,
       totalUnits: complete ? ownUnits + rivalUnits : null,
       state: !complete ? 'insufficient' : ownUnits + rivalUnits ? 'available' : 'empty' },
-    pairs: resultPairs, opportunities,
+    pairs: complete ? resultPairs : resultPairs.map((pair) => ({
+      ...pair, state: 'insufficient', ownUnits: null, rivalUnits: null, totalUnits: null,
+      differenceUnits: null, ownSharePercent: null, rivalSharePercent: null, cuts: [],
+    })), opportunities,
     readingState: !complete ? 'insufficient' : included.lines === 0 ? 'no_classifiable_data' :
       opportunities.length ? 'opportunities' : 'no_opportunities',
     coverage: {

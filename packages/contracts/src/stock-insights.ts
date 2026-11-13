@@ -64,6 +64,19 @@ export const stockInsightsExclusionReasonSchema = z.enum([
 ]);
 export type StockInsightsExclusionReason = z.infer<typeof stockInsightsExclusionReasonSchema>;
 const count = z.object({ lines: units, units }).strict();
+const pairIdentity = { id: stockInsightsPairIdSchema, label: z.string(), ownBrand };
+const pair = z.discriminatedUnion('state', [
+  z.object({
+    ...pairIdentity, ...shares,
+    differenceUnits: z.number().int().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+    state: z.enum(['available', 'empty']), cuts: z.array(cut),
+  }).strict(),
+  z.object({
+    ...pairIdentity, state: z.literal('insufficient'),
+    ownUnits: z.null(), rivalUnits: z.null(), totalUnits: z.null(), differenceUnits: z.null(),
+    ownSharePercent: z.null(), rivalSharePercent: z.null(), cuts: z.array(cut).max(0),
+  }).strict(),
+]);
 export const stockInsightsSchema = z.object({
   schemaVersion: z.literal(1),
   overall: z.object({
@@ -71,11 +84,7 @@ export const stockInsightsSchema = z.object({
     ownUnits: units.nullable(), rivalUnits: units.nullable(), totalUnits: units.nullable(),
     ownSharePercent: z.number().min(0).max(100).nullable(), rivalSharePercent: z.number().min(0).max(100).nullable(),
   }).strict(),
-  pairs: z.array(z.object({
-    id: stockInsightsPairIdSchema, label: z.string(), ownBrand,
-    ...shares, differenceUnits: z.number().int().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
-    state: z.enum(['available', 'empty', 'insufficient']), cuts: z.array(cut),
-  }).strict()).length(3),
+  pairs: z.array(pair).length(3),
   opportunities: z.array(z.object({
     pairId: stockInsightsPairIdSchema, ownBrand, amperageAh: z.number().positive().finite(), family,
     kind: z.enum(['absence', 'gap']), ownUnits: units, rivalUnits: units, gapUnits: units,
@@ -91,5 +100,13 @@ export const stockInsightsSchema = z.object({
     legacy: z.object({ heliarQuantity: units, mouraQuantity: units, usedInTotals: z.literal(false) }).strict(),
   }).strict(),
   caution: z.string(),
-}).strict();
+}).strict().superRefine((analysis, context) => {
+  const complete = analysis.coverage.general.ownLinesAvailable && analysis.coverage.general.rivalLinesAvailable;
+  if (analysis.pairs.some((pair) => (pair.state !== 'insufficient') !== complete)) {
+    context.addIssue({ code: 'custom', path: ['pairs'], message: 'Comparações exigem os dois arrays de linhas.' });
+  }
+  if (!complete && analysis.opportunities.length > 0) {
+    context.addIssue({ code: 'custom', path: ['opportunities'], message: 'Estoque incompleto não permite oportunidades.' });
+  }
+});
 export type StockInsights = z.infer<typeof stockInsightsSchema>;

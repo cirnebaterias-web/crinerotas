@@ -57,7 +57,7 @@ function StockInsightsReading({ analysis }: { analysis: StockInsights }) {
             <p>Rival: <strong>{formatUnits(pair.rivalUnits)} · {formatShare(pair.rivalSharePercent)}</strong></p>
             <p>Diferença (própria − rival): {pair.differenceUnits.toLocaleString('pt-BR')} un.</p>
           </>}
-        {pair.cuts.length > 0 && <details><summary>Ver recortes por Ah e tecnologia ({pair.cuts.length})</summary>
+        {pair.state !== 'insufficient' && pair.cuts.length > 0 && <details><summary>Ver recortes por Ah e tecnologia ({pair.cuts.length})</summary>
           <ul>{pair.cuts.map((cut) => <li key={`${cut.amperageAh}:${cut.family}`}>
             <strong>{cut.amperageAh} Ah · {cut.family}</strong><br />
             Própria {formatUnits(cut.ownUnits)} · rival {formatUnits(cut.rivalUnits)}

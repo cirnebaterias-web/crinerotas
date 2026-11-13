@@ -39,6 +39,39 @@ describe('stock insights: observed units and identity', () => {
     legacy.snapshot.competitorLines = [rival(7)];
     expect(analyzeStockInsights(legacy).opportunities).toEqual([]);
   });
+  it.each(['ownLines', 'competitorLines'] as const)('makes all pair comparisons unavailable when %s is absent', (missing) => {
+    const data = input([own(5)], [rival(7)]);
+    delete data.snapshot[missing];
+    const result = analyzeStockInsights(data);
+    expect(result.overall).toMatchObject({ state: 'insufficient', totalUnits: null,
+      ownUnits: missing === 'ownLines' ? null : 5, rivalUnits: missing === 'competitorLines' ? null : 7,
+      ownSharePercent: null, rivalSharePercent: null });
+    for (const pair of result.pairs) expect(pair).toMatchObject({
+      state: 'insufficient', ownUnits: null, rivalUnits: null, totalUnits: null,
+      differenceUnits: null, ownSharePercent: null, rivalSharePercent: null, cuts: [],
+    });
+    expect(result.opportunities).toEqual([]);
+    expect(result.readingState).toBe('insufficient');
+    expect(stockInsightsSchema.safeParse(result).success).toBe(true);
+    expect(result.coverage.general.observed.units).toBe(missing === 'ownLines' ? 7 : 5);
+  });
+  it('distinguishes missing own lines from an explicit empty array when rivals are observed', () => {
+    const data = input([], [rival(7)]);
+    const empty = analyzeStockInsights(data);
+    expect(empty.pairs[0]).toMatchObject({ state: 'available', ownUnits: 0, rivalUnits: 7, totalUnits: 7,
+      differenceUnits: -7, ownSharePercent: 0, rivalSharePercent: 100,
+      cuts: [{ ownUnits: 0, rivalUnits: 7, ownSharePercent: 0, rivalSharePercent: 100 }] });
+    expect(empty.opportunities).toMatchObject([{ kind: 'absence', ownUnits: 0, rivalUnits: 7, gapUnits: 7 }]);
+    delete data.snapshot.ownLines;
+    expect(analyzeStockInsights(data).pairs[0]).toMatchObject({ state: 'insufficient', ownUnits: null, cuts: [] });
+  });
+  it('preserves known zero rivals only when their array is explicitly present', () => {
+    const data = input([own(5)], []);
+    expect(analyzeStockInsights(data).pairs[0]).toMatchObject({ state: 'available', ownUnits: 5, rivalUnits: 0,
+      totalUnits: 5, differenceUnits: 5, ownSharePercent: 100, rivalSharePercent: 0 });
+    delete data.snapshot.competitorLines;
+    expect(analyzeStockInsights(data).pairs[0]).toMatchObject({ state: 'insufficient', ownUnits: null, rivalUnits: null, cuts: [] });
+  });
   it.each([
     [{ productCode: undefined, catalogVersion: undefined }, 'manual_line'],
     [{ catalogVersion: undefined }, 'missing_catalog_version'],
@@ -112,6 +145,20 @@ describe('stock insights: strict normalization and opportunities', () => {
 });
 
 describe('stock insights: invariants and invalid data', () => {
+  it('never exposes synthetic zero comparisons for one-sided snapshots across generated quantities', () => {
+    for (const quantity of [0, 1, 7, 60, Number.MAX_SAFE_INTEGER]) for (const missing of ['ownLines', 'competitorLines'] as const) {
+      const data = input([own(quantity)], [rival(quantity)]);
+      delete data.snapshot[missing];
+      const result = analyzeStockInsights(data);
+      expect(stockInsightsSchema.safeParse(result).success).toBe(true);
+      expect(result.opportunities).toEqual([]);
+      for (const pair of result.pairs) {
+        expect(pair.state).toBe('insufficient');
+        expect([pair.ownUnits, pair.rivalUnits, pair.totalUnits, pair.differenceUnits, pair.ownSharePercent, pair.rivalSharePercent]).toEqual([null, null, null, null, null, null]);
+        expect(pair.cuts).toEqual([]);
+      }
+    }
+  });
   it('is deterministic, permutation/partition invariant, bounded and monotonic over generated quantities', () => {
     for (let quantity = 0; quantity < 40; quantity++) {
       const data = input([own(quantity), own(2)], [rival(3), rival(quantity + 1)]);
