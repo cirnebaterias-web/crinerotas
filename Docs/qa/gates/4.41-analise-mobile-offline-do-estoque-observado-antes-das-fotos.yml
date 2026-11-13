@@ -2,17 +2,17 @@ schema: 1
 story: '4.41'
 story_title: 'Análise mobile offline do estoque observado antes das fotos'
 gate: PASS
-status_reason: 'Os 17 critérios estão atendidos após corrigir determinismo/proveniência do catálogo e comparações de snapshots incompletos. Gates independentes e regressões de produção passaram, sem finding pendente.'
+status_reason: 'Os 17 critérios estão atendidos, incluindo erros estruturados para artefatos malformados e bootstrap restrito ao próprio destino verificado. Revalidação independente do patch pré-push passou; não há finding pendente.'
 reviewer: 'Quinn (Test Architect)'
-reviewed_revision: 'commit:7d7924c5042e61e1da0f7e6c34d01cf7d2bdf32f'
-implementation_revisions: ['b2157b45e5deaf74531ae563f393568ce60d8168', '59dc9855ef0b45c6432007e69b93993b11d2af97', '1abdad48b371977a4e8dc9eb9d8cd0dea25fe463', '7d7924c5042e61e1da0f7e6c34d01cf7d2bdf32f']
-updated: '2026-11-12T21:23:31-03:00'
+reviewed_revision: 'commit:f047538f6d37474274dda024a69be5da558c95bb'
+implementation_revisions: ['b2157b45e5deaf74531ae563f393568ce60d8168', '59dc9855ef0b45c6432007e69b93993b11d2af97', '1abdad48b371977a4e8dc9eb9d8cd0dea25fe463', '7d7924c5042e61e1da0f7e6c34d01cf7d2bdf32f', 'f047538f6d37474274dda024a69be5da558c95bb']
+updated: '2026-11-12T21:42:55-03:00'
 top_issues: []
 waiver: { active: false }
 quality_score: 100
 evidence:
   tests_reviewed: 1043
-  risks_identified: 3
+  risks_identified: 5
   independent_qa:
     lint: PASS
     typecheck: PASS
@@ -29,10 +29,22 @@ evidence:
     mobile_accessibility: '320/360/390/430 px sem overflow; screenshot 320 inspecionada; alvos 44 px, foco/teclado, texto 200% e axe sem violações.'
     diff_check: PASS
     persistence: 'Sem mudança em supabase, repositório/serviço offline, controller de persistência ou lockfile; nenhum XLSX rastreado. Banco/pgTAP N/A.'
+  independent_pre_push_revalidation:
+    revision: 'commit:f047538f6d37474274dda024a69be5da558c95bb'
+    lint: PASS
+    typecheck: PASS
+    python: '14 cenários; 13 PASS e 1 skip de symlink por WinError 1314; 26,78 s.'
+    focused_vitest: '3 arquivos, 6 PASS em 20,10 s: gerador, registro offline e CLI real.'
+    structured_errors: 'Omissão individual dos oito campos históricos em artefato de publish retorna saída 1/INVALID_CATALOG, sem traceback, preservando o output.'
+    path_identity: 'Âncora legada distinta é rejeitada; caminho equivalente com .. é aceito. Regressões cobrem relativo/absoluto, destino novo e preservação de ambos os arquivos.'
+    catalog: 'Fonte real novamente somente lida; 156/156, zero diagnóstico, hashes fonte/identidade iguais; XLSX e artefato gerado inalterados.'
+    runtime_gate_reuse: 'Build, suíte completa e 40/7 E2E acima pertencem à revisão 7d7924c; não repetidos no patch restrito a Python/fixtures/docs, sem diff em apps/packages/lockfile/supabase.'
+    diff_check: PASS
   coderabbit:
     qa_committed_review: 'CLI 0.7.6/WSL contra e6bbf90: zero CRITICAL/major; dois minor reproduzidos e corrigidos em 1abdad4.'
     final_patch_review: 'Executor executou revisão final: zero findings; QA revisou integralmente o patch e reexecutou os casos reproduzidos.'
-    bootstrap_disposition: 'Proibição genérica do bootstrap histórico não aplicada, conforme parecer arquitetural/coordenador e AC8-9/T1. Bootstrap agora exige v2 legada, --verify-published explícito e identidade histórica comprovada; após ancoragem, proveniência/metadados são imutáveis. Não há waiver do gate final.'
+    devops_patch_review: 'Revisão CodeRabbit do executor sobre o patch pré-push: zero findings; diff completo e regressões revistos independentemente por QA.'
+    bootstrap_disposition: 'Proibição genérica do bootstrap histórico não aplicada, conforme parecer arquitetural/coordenador e AC8-9/T1. Bootstrap exige v2 legada, --verify-published explícito resolvendo para o mesmo destino e identidade histórica comprovada; após ancoragem, proveniência/metadados são imutáveis. Não há waiver do gate final.'
   resolved_findings:
     - id: 'REQ-441-01'
       finding: 'Primeira publicação e republicação idênticas alteravam verifiedPublishedIdentitySha256 e os bytes.'
@@ -43,6 +55,12 @@ evidence:
     - id: 'REQ-441-03'
       finding: 'Snapshot com um array ausente expunha cortes com zero/percentuais artificiais.'
       verification: 'Contrato/domínio/UI retornam pares insufficient com nulls/cuts[]; regressões dos dois lados ausentes, [] explícito e inteiros seguros passaram.'
+    - id: 'REQ-441-04'
+      finding: 'Identidade histórica malformada causava KeyError/TypeError e saía sem diagnóstico JSON.'
+      verification: 'Validação defensiva antes do hash e regressões de lista/objeto/campos/tipos; omissão independente dos oito campos retorna JSON/saída 1 e não altera o artefato.'
+    - id: 'REQ-441-05'
+      finding: 'Flag de verificação apontando outro arquivo liberava bootstrap de destino legado não ancorado.'
+      verification: 'Path.resolve vincula a âncora ao destino; outro arquivo ou destino novo são rejeitados, aliases equivalentes são aceitos e a escrita usa o destino resolvido.'
   trace:
     ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
     ac_gaps: []
@@ -66,5 +84,6 @@ recommendations:
   immediate: []
   future: []
 limitations:
+  - 'Teste de symlink do gerador pulado no Windows por WinError 1314; WSL não dispõe de openpyxl. Sem instalação de dependência ou mudança de permissão; relativo/absoluto e .. executados.'
   - 'Android físico/TalkBack, câmera/GPS reais, zoom nativo e encerramento do processo pelo sistema operacional não executados.'
   - 'Reabertura offline usa o mesmo contexto Chromium; PASS de software não declara homologação física, uso de dados reais ou deploy.'
