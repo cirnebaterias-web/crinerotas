@@ -1,0 +1,18 @@
+{
+  "heliarQuantity": 999,
+  "mouraQuantity": 999,
+  "ownLines": [
+    {"brand":"Heliar","model":"Manual sintético","quantity":10},
+    {"brand":"América","model":"Manual sintético","quantity":5},
+    {"brand":"Durex","model":"Manual sintético","quantity":2},
+    {"brand":"ACDelco","model":"Manual sintético","quantity":3}
+  ],
+  "competitorLines": [
+    {"brand":"Moura","amperage":60,"technology":"SLI","quantity":10},
+    {"brand":"Zetta","amperage":60,"technology":"SLI","quantity":5},
+    {"brand":"Pioneiro","amperage":60,"technology":"SLI","quantity":1},
+    {"brand":"Outra","otherBrand":" PIOBAT ","amperage":60,"technology":"SLI/Frota","quantity":2},
+    {"brand":"Outra","otherBrand":"Eletran","amperage":60,"technology":"SLI","quantity":1},
+    {"brand":"Tudor","amperage":60,"technology":"SLI","quantity":11}
+  ]
+}

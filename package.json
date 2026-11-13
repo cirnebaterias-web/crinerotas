@@ -70,12 +70,13 @@
     "ops:route-proposals": "tsx apps/cli/src/weekly-route-proposals-cli.ts",
     "ops:seller-route-profile": "tsx apps/cli/src/seller-route-profiles-cli.ts",
     "ops:visits": "tsx apps/cli/src/visits-cli.ts",
+    "ops:stock-insights": "tsx apps/cli/src/stock-insights-cli.ts",
     "ops:backup:verify": "tsx scripts/backup-verify-cli.ts",
     "ops:vps:preflight": "tsx scripts/pilot-vps-preflight-cli.ts",
     "ops:scrap:restore-drill": "tsx scripts/scrap-full-restore-drill.ts",
     "catalog:products:validate": "python scripts/product-catalog-cli.py validate \"Docs/Base produtos Clarios.xlsx\"",
     "catalog:products:preview": "python scripts/product-catalog-cli.py preview \"Docs/Base produtos Clarios.xlsx\"",
-    "catalog:products:publish": "python scripts/product-catalog-cli.py publish \"Docs/Base produtos Clarios.xlsx\" --version 2 --valid-from 2026-10-02"
+    "catalog:products:publish": "python scripts/product-catalog-cli.py publish \"Docs/Base produtos Clarios.xlsx\" --version 2 --valid-from 2026-10-02 --verify-published packages/domain/src/own-product-catalog.generated.ts"
   },
   "devDependencies": {
     "@secretlint/secretlint-rule-preset-recommend": "13.0.5",
