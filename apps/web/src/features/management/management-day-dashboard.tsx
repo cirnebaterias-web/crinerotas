@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent }
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  apiErrorResponseSchema, managementDayPath, managementDayResponseSchema, managementServiceDateSchema,
+  apiErrorResponseSchema, managementAttemptPhotoPath, managementDayPath, managementDayResponseSchema, managementServiceDateSchema,
   type ManagementActivityState, type ManagementDayResponse, type ManagementDayRouteV2,
 } from '@cirne/contracts';
 import {
@@ -75,6 +75,12 @@ function StopInspector({ route, selectedStopId, selectedVisitId, open, onSelect,
     <p className="management-stop-meta">Ordem planejada {stop.plannedOrder} · execução {stop.executionOrder} · atualização {localDateTime(stop.lastKnownUpdateAt)}</p>
     {(route.sync.errors > 0 || route.sync.pending > 0) && <p className="seller-notice"><strong>Sincronização da rota:</strong> {route.sync.errors} erro(s) e {route.sync.pending} envio(s) pendente(s). O estado abaixo se refere somente à visita selecionada.</p>}
     {stop.nonVisitReason && <p className="seller-notice"><strong>Motivo da não visita:</strong> {stop.nonVisitReason.label}</p>}
+    {stop.nonVisitAttempt && <section className="seller-notice" aria-label="Detalhes da tentativa de visita"><h3>Tentativa de visita</h3>
+      <p><strong>Horário:</strong> {localDateTime(stop.nonVisitAttempt.recordedAt)} · evidência capturada em {localDateTime(stop.nonVisitAttempt.capturedAt)}</p>
+      {stop.nonVisitAttempt.observation && <p><strong>Observação:</strong> {stop.nonVisitAttempt.observation}</p>}
+      <p><strong>GPS:</strong> {stop.nonVisitAttempt.latitude.toFixed(6)}, {stop.nonVisitAttempt.longitude.toFixed(6)} · precisão {stop.nonVisitAttempt.accuracyM.toFixed(0)} m</p>
+      <a className="seller-button seller-secondary" href={managementAttemptPhotoPath(stop.nonVisitAttempt.attachmentId)} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Abrir foto da fachada</a>
+    </section>}
     {!visit ? <section className="management-checklist-empty"><h3>Atividades</h3><p>Nenhuma visita recebida pelo servidor para esta parada.</p></section>
       : <>{stop.visits.length > 1 && <section className="management-visit-picker"><h3>{stop.visits.length} visitas registradas</h3><div>
         {stop.visits.map((item, index) => <button type="button" key={item.visitId} aria-pressed={item.visitId === visit.visitId} onClick={() => onSelectVisit(item.visitId)}>

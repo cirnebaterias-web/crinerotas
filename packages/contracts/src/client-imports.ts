@@ -74,6 +74,10 @@ export const importedClientSchema = z.object({
   sellerId: z.uuid().nullable(),
   sellerEmail: z.string().nullable(),
   status: z.enum(['active', 'archived']),
+  classificationCode: z.string().nullable().optional().default(null),
+  classificationLabel: z.string().nullable().optional().default(null),
+  operatingStatus: z.enum(['active', 'closed']).optional().default('active'),
+  operatingClosedReason: z.string().nullable().optional().default(null),
   version: z.number().int().positive(),
 }).strict();
 

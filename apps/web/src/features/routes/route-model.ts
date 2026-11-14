@@ -1,6 +1,10 @@
 import type { CanonicalRoute } from '@cirne/contracts';
 
 type Stop = CanonicalRoute['stops'][number];
+export function projectOfflineNonVisit<T extends CanonicalRoute>(route: T, routeVersionStopId: string): T {
+  return { ...route, stops: route.stops.map((stop) => stop.routeVersionStopId === routeVersionStopId
+    ? { ...stop, status: 'not_visited' as const } : stop) } as T;
+}
 export function orderedStops(stops: Stop[]) { return [...stops].sort((a, b) => a.executionOrder - b.executionOrder); }
 export function pendingIds(stops: Stop[]) {
   return orderedStops(stops).filter((stop) => stop.status === 'pending').map((stop) => stop.routeVersionStopId);

@@ -27,6 +27,7 @@ import { ClientSheetSyncPanel } from './client-sheet-sync-panel';
 import { ScrapShell, scrapRequest } from '@/features/scrap/scrap-ui';
 import { ClientSalesDialog } from '@/features/clients/client-sales-dialog';
 import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
+import { managementClientsCsv } from './client-export';
 
 const clientPageSize = 25;
 const initialPagination: ClientListPagination = {
@@ -73,6 +74,23 @@ export function ClientImportManagement() {
   const [appliedQuery, setAppliedQuery] = useState('');
   const [pagination, setPagination] = useState<ClientListPagination>(initialPagination);
   const accessBlocked = useRef(false);
+
+  const exportClients = useCallback(async () => {
+    setListBusy(true); setMessage('');
+    try {
+      const first = clientListResponseSchema.parse(await scrapRequest(clientListUrl(appliedQuery, 1)));
+      const pages = [first.clients];
+      for (let page = 2; page <= first.pagination.totalPages; page += 1) {
+        const result = clientListResponseSchema.parse(await scrapRequest(clientListUrl(appliedQuery, page)));
+        pages.push(result.clients);
+      }
+      const url = URL.createObjectURL(new Blob([managementClientsCsv(pages.flat())], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'clientes-gerencial.csv'; link.click();
+      URL.revokeObjectURL(url);
+      setMessage('Exportação de clientes concluída.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível exportar os clientes.'); }
+    finally { setListBusy(false); }
+  }, [appliedQuery]);
 
   const loadClients = useCallback(async (query: string, page: number) => {
     if (accessBlocked.current) return;
@@ -296,6 +314,9 @@ export function ClientImportManagement() {
 
     {!loading && clientsLoaded && !accessDenied && <section aria-labelledby="client-list" aria-busy={listBusy}>
       <h2 id="client-list">Clientes cadastrados</h2>
+      <button type="button" className="seller-button seller-secondary" disabled={listBusy} onClick={() => void exportClients()}>
+        Exportar clientes (CSV)
+      </button>
       {canReadSales && <p>Abra o mini CRM de um cliente para consultar compras, gráficos, produtos e histórico.</p>}
       <form className="seller-stock-card seller-stock-form" role="search" onSubmit={searchClients}>
         <label htmlFor="client-search">Pesquisar clientes</label>
@@ -329,7 +350,8 @@ export function ClientImportManagement() {
         <h3 aria-label={client.name}>{canReadSales
           ? <button type="button" className="client-sales-trigger" aria-label={`Consultar compras de ${client.name}`} onClick={() => setSalesClient(client)}>{client.name}</button>
           : client.name}</h3>
-        <p>{client.externalReference} · {client.status === 'active' ? 'Ativo' : 'Inativo'} · versão {client.version}</p>
+        <p>{client.externalReference} · Cadastro: {client.status === 'active' ? 'Ativo' : 'Arquivado'} · Operação: {client.operatingStatus === 'closed' ? 'Encerrado' : 'Em atividade'} · versão {client.version}</p>
+        <p>Classificação: {client.classificationLabel ?? 'Não classificado'}{client.operatingStatus === 'closed' && client.operatingClosedReason ? ` · Motivo: ${client.operatingClosedReason}` : ''}</p>
         <p>{client.address}</p>
         <ClientLocationSource location={client.googleLocation} />
         <p>Vendedor: {client.sellerEmail ?? 'Sem carteira'}{client.portfolioReference ? ` · ${client.portfolioReference}` : ''}</p>

@@ -1,0 +1,15 @@
+schema: 1
+story: '4.44'
+story_title: 'Classificação obrigatória quando ausente e cliente com atividade encerrada'
+gate: PASS
+status_reason: 'Classificação única, encerramento auditável, separação dos dois status, exportação e replay offline passaram nos gates finais.'
+reviewer: 'Quinn (Test Architect)'
+updated: '2026-11-14T09:00:00-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 95
+evidence: { focused_tests: PASS, lint: PASS, typecheck: PASS, production_build: PASS }
+nfr_validation:
+  security: { status: PASS, notes: 'Servidor impede reclassificação pelo vendedor, filtra carteira e revalida identidade no replay.' }
+  reliability: { status: PASS, notes: 'Commit local, ACK, conflito action_required e revogação foram cobertos.' }
+recommendations: { future: [] }

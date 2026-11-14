@@ -1,0 +1,21 @@
+schema: 1
+story: '4.46'
+story_title: 'Registro de visita não realizada com fachada, GPS e justificativa'
+gate: PASS
+status_reason: 'O fluxo separado de não-visita valida foto/GPS, funciona offline, sincroniza na reconexão e expõe detalhe autorizado ao gestor sem criar visita.'
+reviewer: 'Quinn (Test Architect)'
+updated: '2026-11-14T09:00:00-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 95
+evidence:
+  focused_offline_tests: '35/35 PASS'
+  mobile_e2e: '320px e 390px PASS'
+  pgtap: '31/31 PASS'
+  lint: PASS
+  typecheck: PASS
+  production_build: PASS
+nfr_validation:
+  security: { status: PASS, notes: 'Magic bytes, tamanho e SHA-256 são verificados no BFF; foto gerencial usa RPC escopada e URL temporária.' }
+  reliability: { status: PASS, notes: 'Agregado local inclui Blob, projeção not_visited, replay ordenado e conflito action_required visível.' }
+recommendations: { future: [] }

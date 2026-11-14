@@ -1,0 +1,26 @@
+schema: 1
+story: '4.43'
+story_title: 'Fundação auditável para classificação, encerramento e execução excepcional de rotas'
+gate: PASS
+status_reason: 'Migration e rollback foram exercitados em sequência; pgTAP 31/31, contratos, CLI, BFF, offline e gates de compilação passaram sem achado alto remanescente.'
+reviewer: 'Quinn (Test Architect)'
+updated: '2026-11-14T09:00:00-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 95
+evidence:
+  current_run:
+    migration_rollback_forward: PASS
+    pgtap: '31/31 PASS'
+    focused_tests: PASS
+    lint: PASS
+    typecheck: PASS
+    production_build: PASS
+    git_diff_check: PASS
+nfr_validation:
+  security: { status: PASS, notes: 'Anon negado, browser sem verify confiável, service_role restrito ao BFF, escopo revalidado antes de replay e storage protegido.' }
+  reliability: { status: PASS, notes: 'Idempotência, rollback seguro, evidência verificada e fila offline durável foram revisados.' }
+recommendations:
+  future:
+    - action: 'Ampliar pgTAP comportamental de concorrência e replay para todas as RPCs.'
+      refs: ['supabase/tests/client_route_field_outcomes.test.sql']

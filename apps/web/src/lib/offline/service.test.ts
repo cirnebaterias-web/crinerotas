@@ -112,6 +112,46 @@ afterEach(async () => {
   )));
 });
 
+describe('field outcome offline synchronization',()=>{
+  it('confirms a queued classification with its stable idempotency key and removes the local action',async()=>{
+    const{service,repository}=await setup();const clientId='10000000-0000-4000-8000-000000000051';
+    await service.saveOfflineClassification(partition.userId,clientId,'autopecas');
+    const queued=(await repository.listFieldOutcomes(partition))[0]!;
+    const request=vi.fn(async()=>new Response(JSON.stringify({schemaVersion:1,clientId,classificationId:'10000000-0000-4000-8000-000000000052',classificationCode:'autopecas',classifiedAt:'2026-11-13T15:00:00Z',replayed:true}),{status:200,headers:{'content-type':'application/json'}}));
+    vi.stubGlobal('fetch',request);const result=await service.synchronize(partition);
+    expect(result.confirmed).toBe(1);expect(await repository.listFieldOutcomes(partition)).toHaveLength(0);
+    const calls=request.mock.calls as unknown as Array<[RequestInfo|URL,RequestInit]>;
+    const call=calls.find(([url])=>String(url).includes(`/clients/${clientId}/field-profile`))!;
+    expect(call[1].headers).toMatchObject({'idempotency-key':queued.idempotencyKey});
+  });
+  it('replays a queued non-visit in reserve, upload, confirm and record order',async()=>{
+    const{service,repository}=await setup();
+    const stopId='10000000-0000-4000-8000-000000000061';
+    await service.saveOfflineNonVisit(partition.userId,{schemaVersion:1,offlineId:'10000000-0000-4000-8000-000000000062',
+      routeVersionStopId:stopId,clientId:'10000000-0000-4000-8000-000000000063',reasonCode:'closed',observation:null,
+      evidence:{capturedAt:'2026-11-13T15:00:00.000Z',latitude:-5.8,longitude:-35.2,accuracyM:10},
+      attachmentOfflineId:'10000000-0000-4000-8000-000000000064',checksum:'a'.repeat(64),expiresAt:'2026-11-14T15:00:00.000Z'},new Blob(['photo'],{type:'image/jpeg'}));
+    const urls:string[]=[];
+    vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{const url=String(input);urls.push(url);
+      if(url.includes('/route-stop-attempt-attachments')&&!url.includes('/confirm'))return Response.json({signedUrl:'https://storage.invalid/upload?token=t',token:'t'});
+      return Response.json({schemaVersion:1});}));
+    await expect(service.synchronize(partition)).resolves.toMatchObject({confirmed:1,actionRequired:0});
+    expect(urls).toEqual(expect.arrayContaining([expect.stringContaining('/route-stop-attempt-attachments'),expect.stringContaining('/confirm'),expect.stringContaining(`/route-stops/${stopId}/attempts`)]));
+    expect(urls.findIndex((url)=>url.includes('storage.invalid'))).toBeGreaterThan(urls.findIndex((url)=>url.endsWith('/route-stop-attempt-attachments')));
+    expect(await repository.listFieldOutcomes(partition)).toHaveLength(0);
+  });
+
+  it('keeps a conflicting non-visit visible as action required after reconnect',async()=>{
+    const{service}=await setup();
+    await service.saveOfflineNonVisit(partition.userId,{schemaVersion:1,offlineId:'10000000-0000-4000-8000-000000000072',
+      routeVersionStopId:'10000000-0000-4000-8000-000000000071',attachmentOfflineId:'10000000-0000-4000-8000-000000000074',
+      checksum:'b'.repeat(64),expiresAt:'2026-11-14T15:00:00.000Z',evidence:{capturedAt:'2026-11-13T15:00:00.000Z'}},new Blob(['photo'],{type:'image/jpeg'}));
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response(null,{status:409})));
+    await expect(service.synchronize(partition)).resolves.toMatchObject({confirmed:0,actionRequired:1});
+    await expect(service.listFieldOutcomeActions(partition.userId)).resolves.toMatchObject([{status:'action_required',lastError:'HTTP 409'}]);
+  });
+});
+
 describe('commercial action catalog availability', () => {
   const action: CommercialAction = {
     id: '90000000-0000-4000-8000-000000000001', title: 'Campanha sintética',

@@ -46,7 +46,7 @@ import {
   type VisitCommercialActionsMutationIds,
   type VisitScrapMutationIds,
 } from '@cirne/domain';
-import type { OfflineDatabase } from './database';
+import type { LocalFieldOutcomeAction, OfflineDatabase } from './database';
 import { SyncEventPersistenceError } from './sync-persistence-error';
 
 function assertPartition(partition: OfflinePartition, record: { userId: string; deviceId: string }) {
@@ -54,6 +54,7 @@ function assertPartition(partition: OfflinePartition, record: { userId: string; 
   if (record.userId !== partition.userId || record.deviceId !== partition.deviceId) {
     throw new Error('Registro fora da partição offline solicitada.');
   }
+
 }
 
 function evidenceDistanceMeters(from: LocalVisitEvidence, to: LocalVisitEvidence) {
@@ -1171,4 +1172,21 @@ export class OfflineRepository {
       return mutation;
     });
   }
+
+  async enqueueFieldOutcome(action: LocalFieldOutcomeAction) {
+    const partition=offlinePartitionSchema.parse({userId:action.userId,deviceId:action.deviceId});
+    if (!action.actionId || !action.idempotencyKey || !Number.isFinite(Date.parse(action.createdAt))) throw new Error('Ação offline inválida.');
+    return this.db.transaction('rw',this.db.fieldOutcomeActions,async()=>{
+      const existing=await this.db.fieldOutcomeActions.get([partition.userId,partition.deviceId,action.actionId]);
+      if(existing)return existing;await this.db.fieldOutcomeActions.add(action);return action;
+    });
+  }
+  async listFieldOutcomes(partitionInput:OfflinePartition){const partition=offlinePartitionSchema.parse(partitionInput);
+    return this.db.fieldOutcomeActions.where('[userId+deviceId]').equals([partition.userId,partition.deviceId]).sortBy('createdAt');}
+  async confirmFieldOutcome(partitionInput:OfflinePartition,actionId:string){const partition=offlinePartitionSchema.parse(partitionInput);
+    await this.db.fieldOutcomeActions.delete([partition.userId,partition.deviceId,actionId]);}
+  async requireFieldOutcomeAction(partitionInput:OfflinePartition,actionId:string,lastError:string){const partition=offlinePartitionSchema.parse(partitionInput);
+    await this.db.fieldOutcomeActions.update([partition.userId,partition.deviceId,actionId],{status:'action_required',lastError});}
+  async purgeFieldOutcomes(partitionInput:OfflinePartition){const partition=offlinePartitionSchema.parse(partitionInput);
+    await this.db.fieldOutcomeActions.where('[userId+deviceId]').equals([partition.userId,partition.deviceId]).delete();}
 }

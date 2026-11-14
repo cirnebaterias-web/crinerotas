@@ -13,7 +13,13 @@ import type {
   CommercialActionList,
 } from '@cirne/contracts';
 
-export const offlineDatabaseVersion = 14;
+export const offlineDatabaseVersion = 15;
+
+export interface LocalFieldOutcomeAction {
+  userId: string; deviceId: string; actionId: string; idempotencyKey: string;
+  kind: 'classify_client' | 'record_non_visit'; status: 'pending' | 'action_required';
+  payload: Record<string, unknown>; attachment?: Blob; createdAt: string; lastError?: string;
+}
 
 export interface LocalCommercialActionCatalog extends CommercialActionList {
   userId: string;
@@ -114,6 +120,10 @@ export const offlineV14Stores = {
   ...offlineV13Stores,
   commercialActionCatalogs: '&[userId+deviceId], cachedAt',
 } as const;
+export const offlineV15Stores = {
+  ...offlineV14Stores,
+  fieldOutcomeActions: '&[userId+deviceId+actionId], &[userId+deviceId+idempotencyKey], [userId+deviceId], status, createdAt',
+} as const;
 
 export class OfflineDatabase extends Dexie {
   routeBundles!: Table<OfflineRouteBundle, [string, string, string]>;
@@ -127,6 +137,7 @@ export class OfflineDatabase extends Dexie {
   scrapSchedules!: Table<LocalStandaloneScrapSchedule, [string, string, string]>;
   scrapPoints!: Table<LocalScrapPoint, [string, string, string]>;
   commercialActionCatalogs!: Table<LocalCommercialActionCatalog, [string, string]>;
+  fieldOutcomeActions!: Table<LocalFieldOutcomeAction, [string, string, string]>;
 
   constructor(name = 'cirne-rotas-offline', options?: DexieOptions) {
     super(name, options);
@@ -148,6 +159,7 @@ export class OfflineDatabase extends Dexie {
     this.version(11).stores(offlineV11Stores);
     this.version(12).stores(offlineV12Stores);
     this.version(13).stores(offlineV13Stores);
-    this.version(offlineDatabaseVersion).stores(offlineV14Stores);
+    this.version(14).stores(offlineV14Stores);
+    this.version(offlineDatabaseVersion).stores(offlineV15Stores);
   }
 }

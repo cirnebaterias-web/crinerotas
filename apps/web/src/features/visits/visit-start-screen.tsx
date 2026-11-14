@@ -16,6 +16,7 @@ import { VisitEvidenceCapture, type VisitEvidenceCaptureValue } from './visit-ev
 import { VisitCommercialActionsStep } from './actions/visit-commercial-actions-step';
 import { VisitScrapStep } from './scrap/visit-scrap-step';
 import { VisitSalesStep } from './sales/visit-sales-step';
+import { ClientFieldProfileGate } from './client-field-profile-gate';
 
 type VisitScreenStep = 'start' | 'stock' | 'competitor-stock' | 'stock-insights' | 'stock-photos' | 'prices' | 'actions' | 'sales' | 'scrap' | 'review' | 'complete';
 
@@ -27,6 +28,7 @@ const visitStepLabels: Record<VisitScreenStep, string> = {
 
 export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const controllerRef = useRef<VisitStartController | null>(null);
+  const offlineServiceRef = useRef<OfflineFoundationService | null>(null);
   const nextStepTitleRef = useRef<HTMLHeadingElement>(null);
   const [view, setView] = useState(initialVisitView);
   const [step, setStep] = useState<VisitScreenStep>('start');
@@ -38,15 +40,21 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
   const [pricesDirty, setPricesDirty] = useState(false);
   const [salesDirty, setSalesDirty] = useState(false);
   const [ownDirty, setOwnDirty] = useState(false);
+  const [classificationReady, setClassificationReady] = useState(false);
   const exitStepRef = useRef<VisitScreenStep>('start');
   const navigationStateRef = useRef({ step, ownDirty, competitorDirty, pricesDirty, salesDirty });
   const { draft, state, message: syncMessage } = view;
+  const requiresClassification = Boolean(draft?.client) && !classificationReady;
   const recoveringSales = Boolean(draft?.localStatus === 'completed' &&
     draft.salesCompletionRecovery && !draft.serverCompletedAt);
   const stockPhotos = view.attachments.filter((item) => item.purpose === 'stock_evidence');
   const stockComplete = Boolean(draft?.stock?.collectionCompletedAt &&
     stockPhotos.length >= 3 && stockPhotos.length <= 5);
   const checkinEvidence = view.evidence.find((item) => item.kind === 'checkin' && item.latitude && item.longitude);
+  const completeClassificationRef = useRef(() => setClassificationReady(true));
+
+  useEffect(() => { setClassificationReady(Boolean(draft?.localStatus === 'completed')); }, [draft?.client?.id, draft?.localStatus]);
+  useEffect(() => { if (requiresClassification && step !== 'start') setStep('start'); }, [requiresClassification, step]);
 
   useEffect(() => {
     navigationStateRef.current = { step, ownDirty, competitorDirty, pricesDirty, salesDirty };
@@ -103,6 +111,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
     }
     readStep();
     const service = new OfflineFoundationService();
+    offlineServiceRef.current = service;
     const controller = new VisitStartController(
       offlineId, service, setView, () => navigator.onLine,
     );
@@ -124,6 +133,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
       stopObserving();
       controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
+      if (offlineServiceRef.current === service) offlineServiceRef.current = null;
     };
   }, [offlineId]);
 
@@ -352,7 +362,9 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         </div>
         <p className="seller-kicker">VISITA EM ANDAMENTO</p>
         <h1>{draft.client?.name ?? 'Atendimento salvo'}<span className="seller-heading-dot">.</span></h1>
-        {step === 'start' && <section className="seller-progress" aria-labelledby="visit-state-title">
+        {requiresClassification && draft.client && <ClientFieldProfileGate clientId={draft.client.id}
+          clientName={draft.client.name} deviceId={draft.deviceId} userId={draft.userId} offlineService={offlineServiceRef.current ?? undefined} onReady={completeClassificationRef.current} />}
+        {!requiresClassification && step === 'start' && <section className="seller-progress" aria-labelledby="visit-state-title">
           <h2 id="visit-state-title">Início da visita</h2>
           <p><strong>{draft.persistenceState === 'synced' ? 'Sincronizada' : 'Salva no aparelho'}</strong></p>
           <p>Iniciada em {new Date(draft.deviceStartedAt ?? draft.updatedAt).toLocaleString('pt-BR')}.</p>
@@ -365,7 +377,7 @@ export function VisitStartScreen({ offlineId }: { offlineId: string }) {
         </section>}
         {step !== 'start' && syncMessage && <p className="seller-muted" role="status">{syncMessage}</p>}
         {recoveringSales && view.requiresLogin && <a className="seller-button seller-primary" href="/login">Entrar novamente</a>}
-        {step === 'start' && draft.localStatus !== 'completed' && <section className="seller-task-list" aria-labelledby="visit-tasks-title">
+        {!requiresClassification && step === 'start' && draft.localStatus !== 'completed' && <section className="seller-task-list" aria-labelledby="visit-tasks-title">
           <p className="seller-kicker">TAREFAS DA VISITA</p>
           <h2 id="visit-tasks-title">O que você vai coletar?</h2>
           <button className="seller-task-card" data-state={stockComplete ? 'completed' : draft.stock ? 'in_progress' : 'available'} onClick={openStockCollection}

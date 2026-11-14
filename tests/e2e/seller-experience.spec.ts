@@ -128,6 +128,18 @@ test.describe('seller visual MVP', () => {
     });
   }
 
+  for (const width of [320, 390]) {
+    test(`non-visit reason dialog traps focus and fits ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 }); await setup(page); await page.goto('/route');
+      const trigger=page.getByRole('button',{name:'Não foi possível visitar'}).first();await trigger.focus();await trigger.click();
+      const dialog=page.getByRole('dialog',{name:'Por que a visita não aconteceu?'});await expect(dialog).toBeVisible();
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+      await expect(page.getByRole('radio',{name:'Cliente fechado'})).toBeFocused();
+      await page.keyboard.press('Shift+Tab');await expect(dialog.getByRole('button',{name:'Cancelar'})).toBeFocused();
+      await page.keyboard.press('Escape');await expect(dialog).toBeHidden();await expect(trigger).toBeFocused();
+    });
+  }
+
   test('409 requires explicit reload and never retries or overwrites silently', async ({ page }) => {
     const commands = await setup(page, { conflict: true });
     await page.goto('/route');
