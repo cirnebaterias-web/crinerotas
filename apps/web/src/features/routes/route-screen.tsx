@@ -7,12 +7,15 @@ import { SavedVisits } from '@/features/visits/saved-visits';
 import { OfflineFoundationService } from '@/lib/offline/service';
 import { observeLocalAccessRevocation } from '@/lib/offline/access-revocation';
 import { isSessionFailure, sellerClient, SellerHttpError } from '@/lib/seller-client';
-import { formatServiceDate, movePending, orderedStops, pendingIds, routeProgress } from './route-model';
+import { formatServiceDate, movePending, orderedStops, pendingIds, projectOfflineNonVisit, routeProgress } from './route-model';
 import { NavigationActions } from './navigation-actions';
 import { VisitEvidenceCapture, type VisitEvidenceCaptureValue } from '@/features/visits/visit-evidence-capture';
 import { checkinFailureMessage } from './checkin-failure-message';
 import { ClientSalesDialog } from '@/features/clients/client-sales-dialog';
 import { orderPendingFromLocation } from './route-location-order';
+import { AdditionalClientDialog } from './additional-client-dialog';
+import { NonVisitWizard } from './non-visit-wizard';
+import { ClientClosurePrompt } from './client-closure-prompt';
 
 const statusLabels = { pending: 'Pendente', in_visit: 'Em visita', completed: 'Visitado', not_visited: 'Não visitado' };
 
@@ -31,14 +34,21 @@ export function RouteScreen() {
   const [visitBusyStop, setVisitBusyStop] = useState<string | null>(null);
   const [checkinStop, setCheckinStop] = useState<CanonicalRoute['stops'][number] | null>(null);
   const [salesClient, setSalesClient] = useState<CanonicalRoute['stops'][number]['client'] | null>(null);
+  const [showAdditionalClient, setShowAdditionalClient] = useState(false);
+  const [attemptStop, setAttemptStop] = useState<CanonicalRoute['stops'][number] | null>(null);
+  const [closureClient, setClosureClient] = useState<CanonicalRoute['stops'][number]['client'] | null>(null);
   const generation = useRef(0);
   const accessBlocked = useRef(false);
   const cacheGeneration = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const offlineService = useRef<OfflineFoundationService | null>(null);
+  const attemptReturnFocus = useRef<HTMLButtonElement | null>(null);
+  const identityRef = useRef<MeResponse | null>(null);
+  useEffect(() => { identityRef.current = identity; }, [identity]);
 
   const clearPrivate = useCallback(() => {
     setSalesClient(null);
+    setClosureClient(null);
     ++cacheGeneration.current;
     setIdentity(null); setToday(null); setDraft(null); setOfflineCache(null); setCompositionMessage(''); setVisitDrafts({});
   }, []);
@@ -111,7 +121,22 @@ export function RouteScreen() {
       setLoginRequired(true); setBusy(false); setMessage(''); setVisitBusyStop(null);
     });
     void load();
-    const connectivity = () => setOffline(!navigator.onLine);
+    const connectivity = () => {
+      const disconnected = !navigator.onLine;
+      setOffline(disconnected);
+      const currentIdentity = identityRef.current;
+      if (!disconnected && currentIdentity?.id) {
+        const partition = { userId: currentIdentity.id, deviceId: localService.deviceId() };
+        void localService.synchronize(partition).then(async (summary) => {
+          const actions = await localService.listFieldOutcomeActions(currentIdentity.id);
+          if (actions.some((action) => action.status === 'action_required') || summary.actionRequired > 0) {
+            setMessage('Uma alteração feita offline precisa de revisão. Atualize a rota ou procure o gestor antes de tentar novamente.');
+            return;
+          }
+          await load();
+        }).catch(() => setMessage('A sincronização continua pendente. Mantenha a conexão e tente atualizar novamente.'));
+      }
+    };
     connectivity();
     const restored = (event: PageTransitionEvent) => { if (event.persisted) void load(); };
     window.addEventListener('online', connectivity);
@@ -247,6 +272,7 @@ export function RouteScreen() {
   const progress = routeProgress(stops);
   const date = route?.serviceDate ?? (today?.availability === 'empty' ? today.serviceDate : null);
   const canReorder = identity?.capabilities.includes('route.reorder_self');
+  const canAddClient = identity?.capabilities.includes('route.extend_self');
 
   return <div className="seller-app seller-route-page">
     <header className="seller-topbar"><div className="seller-topbar-inner"><Brand />
@@ -286,7 +312,9 @@ export function RouteScreen() {
         </aside>
         <section className="seller-stops" aria-labelledby="stops-title">
           <div className="seller-section-heading"><div><h2 id="stops-title">Paradas do dia <span>{stops.length}</span></h2><p>{draft ? 'Ajuste a sequência usando as setas.' : 'Seu roteiro na ordem de execução.'}</p></div>
-            {!draft && <button className="seller-button seller-secondary" disabled={busy || offline || needsReload || !canReorder || pending.length < 2} onClick={() => void beginReorder()}>Reordenar <span aria-hidden="true">↕</span></button>}
+            {!draft && <div className="seller-heading-actions"><button className="seller-button seller-secondary" disabled={busy || offline || needsReload || !canAddClient}
+              title={offline ? 'Conecte-se para adicionar cliente' : undefined} onClick={() => setShowAdditionalClient(true)}>+ Adicionar cliente</button>
+              <button className="seller-button seller-secondary" disabled={busy || offline || needsReload || !canReorder || pending.length < 2} onClick={() => void beginReorder()}>Reordenar <span aria-hidden="true">↕</span></button></div>}
           </div>
           {(draft || needsReload) && <div className="seller-editbar"><span>{needsReload ? 'Recarregamento necessário' : 'Editando · alterações não salvas'}</span><div>
             {needsReload ? <button className="seller-button seller-primary" disabled={busy || offline} onClick={() => void load()}>Recarregar rota</button> : <>
@@ -311,6 +339,9 @@ export function RouteScreen() {
                 >{visitBusyStop === stop.routeVersionStopId ? 'Salvando no aparelho…'
                     : localVisit?.localStatus === 'completed' ? 'Visita encerrada'
                       : localVisit ? 'Continuar visita' : 'Iniciar visita'}</button>}
+                {!draft && stop.status === 'pending' && !localVisit && <button type="button"
+                  className="seller-button seller-secondary seller-non-visit-action"
+                  disabled={busy || needsReload || visitBusyStop !== null} onClick={(event) => { attemptReturnFocus.current=event.currentTarget;setAttemptStop(stop);}}>Não foi possível visitar</button>}
               </div>
               {draft && stop.status === 'pending' && <div className="seller-move-controls">
                 <button className="seller-button seller-secondary" aria-label={`Subir ${stop.client.name}`} disabled={busy || needsReload || pendingIndex === 0} onClick={() => setDraft(movePending(stops, stop.routeVersionStopId, -1))}>↑</button>
@@ -323,6 +354,27 @@ export function RouteScreen() {
         </section>
       </div>}
       {salesClient && <ClientSalesDialog key={salesClient.id} client={salesClient} onClose={() => setSalesClient(null)} />}
+      {showAdditionalClient && route && offlineService.current && <AdditionalClientDialog route={route}
+        deviceId={offlineService.current.deviceId()} onClose={() => setShowAdditionalClient(false)} onAdded={async () => {
+          setShowAdditionalClient(false); await load(); setMessage('Cliente incluído no fim da rota.');
+        }} />}
+      {attemptStop && offlineService.current && <NonVisitWizard stop={attemptStop} deviceId={offlineService.current.deviceId()} userId={identity?.id} offlineService={offlineService.current}
+        onCancel={() => {setAttemptStop(null);queueMicrotask(()=>attemptReturnFocus.current?.focus());}} onDone={async (reason) => { const attempted = attemptStop; const attemptedClient = attempted.client; setAttemptStop(null);
+          if (!navigator.onLine && route) {
+            const projected = projectOfflineNonVisit(route, attempted.routeVersionStopId);
+            setToday((current) => {
+              if (!current || current.availability !== 'available') return current;
+              if (current.schemaVersion === 2) return { ...current,
+                route: projectOfflineNonVisit(current.route, attempted.routeVersionStopId) };
+              return { ...current, route: projectOfflineNonVisit(current.route, attempted.routeVersionStopId) };
+            });
+            if (identity) cacheRoute(identity.id, projected, generation.current);
+          } else await load();
+          if (reason === 'business_closed') setClosureClient(attemptedClient);
+          setMessage(navigator.onLine ? 'Parada registrada como não realizada.' : 'Parada salva no aparelho e pendente de sincronização.'); }} />}
+      {closureClient && offlineService.current && <ClientClosurePrompt client={closureClient}
+        deviceId={offlineService.current.deviceId()} onCancel={() => { setClosureClient(null); setMessage('Cliente mantido em atividade.'); }}
+        onClosed={async () => { setClosureClient(null); await load(); setMessage('Cliente marcado como encerrado; o histórico foi preservado.'); }} />}
       {checkinStop && <div className="seller-evidence-overlay">
         <VisitEvidenceCapture
           kind="checkin"

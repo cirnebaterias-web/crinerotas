@@ -28,3 +28,23 @@ it('classifies access failures separately from concurrency and server errors', a
   expect(isSessionFailure(new SellerHttpError(409))).toBe(false);
   expect(isSessionFailure(new TypeError('Failed to fetch'))).toBe(false);
 });
+
+it('searches the authorized portfolio and sends an idempotent route extension', async () => {
+  const id = '40000000-0000-4000-8000-000000000001';
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ schemaVersion: 1, clients: [{ id,
+      externalReference: 'C-1', name: 'Cliente', address: 'Rua 1', portfolioReference: null, alreadyOnRoute: false }] })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ schemaVersion: 1, routeId: id,
+      previousRouteVersionId: id, routeVersionId: id, versionNumber: 2, routeVersionStopId: id,
+      source: 'seller_ad_hoc', replayed: false })));
+  vi.stubGlobal('fetch', fetcher);
+  expect((await sellerClient.searchRouteClients(id, 'Rua 1')).clients).toHaveLength(1);
+  await sellerClient.addRouteClient({ schemaVersion: 2, routeId: id, routeVersionId: id, versionNumber: 1,
+    serviceDate: '2026-11-13', status: 'published', publishedAt: '2026-11-13T10:00:00.000Z', executionVersion: 1,
+    seller: { id, displayName: 'Vendedor' }, stops: [{ routeVersionStopId: id, plannedOrder: 1,
+      executionOrder: 1, priority: 0, status: 'pending', executionVersion: 1,
+      client: { id, externalReference: 'C-1', name: 'Cliente', address: 'Rua 1', latitude: null,
+        longitude: null, portfolioReference: null } }] }, id, id, id);
+  expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: 'POST', headers: expect.objectContaining({
+    'x-device-id': id, 'idempotency-key': id }), body: expect.stringContaining('"expectedVersion":1') }));
+});

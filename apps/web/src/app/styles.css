@@ -215,6 +215,24 @@ h1 { margin: 0; font-size: clamp(1.9rem, 8vw, 2.7rem); }
 .seller-section-heading h2 span { font-size: 11px; padding: 3px 7px; background: #e3eae5; border-radius: 6px; margin-left: 5px; vertical-align: middle; }
 .seller-section-heading p { font-size: 12px; margin-bottom: 0; color: var(--cirne-muted); }
 .seller-section-heading button { font-size: 12px; }
+.seller-heading-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.additional-client-dialog { width: min(100%, 640px); max-height: calc(100dvh - 32px); overflow: auto; }
+.additional-client-results { display: grid; gap: 8px; max-height: 42dvh; overflow: auto; margin: 12px 0; padding: 0; list-style: none; }
+.additional-client-results button { width: 100%; min-height: 64px; display: grid; gap: 3px; padding: 12px; text-align: left; border: 1px solid var(--cirne-border); border-radius: 12px; background: #fff; }
+.additional-client-results button[aria-pressed="true"] { border-color: var(--cirne-green); box-shadow: 0 0 0 2px rgb(0 126 69 / 15%); }
+.additional-client-results span,.additional-client-results small { color: var(--cirne-muted); }
+.client-classification-gate { max-width: 760px; margin: 16px auto; }
+.classification-options { display: grid; gap: 8px; max-height: 46dvh; overflow: auto; padding: 4px; }
+.classification-options label { display: flex; gap: 10px; align-items: flex-start; min-height: 52px; padding: 10px; border: 1px solid var(--cirne-border); border-radius: 10px; }
+.classification-options input { width: 20px; height: 20px; flex: 0 0 auto; }
+.classification-options span { display: grid; gap: 3px; }
+.classification-options small { color: var(--cirne-muted); line-height: 1.35; }
+.client-close-confirm { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid #b42318; border-radius: 12px; }
+.seller-non-visit-action { width: 100%; min-height: 44px; margin-top: 8px; }
+.non-visit-wizard { width: min(100%, 620px); max-height: calc(100dvh - 32px); overflow: auto; }
+.non-visit-reasons { display: grid; gap: 6px; margin: 8px 0 14px; }
+.non-visit-reasons label { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px; border: 1px solid var(--cirne-border); border-radius: 10px; }
+.non-visit-reasons input { width: 20px; height: 20px; }
 .seller-stop-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
 .seller-saved-visits { margin-top: 28px; }
 .seller-stop-card { display: flex; align-items: flex-start; gap: 17px; background: white; border: 1px solid var(--cirne-border); box-shadow: 0 3px 8px #17351f03; border-radius: 14px; padding: 22px; }

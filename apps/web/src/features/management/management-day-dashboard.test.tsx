@@ -23,7 +23,7 @@ const result: ManagementDayResponse = {
       routeVersionStopId: '30000000-0000-4000-8000-000000000001', plannedOrder: 1,
       executionOrder: 1, priority: 0,
       client: { id: '40000000-0000-4000-8000-000000000001', name: 'Cliente Visitado' },
-      status: 'completed', nonVisitReason: null, lastKnownUpdateAt: '2026-10-20T11:05:00.000Z',
+      status: 'completed', nonVisitReason: null, nonVisitAttempt:{attemptId:'60000000-0000-4000-8000-000000000001',observation:'Cliente confirmou encerramento',recordedAt:'2026-10-20T11:04:00.000Z',capturedAt:'2026-10-20T11:03:00.000Z',latitude:-5.8,longitude:-35.2,accuracyM:12,attachmentId:'60000000-0000-4000-8000-000000000002'}, lastKnownUpdateAt: '2026-10-20T11:05:00.000Z',
       visits: [{
         visitId: '50000000-0000-4000-8000-000000000001',
         routeVersionStopId: '30000000-0000-4000-8000-000000000001',
@@ -39,7 +39,7 @@ const result: ManagementDayResponse = {
       routeVersionStopId: '30000000-0000-4000-8000-000000000002', plannedOrder: 2,
       executionOrder: 2, priority: 0,
       client: { id: '40000000-0000-4000-8000-000000000002', name: 'Cliente Pendente' },
-      status: 'pending', nonVisitReason: null, lastKnownUpdateAt: '2026-10-20T11:05:00.000Z', visits: [],
+      status: 'pending', nonVisitReason: null, nonVisitAttempt: null, lastKnownUpdateAt: '2026-10-20T11:05:00.000Z', visits: [],
     }],
   }],
 };
@@ -53,6 +53,9 @@ describe('management day dashboard', () => {
     expect(html).toContain('Situação das atividades no servidor');
     expect(html).toContain('Foto da fachada / check-in');
     expect(html).toContain('Abrir detalhe completo');
+    expect(html).toContain('Cliente confirmou encerramento');
+    expect(html).toContain('precisão 12 m');
+    expect(html).toContain('/api/v1/management/route-stop-attempt-attachments/60000000-0000-4000-8000-000000000002/download-url');
     expect(html).toContain('Requer atenção');
     expect(html).toContain('1 envio pendente');
     expect(html).toContain('itens ainda apenas no aparelho não são visíveis');

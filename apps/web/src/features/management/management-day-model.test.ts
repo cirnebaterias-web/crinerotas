@@ -17,7 +17,7 @@ function route(overrides: Partial<ManagementDayRouteV2> = {}): ManagementDayRout
     stops: [{ routeVersionStopId: '30000000-0000-4000-8000-000000000001', plannedOrder: 1,
       executionOrder: 1, priority: 0,
       client: { id: '40000000-0000-4000-8000-000000000001', name: 'Auto Peças Norte' },
-      status: 'pending', nonVisitReason: null, lastKnownUpdateAt: '2026-10-20T11:00:00.000Z', visits: [] }],
+      status: 'pending', nonVisitReason: null, nonVisitAttempt: null, lastKnownUpdateAt: '2026-10-20T11:00:00.000Z', visits: [] }],
     ...overrides,
   };
 }

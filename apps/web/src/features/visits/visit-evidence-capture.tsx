@@ -14,7 +14,7 @@ export interface VisitEvidenceCaptureValue {
 }
 
 interface Props {
-  kind: 'checkin' | 'checkout';
+  kind: 'checkin' | 'checkout' | 'attempt';
   client: CanonicalRoute['stops'][number]['client'];
   busy?: boolean;
   referenceLocation?: { latitude: string; longitude: string };
@@ -41,7 +41,7 @@ export function VisitEvidenceCapture({ kind, client, busy = false, referenceLoca
   const [streetConfirmed, setStreetConfirmed] = useState(false);
   const referenceLatitude = referenceLocation?.latitude ?? client.latitude;
   const referenceLongitude = referenceLocation?.longitude ?? client.longitude;
-  const missingClientLocation = kind === 'checkin' && (client.latitude === null || client.longitude === null);
+  const missingClientLocation = kind !== 'checkout' && (client.latitude === null || client.longitude === null);
 
   useEffect(() => {
     let active = true;
@@ -139,7 +139,7 @@ export function VisitEvidenceCapture({ kind, client, busy = false, referenceLoca
       setMessage('Checkout recusado. O ponto do check-in não está disponível neste aparelho; reabra a visita pela rota.');
       return;
     }
-    const radiusDecision = outsideRadiusDecision({ kind, issues, justification });
+    const radiusDecision = outsideRadiusDecision({ kind: kind === 'attempt' ? 'checkin' : kind, issues, justification });
     if (radiusDecision === 'blocked') {
       setMessage('Checkout recusado. Volte ao ponto onde realizou o check-in e tente novamente.');
       return;
@@ -175,12 +175,13 @@ export function VisitEvidenceCapture({ kind, client, busy = false, referenceLoca
   };
 
   return <section className="seller-evidence" role="dialog" aria-modal="true" aria-labelledby="evidence-title">
-    <p className="seller-kicker">{kind === 'checkin' ? 'CHECK-IN' : 'CHECKOUT'}</p>
+    <p className="seller-kicker">{kind === 'checkout' ? 'CHECKOUT' : kind === 'attempt' ? 'VISITA NÃO REALIZADA' : 'CHECK-IN'}</p>
     <h2 id="evidence-title">Foto da fachada e posição</h2>
     <p className="seller-muted">{client.name} · a foto deve ser tirada agora pela câmera. A galeria não está disponível.</p>
     <p className="seller-muted">{kind === 'checkout'
       ? 'O checkout precisa ocorrer a até 30 m do ponto registrado no check-in.'
-      : 'Preferencialmente, faça o check-in a até 30 m do PDV. Durante o teste, uma distância maior exige justificativa.'}</p>
+      : kind === 'attempt' ? 'Registre a fachada e o GPS para comprovar a tentativa.'
+        : 'Preferencialmente, faça o check-in a até 30 m do PDV. Durante o teste, uma distância maior exige justificativa.'}</p>
     {missingClientLocation && <div className="seller-notice"><strong>PDV sem posição exata cadastrada</strong>
       <p>Confira se você está nesta rua: {client.address}</p>
       <label><input type="checkbox" checked={streetConfirmed}
@@ -209,7 +210,7 @@ export function VisitEvidenceCapture({ kind, client, busy = false, referenceLoca
     <div className="seller-evidence-actions">
       <button className="seller-button seller-secondary" type="button" disabled={saving || busy} onClick={onCancel}>Cancelar</button>
       <button className="seller-button seller-primary" type="button" disabled={saving || busy || locating}
-        onClick={() => void submit()}>{saving || busy ? 'Salvando…' : kind === 'checkin' ? 'Confirmar e iniciar visita' : 'Confirmar e encerrar visita'}</button>
+        onClick={() => void submit()}>{saving || busy ? 'Salvando…' : kind === 'checkin' ? 'Confirmar e iniciar visita' : kind === 'attempt' ? 'Usar esta evidência' : 'Confirmar e encerrar visita'}</button>
     </div>
   </section>;
 }

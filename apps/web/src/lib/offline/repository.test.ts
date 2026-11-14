@@ -59,6 +59,20 @@ describe('commercial action catalog cache', () => {
   });
 });
 
+describe('field outcome offline aggregate',()=>{
+  it('commits non-visit metadata and photo atomically, replays locally and purges by identity',async()=>{
+    const{db,repository}=makeRepository();const blob=new Blob([new Uint8Array([0xff,0xd8,0xff])],{type:'image/jpeg'});
+    const action={...partitionA,actionId:'10000000-0000-4000-8000-000000000041',idempotencyKey:'10000000-0000-4000-8000-000000000042',
+      kind:'record_non_visit' as const,status:'pending' as const,payload:{offlineId:'10000000-0000-4000-8000-000000000043',reasonCode:'client_closed'},attachment:blob,createdAt:'2026-11-13T15:00:00.000Z'};
+    await repository.enqueueFieldOutcome(action);await repository.enqueueFieldOutcome(action);
+    const stored=await repository.listFieldOutcomes(partitionA);expect(stored).toHaveLength(1);expect(stored[0]!.attachment?.size).toBe(3);
+    expect(await repository.listFieldOutcomes(partitionB)).toHaveLength(0);
+    await repository.requireFieldOutcomeAction(partitionA,action.actionId,'VERSION_CONFLICT');
+    expect((await repository.listFieldOutcomes(partitionA))[0]).toMatchObject({status:'action_required',lastError:'VERSION_CONFLICT'});
+    await repository.purgeFieldOutcomes(partitionA);expect(await db.fieldOutcomeActions.count()).toBe(0);
+  });
+});
+
 function command(overrides: Partial<SaveDraftCommand> = {}): SaveDraftCommand {
   return {
     partition: partitionA,

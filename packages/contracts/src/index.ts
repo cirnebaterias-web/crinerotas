@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export * from './field-route-outcomes';
 import { competitorCommercialActionTypeSchema } from './commercial-action-types';
 import { clientGoogleLocationSchema } from './client-google-location';
 export * from './client-google-location';

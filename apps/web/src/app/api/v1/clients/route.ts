@@ -1,4 +1,4 @@
-import { clientListQuerySchema, clientListResponseSchema, createClientRequestSchema } from '@cirne/contracts';
+import { clientListQuerySchema, clientListResponseSchema, createClientRequestSchema, managementClientFieldProfilesSchema } from '@cirne/contracts';
 import { clientImportRpc, handleClientImportRequest, requireClientCapability } from '@/server/client-imports/http';
 import {
   clientRequestOrigin,
@@ -15,13 +15,23 @@ export async function GET(request: Request) {
     if (!parsed.success) {
       throw new RouteRequestError(422, 'VALIDATION_FAILED', 'Revise os filtros da consulta.', false);
     }
-    const result = await clientImportRpc(client, 'list_management_clients', {
+    const result = clientListResponseSchema.parse(await clientImportRpc(client, 'list_management_clients', {
       p_query: parsed.data.q,
       p_page: parsed.data.page,
       p_page_size: parsed.data.pageSize,
       p_seller_id: parsed.data.sellerId ?? null,
-    });
-    return Response.json(clientListResponseSchema.parse(result), { headers });
+    }));
+    const profiles = result.clients.length === 0 ? { schemaVersion: 1 as const, profiles: [] }
+      : managementClientFieldProfilesSchema.parse(await clientImportRpc(client, 'list_management_client_field_profiles', {
+        p_client_ids: result.clients.map((item) => item.id),
+      }));
+    const byClient = new Map(profiles.profiles.map((profile) => [profile.clientId, profile]));
+    return Response.json(clientListResponseSchema.parse({ ...result, clients: result.clients.map((item) => {
+      const profile = byClient.get(item.id);
+      return { ...item, classificationCode: profile?.classificationCode ?? null,
+        classificationLabel: profile?.classificationLabel ?? null,
+        operatingStatus: profile?.operatingStatus ?? 'active', operatingClosedReason: profile?.closedReason ?? null };
+    }) }), { headers });
   });
 }
 export async function POST(request: Request) {

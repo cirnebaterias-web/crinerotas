@@ -34,7 +34,7 @@ describe('authorized tabular projections', () => {
         nonVisits: [], historicalExecutions: [], syncIssues: [], visits: [visit],
         lastKnownUpdateAt: '2026-10-29T12:00:00.000Z',
         stops: [{ routeVersionStopId: visit.routeVersionStopId, plannedOrder: 1, executionOrder: 1, priority: 0,
-          client: visit.client, status: 'in_visit', nonVisitReason: null,
+          client: visit.client, status: 'in_visit', nonVisitReason: null, nonVisitAttempt: null,
           lastKnownUpdateAt: '2026-10-29T12:00:00.000Z', visits: [visit] }] }],
     };
     expect(managementDayReport(response).rows[0]).toMatchObject({

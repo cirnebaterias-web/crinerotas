@@ -70,6 +70,7 @@
     "ops:route-proposals": "tsx apps/cli/src/weekly-route-proposals-cli.ts",
     "ops:seller-route-profile": "tsx apps/cli/src/seller-route-profiles-cli.ts",
     "ops:visits": "tsx apps/cli/src/visits-cli.ts",
+    "ops:field-outcomes": "tsx apps/cli/src/field-route-outcomes-cli.ts",
     "ops:stock-insights": "tsx apps/cli/src/stock-insights-cli.ts",
     "ops:backup:verify": "tsx scripts/backup-verify-cli.ts",
     "ops:vps:preflight": "tsx scripts/pilot-vps-preflight-cli.ts",

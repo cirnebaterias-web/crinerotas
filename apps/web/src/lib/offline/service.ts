@@ -27,6 +27,7 @@ import {
   type VisitEvidenceIssue,
   type CompetitorStockLine,
   type OfflinePartition,
+  clientFieldProfilePath, routeStopAttemptAttachmentPath, routeStopAttemptAttachmentConfirmPath, routeStopAttemptPath,
 } from '@cirne/contracts';
 import {
   createCanonicalLocalRouteBundle,
@@ -213,6 +214,8 @@ export class OfflineFoundationService {
     this.evidenceSync = new EvidenceSyncCoordinator(this.repository, new FetchEvidenceSyncTransport());
     this.scrapEvidenceSync = new ScrapEvidenceSyncCoordinator(this.repository, new FetchScrapEvidenceTransport());
   }
+
+  deviceId() { return this.getDeviceId(); }
 
   async initialize(): Promise<OfflineShellResult> {
     if (this.accessRevoked) return revokedResult;
@@ -727,6 +730,29 @@ export class OfflineFoundationService {
     return this.loadAuthorizedPartition(partition, false);
   }
 
+  async saveOfflineClassification(userId:string,clientId:string,classificationCode:string){const partition={userId,deviceId:this.getDeviceId()};
+    const access=await this.requireLocalAccess(partition);if(!access.allowed)throw new Error('A sessão local precisa ser revalidada.');
+    return this.repository.enqueueFieldOutcome({ ...partition,actionId:this.createId(),idempotencyKey:this.createId(),kind:'classify_client',status:'pending',
+      payload:{schemaVersion:1,clientId,classificationCode},createdAt:this.now()});}
+  async hasPendingOfflineClassification(userId:string,clientId:string){return (await this.repository.listFieldOutcomes({userId,deviceId:this.getDeviceId()}))
+    .some((item)=>item.kind==='classify_client'&&item.status==='pending'&&item.payload.clientId===clientId);}
+  async saveOfflineNonVisit(userId:string,payload:Record<string,unknown>,attachment:Blob){const partition={userId,deviceId:this.getDeviceId()};
+    const access=await this.requireLocalAccess(partition);if(!access.allowed)throw new Error('A sessão local precisa ser revalidada.');
+    return this.repository.enqueueFieldOutcome({...partition,actionId:this.createId(),idempotencyKey:this.createId(),kind:'record_non_visit',status:'pending',payload,attachment,createdAt:this.now()});}
+  async listFieldOutcomeActions(userId:string){return this.repository.listFieldOutcomes({userId,deviceId:this.getDeviceId()});}
+
+  private async syncFieldOutcomes(partition:OfflinePartition){const actions=await this.repository.listFieldOutcomes(partition);let confirmed=0,recoverable=0,actionRequired=0,authenticationRequired=false;
+    for(const action of actions){if(action.status==='action_required'){actionRequired++;continue;}try{const headers={'content-type':'application/json','x-csrf-token':'cirne-route-v1','x-device-id':partition.deviceId,'idempotency-key':action.idempotencyKey};
+      if(action.kind==='classify_client'){const clientId=String(action.payload.clientId);const response=await fetch(clientFieldProfilePath(clientId),{method:'POST',credentials:'same-origin',headers,body:JSON.stringify(action.payload)});if(!response.ok)throw response;}
+      else{const attachmentId=String(action.payload.attachmentOfflineId);const attemptId=String(action.payload.offlineId);const evidence=action.payload.evidence as Record<string,unknown>;const blob=action.attachment;if(!blob)throw new Error('attachment');
+        const checksum=String(action.payload.checksum);const reserve=await fetch(routeStopAttemptAttachmentPath,{method:'POST',credentials:'same-origin',headers,body:JSON.stringify({schemaVersion:1,offlineId:attachmentId,attemptOfflineId:attemptId,contentType:blob.type,byteSize:blob.size,checksum,capturedAt:evidence.capturedAt,expiresAt:action.payload.expiresAt})});if(!reserve.ok)throw reserve;
+        const intent=await reserve.json() as {signedUrl:string;token:string};const uploadUrl=new URL(intent.signedUrl);if(!uploadUrl.searchParams.has('token'))uploadUrl.searchParams.set('token',intent.token);const form=new FormData();form.append('cacheControl','3600');form.append('',blob);const upload=await fetch(uploadUrl,{method:'PUT',credentials:'omit',headers:{'x-upsert':'false'},body:form});if(!upload.ok&&upload.status!==409)throw upload;
+        const confirmation=await fetch(routeStopAttemptAttachmentConfirmPath(attachmentId),{method:'POST',credentials:'same-origin',headers:{...headers,'idempotency-key':attachmentId},body:JSON.stringify({schemaVersion:1,checksum})});if(!confirmation.ok)throw confirmation;
+        const stopId=String(action.payload.routeVersionStopId);const command={...action.payload};delete command.checksum;delete command.expiresAt;delete command.attachmentOfflineId;const recorded=await fetch(routeStopAttemptPath(stopId),{method:'POST',credentials:'same-origin',headers:{...headers,'idempotency-key':attemptId},body:JSON.stringify(command)});if(!recorded.ok)throw recorded;}
+      await this.repository.confirmFieldOutcome(partition,action.actionId);confirmed++;
+    }catch(error){const status=error instanceof Response?error.status:0;if(status===401){authenticationRequired=true;recoverable++;break;}if(status===403||status===409||status===422){await this.repository.requireFieldOutcomeAction(partition,action.actionId,`HTTP ${status}`);actionRequired++;}else recoverable++;}}
+    return{attempted:actions.length,confirmed,recoverable,actionRequired,authenticationRequired};}
+
   async synchronize(partition: OfflinePartition): Promise<OfflineSyncRunSummary> {
     const access = await this.requireLocalAccess(partition);
     if (!access.allowed) throw new Error('A sessão local precisa ser revalidada antes de sincronizar.');
@@ -762,12 +788,13 @@ export class OfflineFoundationService {
       disabled: false,
       authenticationRequired: false,
     }));
+    const fieldOutcomes=await this.syncFieldOutcomes(partition);
     return {
-      attempted: recovery.attempted + outbox.attempted + scrap.attempted + evidence.attempted,
-      confirmed: recovery.confirmed + outbox.confirmed + scrap.confirmed + evidence.confirmed,
-      recoverable: recovery.recoverable + outbox.recoverable + scrap.recoverable + evidence.recoverable,
-      actionRequired: recovery.actionRequired + outbox.actionRequired + scrap.actionRequired + evidence.actionRequired,
-      authenticationRequired: recovery.authenticationRequired || outbox.authenticationRequired || scrap.authenticationRequired || evidence.authenticationRequired,
+      attempted: recovery.attempted + outbox.attempted + scrap.attempted + evidence.attempted+fieldOutcomes.attempted,
+      confirmed: recovery.confirmed + outbox.confirmed + scrap.confirmed + evidence.confirmed+fieldOutcomes.confirmed,
+      recoverable: recovery.recoverable + outbox.recoverable + scrap.recoverable + evidence.recoverable+fieldOutcomes.recoverable,
+      actionRequired: recovery.actionRequired + outbox.actionRequired + scrap.actionRequired + evidence.actionRequired+fieldOutcomes.actionRequired,
+      authenticationRequired: recovery.authenticationRequired || outbox.authenticationRequired || scrap.authenticationRequired || evidence.authenticationRequired||fieldOutcomes.authenticationRequired,
       evidenceDisabled: recovery.disabled || evidence.disabled,
       scrapEvidenceDisabled: scrap.disabled,
     };
@@ -785,7 +812,7 @@ export class OfflineFoundationService {
       if (currentUserId && uniqueUserIds.includes(currentUserId)) window.localStorage.removeItem(userStorageKey);
     } catch (error) { storageFailure = error; }
     await Promise.all(uniqueUserIds.map((userId) => (
-      this.repository.deleteLocalSession({ userId, deviceId })
+      Promise.all([this.repository.deleteLocalSession({ userId, deviceId }),this.repository.purgeFieldOutcomes({userId,deviceId})])
     )));
     if (storageFailure) throw storageFailure;
   }

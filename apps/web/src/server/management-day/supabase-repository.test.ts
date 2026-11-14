@@ -34,4 +34,33 @@ describe('Supabase management day repository', () => {
     await expect(unknown.getForDate('2026-10-20', 'America/Recife'))
       .rejects.toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE', recoverable: true });
   });
+
+  it('merges the authorized non-visit attempt projection into its route stop', async () => {
+    const stopId = '10000000-0000-4000-8000-000000000010';
+    const day = { ...empty, schemaVersion: 2, availability: 'available',
+      totals: { planned: 1, pending: 0, inVisit: 0, completed: 0, notVisited: 1 }, routes: [{
+        routeId: '10000000-0000-4000-8000-000000000011', routeVersionId: '10000000-0000-4000-8000-000000000012', versionNumber: 1,
+        seller: { id: '10000000-0000-4000-8000-000000000013', displayName: 'Vendedor' }, counts: { planned: 1, pending: 0, inVisit: 0, completed: 0, notVisited: 1 },
+        sync: empty.sync, nonVisits: [{ routeVersionStopId: stopId,
+          clientId: '10000000-0000-4000-8000-000000000014', clientName: 'Cliente',
+          reasonId: '10000000-0000-4000-8000-000000000015', updatedAt: '2026-10-20T12:00:00.000Z' }],
+        historicalExecutions: [], syncIssues: [], visits: [], lastKnownUpdateAt: '2026-10-20T12:00:00.000Z',
+        stops: [{ routeVersionStopId: stopId, plannedOrder: 1, executionOrder: 1, priority: 0,
+          client: { id: '10000000-0000-4000-8000-000000000014', name: 'Cliente' }, status: 'not_visited',
+          nonVisitReason: { id: '10000000-0000-4000-8000-000000000015', label: 'Fechado' },
+          lastKnownUpdateAt: '2026-10-20T12:00:00.000Z', visits: [] }],
+      }] };
+    const results = [{ data: day, error: null }, { data: { schemaVersion: 1, attempts: [{ routeVersionStopId: stopId, attempt: {
+      attemptId: '10000000-0000-4000-8000-000000000016', observation: 'Retornar amanhã', recordedAt: '2026-10-20T12:00:00.000Z',
+      capturedAt: '2026-10-20T11:59:00.000Z', latitude: -5.8, longitude: -35.2, accuracyM: 12,
+      attachmentId: '10000000-0000-4000-8000-000000000017',
+    } }] }, error: null }];
+    const rpc = vi.fn().mockImplementation(() => ({ abortSignal: vi.fn().mockResolvedValue(results.shift()) }));
+    const repository = new SupabaseManagementDayRepository({ schema: vi.fn().mockReturnValue({ rpc }) } as unknown as SupabaseClient);
+    const result = await repository.getForDate('2026-10-20', 'America/Recife');
+    expect(result.schemaVersion).toBe(2);
+    if (result.schemaVersion !== 2) throw new Error('Expected management day schema v2.');
+    expect(result.routes[0]?.stops[0]?.nonVisitAttempt).toMatchObject({ observation: 'Retornar amanhã', accuracyM: 12 });
+    expect(rpc).toHaveBeenNthCalledWith(2, 'list_management_day_route_stop_attempts', { p_service_date: '2026-10-20' });
+  });
 });

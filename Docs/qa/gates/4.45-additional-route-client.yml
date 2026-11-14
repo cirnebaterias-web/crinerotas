@@ -1,0 +1,18 @@
+schema: 1
+story: '4.45'
+story_title: 'Cliente adicional na rota do vendedor'
+gate: PASS
+status_reason: 'A inclusão está limitada à carteira ativa, é online, idempotente e cria versão append-only sem perder o histórico.'
+reviewer: 'Quinn (Test Architect)'
+updated: '2026-11-14T09:00:00-03:00'
+top_issues: []
+waiver: { active: false }
+quality_score: 90
+evidence: { focused_tests: PASS, lint: PASS, typecheck: PASS, production_build: PASS }
+nfr_validation:
+  security: { status: PASS, notes: 'Busca e mutação são filtradas no servidor por vendedor, capability, status e carteira.' }
+  reliability: { status: PASS, notes: 'Versão esperada, replay e lineage preservam consistência.' }
+recommendations:
+  future:
+    - action: 'Adicionar E2E dedicado para busca, 409, inclusão e atualização do cache.'
+      refs: ['apps/web/src/features/routes/additional-client-dialog.tsx']

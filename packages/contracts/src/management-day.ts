@@ -69,9 +69,20 @@ export const managementDayStopSchema = z.object({
   client: z.object({ id: z.uuid(), name: z.string().trim().min(1).max(160) }).strict(),
   status: managementExecutionStatusSchema,
   nonVisitReason: z.object({ id: z.uuid(), label: z.string().trim().min(1).max(160) }).strict().nullable(),
+  nonVisitAttempt: z.object({ attemptId: z.uuid(), observation: z.string().max(500).nullable(),
+    recordedAt: z.iso.datetime({offset:true}), capturedAt: z.iso.datetime({offset:true}),
+    latitude: z.coerce.number().min(-90).max(90), longitude: z.coerce.number().min(-180).max(180),
+    accuracyM: z.coerce.number().positive(), attachmentId: z.uuid(),
+  }).strict().nullable().optional().default(null),
   lastKnownUpdateAt: z.iso.datetime({ offset: true }),
   visits: z.array(managementDayVisitSummarySchema).max(10),
 }).strict();
+
+export const managementDayAttemptProjectionSchema=z.object({schemaVersion:z.literal(1),attempts:z.array(z.object({
+  routeVersionStopId:z.uuid(),attempt:z.object({attemptId:z.uuid(),observation:z.string().max(500).nullable(),recordedAt:z.iso.datetime({offset:true}),capturedAt:z.iso.datetime({offset:true}),latitude:z.coerce.number(),longitude:z.coerce.number(),accuracyM:z.coerce.number().positive(),attachmentId:z.uuid()}).strict(),
+}).strict()).max(500)}).strict();
+export const managementAttemptPhotoResultSchema=z.object({schemaVersion:z.literal(1),signedUrl:z.url(),expiresInSeconds:z.number().int().positive().max(900),contentType:z.enum(['image/jpeg','image/webp'])}).strict();
+export const managementAttemptPhotoPath=(attachmentId:string)=>`/api/v1/management/route-stop-attempt-attachments/${encodeURIComponent(attachmentId)}/download-url`;
 
 export const managementDayRouteSchema = z.object({
   routeId: z.uuid(), routeVersionId: z.uuid(), versionNumber: z.number().int().positive(),
